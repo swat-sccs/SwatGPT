@@ -134,7 +134,7 @@
     "express": "^5.1.0",
     "express-session": "^1.18.2",
     "firebase": "^11.0.2",
-    "form-data": "^4.0.4",
+    "form-data": "^4.0.6",
     "get-stream": "^6.0.1",
     "google-auth-library": "^9.15.1",
     "https-proxy-agent": "^7.0.6",
@@ -159,7 +159,7 @@
     "rate-limit-redis": "^4.2.0",
     "sanitize-html": "^2.13.0",
     "sharp": "^0.33.5",
-    "undici": "^7.24.1",
+    "undici": "^7.28.0",
     "yauzl": "^3.2.1",
     "zod": "^3.22.4"
   }
