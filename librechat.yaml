@@ -1,0 +1,18 @@
+version: 1.3.14
+
+cache: true
+
+interface:
+  customWelcome: 'Welcome to SwatGPT, AI for Swarthmore College.'
+
+endpoints:
+  custom:
+    - name: 'SwatGPT'
+      apiKey: '${VLLM_API_KEY}'
+      baseURL: 'http://loon.sccs.swarthmore.edu:8000/v1'
+      models:
+        default: ['Qwen/Qwen3.6-35B-A3B-FP8']
+        fetch: true
+      titleConvo: true
+      titleModel: 'Qwen/Qwen3.6-35B-A3B-FP8'
+      modelDisplayLabel: 'SwatGPT'
