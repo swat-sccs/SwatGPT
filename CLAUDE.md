@@ -45,21 +45,23 @@ Other VMs on `nest`: `gull` (128 GiB RAM), `robin` (128 GiB), `lineage-buildbox`
 
 - **nest's RAM is overcommitted** — allocated VM RAM exceeds the 503 GiB physical, coped with via swap + KSM. New VMs must be modestly sized.
 - **Storage is node-local, not shared** between nest and heron; stateful services get pinned to a node. Pools on nest: `local-zfs` (SSD, rpool/data, ~1.67 TB — VM disks), `hdd-pool` (HDD, ~68 TB bulk), `local` (ISOs). Backups go to `ibis` (PBS).
-- **~128 GB aggregate VRAM is split across two machines** (96 GB on loon + ~32 GB on sccs-5090), not pooled. loon's 96 GB is the only contiguous large-VRAM target — keep it dedicated to the 35B model + KV cache; put auxiliary GPU workloads (embeddings, reranking) on `sccs-5090`.
+- **~128 GB aggregate VRAM is split across two machines** (96 GB on loon + ~32 GB on sccs-5090), not pooled. The `sccs-5090` GPU is **not available for SwatGPT** — all GPU workloads (generation, embeddings, reranking) run on loon's RTX 6000 Pro.
 
 ### RAG Stack
 
+All GPU workloads share loon's RTX 6000 Pro. vLLM runs with `--gpu-memory-utilization 0.85` (~82 GB: 35 GB FP8 weights + ~46 GB KV cache), leaving ~13 GB on the card for TEI. Start vLLM first, then TEI.
+
 | Component | Choice | Host | Notes |
 |---|---|---|---|
-| Generation | vLLM 0.21.0 + Qwen3.6-35B-A3B-FP8 | `loon` | Done. Keep prefix caching enabled; static system prompt first so it caches. |
-| Embeddings | TEI (text-embeddings-inference) serving `Qwen/Qwen3-Embedding-0.6B` | `sccs-5090` | ~1.5 GB VRAM, sub-10 ms query embeds; OpenAI-compatible `/v1/embeddings` |
-| Reranker (phase 2) | TEI serving `BAAI/bge-reranker-v2-m3` (or Qwen3-Reranker-0.6B) | `sccs-5090` | Same box; only if plain vector recall proves insufficient |
+| Generation | vLLM 0.21.0 + Qwen3.6-35B-A3B-FP8 | `loon` | Done. `--gpu-memory-utilization 0.85`; keep prefix caching enabled; static system prompt first so it caches. |
+| Embeddings | TEI (text-embeddings-inference) serving `Qwen/Qwen3-Embedding-0.6B` | `loon` (shares GPU) | ~2–3 GB VRAM, sub-10 ms query embeds; OpenAI-compatible `/v1/embeddings` on port 8080 |
+| Reranker (phase 2) | TEI serving `BAAI/bge-reranker-v2-m3` (or Qwen3-Reranker-0.6B) | `loon` (shares GPU) | ~2 GB more; only if plain vector recall proves insufficient |
 | Vector store | PostgreSQL + pgvector, HNSW index | `swatgpt` VM on nest (local-zfs SSD) | rag_api's native store; corpus is ~5k chunks — trivially in-RAM |
-| RAG service | `librechat-rag-api` (danny-avila/rag_api) | `swatgpt` VM | LibreChat's native RAG; `RAG_OPENAI_BASEURL` → TEI on sccs-5090 |
+| RAG service | `librechat-rag-api` (danny-avila/rag_api) | `swatgpt` VM | LibreChat's native RAG; `RAG_OPENAI_BASEURL` → TEI on loon |
 | App DB | MongoDB | `swatgpt` VM (local-zfs SSD) | LibreChat users/conversations |
 | Chat search | Meilisearch | `swatgpt` VM | Ships with LibreChat's compose stack |
 
-**Hosting plan**: one dedicated `swatgpt` VM on `nest` (modest: ~8 vCPU / 16 GiB, disk on `local-zfs`) running LibreChat + MongoDB + Postgres/pgvector + Meilisearch + rag_api via docker compose, backed up to `ibis`. GPU work stays on the GPU boxes: generation on `loon`, embeddings/rerank on `sccs-5090`. Do **not** host the databases on `goose` (too small) or on `hdd-pool` (too slow for DB workloads).
+**Hosting plan**: one dedicated `swatgpt` VM on `nest` (modest: ~8 vCPU / 16 GiB, disk on `local-zfs`) running LibreChat + MongoDB + Postgres/pgvector + Meilisearch + rag_api via docker compose, backed up to `ibis`. All GPU work (generation + embeddings + optional rerank) runs on `loon`. Do **not** host the databases on `goose` (too small) or on `hdd-pool` (too slow for DB workloads). Fallback if loon must stay single-process: run TEI in CPU mode on the `swatgpt` VM (~30–50 ms/query embed — acceptable at this corpus size).
 
 **KB ingestion**: create a "SwatGPT" LibreChat agent with `file_search` enabled and batch-upload the `information/` markdown via the API; rag_api chunks, embeds through TEI, and stores vectors in pgvector.
 

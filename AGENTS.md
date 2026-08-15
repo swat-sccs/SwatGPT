@@ -13,16 +13,16 @@ This LibreChat fork is being built into **SwatGPT**, an AI assistant for Swarthm
 
 - `nest` — physical Proxmox VE 9.1.4 host: 2× Xeon Gold 6430 (128 threads), 503 GiB RAM. Runs nearly all VMs (~15). **RAM is overcommitted** (swap + KSM) — size new VMs modestly. Storage pools: `local-zfs` (SSD ~1.67 TB, VM disks), `hdd-pool` (HDD ~68 TB bulk). Storage is node-local.
 - `heron` — second physical Proxmox host, currently **down**.
-- `sccs-5090` — bare-metal Docker swarm worker with RTX 5090 (~32 GB VRAM).
+- `sccs-5090` — bare-metal Docker swarm worker with RTX 5090 (~32 GB VRAM). **Not available for SwatGPT.**
 - `ibis` — Proxmox Backup Server (PBS).
-- `loon` (VM 109 on nest) — vLLM inference, 96 GB GPU. Keep dedicated to the 35B model.
+- `loon` (VM 109 on nest) — 96 GB GPU; hosts ALL SwatGPT GPU workloads (generation + embeddings).
 - `goose` (VM on nest) — small slice running Dokploy; not for heavy workloads.
 - VRAM is ~128 GB aggregate but split across two machines, not pooled.
 
 ### RAG Stack
 
-- **Generation**: vLLM + Qwen3.6-35B on `loon` (done).
-- **Embeddings**: TEI serving `Qwen/Qwen3-Embedding-0.6B` on `sccs-5090`; optional reranker (`bge-reranker-v2-m3`) there too in phase 2.
+- **Generation**: vLLM + Qwen3.6-35B on `loon` (done), `--gpu-memory-utilization 0.85` to leave ~13 GB for TEI.
+- **Embeddings**: TEI serving `Qwen/Qwen3-Embedding-0.6B`, co-located on `loon` (~2–3 GB VRAM; start vLLM first). Optional reranker (`bge-reranker-v2-m3`) there too in phase 2.
 - **Vector store**: PostgreSQL + pgvector (HNSW) via LibreChat's native `rag_api`.
 - **Hosting**: dedicated `swatgpt` VM on `nest` (~8 vCPU / 16 GiB, `local-zfs` SSD) running LibreChat + MongoDB + Postgres/pgvector + Meilisearch + rag_api; backups to `ibis`. Databases never on `goose` or `hdd-pool`.
 - **Ingestion**: "SwatGPT" agent with `file_search`; batch-upload `information/` via the API.
