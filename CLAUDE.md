@@ -17,6 +17,54 @@ The source code for `@librechat/agents` (major backend dependency, same team) is
 
 ---
 
+## SwatGPT
+
+This LibreChat fork is being built into **SwatGPT**, an AI assistant for Swarthmore College.
+
+- **Inference server**: self-hosted vLLM (v0.21.0) on `loon`, OpenAI-compatible API at `http://loon.sccs.swarthmore.edu:8000/v1`. Serving is confirmed working.
+- **Model**: `Qwen/Qwen3.6-35B-A3B-FP8` (reasoning model — responses include a `reasoning` field).
+- **GPU**: NVIDIA RTX PRO 6000 Blackwell (96 GB VRAM), PCI-passthrough to `loon`.
+- **Knowledge base**: `scrape_kb.py` scrapes every main-namespace article from https://kb.swarthmore.edu (MediaWiki) into `information/` as markdown with YAML frontmatter (~489 articles, ~2.8 MB) for RAG ingestion.
+
+### SCCS Infrastructure
+
+Everything is hosted on SCCS servers. The real physical ceiling is `nest` plus the two GPU boxes — nearly every other named host is a VM subdividing `nest`, not additional hardware.
+
+| Host | Type | Hardware | Role | Status |
+|---|---|---|---|---|
+| `nest` | Physical | 2× Intel Xeon Gold 6430 (128 logical CPUs), 503 GiB RAM | Proxmox VE 9.1.4 hypervisor — runs nearly all VMs (manager, DNS, LDAP, mail, GPU worker, goose, …) | Up |
+| `heron` | Physical | unspecified | Second Proxmox host | **Down** — no second-host capacity online |
+| `sccs-5090` | Physical (bare metal) | RTX 5090 (~32 GB VRAM) | Docker swarm worker | Up |
+| `ibis` | Physical | unspecified | Proxmox Backup Server (PBS); backups over 1G + 10G links | Up |
+| `loon` | VM 109 on nest | RTX PRO 6000 96 GB passthrough | vLLM inference server | Up |
+| `goose` | VM on nest | Ubuntu 24.04, ~41 GB disk, small RAM/CPU slice | Dokploy + small apps only — do not pile heavy workloads here | Up |
+
+Other VMs on `nest`: `gull` (128 GiB RAM), `robin` (128 GiB), `lineage-buildbox` (72 GiB), `puffin` (VM 105, holds a 16 TB bulk disk), ~15 VMs total.
+
+**Constraints to respect:**
+
+- **nest's RAM is overcommitted** — allocated VM RAM exceeds the 503 GiB physical, coped with via swap + KSM. New VMs must be modestly sized.
+- **Storage is node-local, not shared** between nest and heron; stateful services get pinned to a node. Pools on nest: `local-zfs` (SSD, rpool/data, ~1.67 TB — VM disks), `hdd-pool` (HDD, ~68 TB bulk), `local` (ISOs). Backups go to `ibis` (PBS).
+- **~128 GB aggregate VRAM is split across two machines** (96 GB on loon + ~32 GB on sccs-5090), not pooled. loon's 96 GB is the only contiguous large-VRAM target — keep it dedicated to the 35B model + KV cache; put auxiliary GPU workloads (embeddings, reranking) on `sccs-5090`.
+
+### RAG Stack
+
+| Component | Choice | Host | Notes |
+|---|---|---|---|
+| Generation | vLLM 0.21.0 + Qwen3.6-35B-A3B-FP8 | `loon` | Done. Keep prefix caching enabled; static system prompt first so it caches. |
+| Embeddings | TEI (text-embeddings-inference) serving `Qwen/Qwen3-Embedding-0.6B` | `sccs-5090` | ~1.5 GB VRAM, sub-10 ms query embeds; OpenAI-compatible `/v1/embeddings` |
+| Reranker (phase 2) | TEI serving `BAAI/bge-reranker-v2-m3` (or Qwen3-Reranker-0.6B) | `sccs-5090` | Same box; only if plain vector recall proves insufficient |
+| Vector store | PostgreSQL + pgvector, HNSW index | `swatgpt` VM on nest (local-zfs SSD) | rag_api's native store; corpus is ~5k chunks — trivially in-RAM |
+| RAG service | `librechat-rag-api` (danny-avila/rag_api) | `swatgpt` VM | LibreChat's native RAG; `RAG_OPENAI_BASEURL` → TEI on sccs-5090 |
+| App DB | MongoDB | `swatgpt` VM (local-zfs SSD) | LibreChat users/conversations |
+| Chat search | Meilisearch | `swatgpt` VM | Ships with LibreChat's compose stack |
+
+**Hosting plan**: one dedicated `swatgpt` VM on `nest` (modest: ~8 vCPU / 16 GiB, disk on `local-zfs`) running LibreChat + MongoDB + Postgres/pgvector + Meilisearch + rag_api via docker compose, backed up to `ibis`. GPU work stays on the GPU boxes: generation on `loon`, embeddings/rerank on `sccs-5090`. Do **not** host the databases on `goose` (too small) or on `hdd-pool` (too slow for DB workloads).
+
+**KB ingestion**: create a "SwatGPT" LibreChat agent with `file_search` enabled and batch-upload the `information/` markdown via the API; rag_api chunks, embeds through TEI, and stores vectors in pgvector.
+
+---
+
 ## Workspace Boundaries
 
 - **All new backend code must be TypeScript** in `/packages/api`.

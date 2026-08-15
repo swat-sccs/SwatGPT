@@ -185,6 +185,40 @@ Open source, actively developed, and built for anyone who values control over th
 
 ---
 
+## 🖥️ Local Model Serving with vLLM
+
+Serve a local model with [vLLM](https://docs.vllm.ai/) and connect it to LibreChat as an OpenAI-compatible endpoint. The API key is stored in the `.env` file as `VLLM_API_KEY`:
+
+```bash
+vllm serve Qwen/Qwen3.6-35B-A3B-FP8 \
+  --max-model-len 32768 \
+  --max-num-seqs 96 \
+  --gpu-memory-utilization 0.9 \
+  --reasoning-parser qwen3 \
+  --api-key "$VLLM_API_KEY" \
+  --host 0.0.0.0 \
+  --port 8000 \
+  --speculative-config '{"method": "mtp", "num_speculative_tokens": 1}'
+```
+
+With tool calling enabled (for use with Agents):
+
+```bash
+vllm serve Qwen/Qwen3.6-35B-A3B-FP8 \
+  --max-model-len 32768 \
+  --max-num-seqs 96 \
+  --gpu-memory-utilization 0.9 \
+  --reasoning-parser qwen3 \
+  --enable-auto-tool-choice \
+  --tool-call-parser hermes \
+  --api-key "$VLLM_API_KEY" \
+  --host 0.0.0.0 \
+  --port 8000 \
+  --speculative-config '{"method": "mtp", "num_speculative_tokens": 1}'
+```
+
+---
+
 ## 🌐 Resources
 
 **GitHub Repo:**
