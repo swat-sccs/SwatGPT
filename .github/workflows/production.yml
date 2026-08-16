@@ -1,0 +1,43 @@
+name: Production Deploy
+
+on:
+  push:
+    branches: [main]
+  workflow_dispatch:
+
+concurrency:
+  group: deploy-production
+  cancel-in-progress: false
+
+jobs:
+  deploy:
+    runs-on: [self-hosted, eagle]
+    defaults:
+      run:
+        working-directory: /home/aidahxr/SwatGPT
+    steps:
+      - name: Sync deploy tree to pushed commit
+        run: |
+          git fetch "https://x-access-token:${{ secrets.GITHUB_TOKEN }}@github.com/${{ github.repository }}.git" "+refs/heads/main:refs/remotes/origin/main"
+          git reset --hard "${{ github.sha }}" || git reset --hard origin/main
+
+      - name: Build app image
+        run: docker compose build api
+
+      - name: Deploy
+        run: docker compose up -d --remove-orphans
+
+      - name: Health check
+        run: |
+          code=000
+          for i in $(seq 1 30); do
+            code=$(curl -s -o /dev/null -w '%{http_code}' http://localhost:3080/) || true
+            if [ "$code" = "200" ]; then
+              echo "healthy after ~$((i * 5))s"
+              exit 0
+            fi
+            sleep 5
+          done
+          echo "health check failed (last status: $code)"
+          docker logs LibreChat --tail 50
+          exit 1
