@@ -29,8 +29,8 @@ services:
       - type: bind
         source: ./.env
         target: /app/.env
-      - ./images:/app/client/public/images
-      - ./uploads:/app/uploads
+      - images:/app/client/public/images
+      - uploads:/app/uploads
       - ./logs:/app/logs
       - ./skill:/app/skill
       - librechat-data:/app/data
@@ -56,7 +56,7 @@ services:
     restart: always
     user: "${UID}:${GID}"
     volumes:
-      - ./data-node:/data/db
+      - mongo-data:/data/db
     command: mongod --noauth
   meilisearch:
     container_name: chat-meilisearch
@@ -68,7 +68,7 @@ services:
       - MEILI_NO_ANALYTICS=true
       - MEILI_MASTER_KEY=${MEILI_MASTER_KEY}
     volumes:
-      - ./meili_data_v1.35.1:/meili_data
+      - meili-data:/meili_data
   qdrant:
     container_name: chat-qdrant
     image: qdrant/qdrant:v1.15.1
@@ -79,7 +79,12 @@ services:
     ports:
       - "127.0.0.1:6333:6333"
     volumes:
-      - ./qdrant_data:/qdrant/storage
+      - qdrant-data:/qdrant/storage
 
 volumes:
   librechat-data:
+  mongo-data:
+  meili-data:
+  qdrant-data:
+  uploads:
+  images:
