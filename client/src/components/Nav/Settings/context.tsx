@@ -25,6 +25,30 @@ export function useSettingsContext(): SettingsContextValue {
     permissionType: PermissionTypes.PROMPTS,
     permission: Permissions.USE,
   });
+  const hasAgents = useHasAccess({
+    permissionType: PermissionTypes.AGENTS,
+    permission: Permissions.USE,
+  });
+  const hasSharedLinks = useHasAccess({
+    permissionType: PermissionTypes.SHARED_LINKS,
+    permission: Permissions.CREATE,
+  });
+  const hasFileSearch = useHasAccess({
+    permissionType: PermissionTypes.FILE_SEARCH,
+    permission: Permissions.USE,
+  });
+  const hasWebSearch = useHasAccess({
+    permissionType: PermissionTypes.WEB_SEARCH,
+    permission: Permissions.USE,
+  });
+  const hasRunCode = useHasAccess({
+    permissionType: PermissionTypes.RUN_CODE,
+    permission: Permissions.USE,
+  });
+  const hasSkills = useHasAccess({
+    permissionType: PermissionTypes.SKILLS,
+    permission: Permissions.USE,
+  });
 
   const balanceEnabled = startupConfig?.balance?.enabled === true;
   const langfuseConnectionAccess = startupConfig?.langfuseConnectionAccess === true;
@@ -36,6 +60,15 @@ export function useSettingsContext(): SettingsContextValue {
   const hasRemoteAgentsBool = hasRemoteAgents === true;
   const hasMultiConvoBool = hasMultiConvo === true;
   const hasPromptsBool = hasPrompts === true;
+  const hasAgentsBool = hasAgents === true;
+  const hasSharedLinksBool = hasSharedLinks === true;
+  const hasModelSelect = startupConfig?.interface?.modelSelect !== false;
+  const hasToolBadges =
+    hasFileSearch === true ||
+    hasWebSearch === true ||
+    hasRunCode === true ||
+    hasSkills === true ||
+    hasMemoryOptOut;
   const engineTTS = useRecoilValue<string>(store.engineTTS);
   const hasUserProvidedEndpoints = useProviderKeys().length > 0;
 
@@ -48,6 +81,10 @@ export function useSettingsContext(): SettingsContextValue {
       hasUserProvidedEndpoints,
       hasMultiConvo: hasMultiConvoBool,
       hasPrompts: hasPromptsBool,
+      hasAgents: hasAgentsBool,
+      hasModelSelect,
+      hasToolBadges,
+      hasSharedLinks: hasSharedLinksBool,
       isLocalProvider,
       twoFactorEnabled,
       allowAccountDeletion,
@@ -64,6 +101,10 @@ export function useSettingsContext(): SettingsContextValue {
       hasUserProvidedEndpoints,
       hasMultiConvoBool,
       hasPromptsBool,
+      hasAgentsBool,
+      hasModelSelect,
+      hasToolBadges,
+      hasSharedLinksBool,
       isLocalProvider,
       twoFactorEnabled,
       allowAccountDeletion,

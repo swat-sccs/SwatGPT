@@ -44,6 +44,10 @@ export interface SettingsContextValue {
   hasUserProvidedEndpoints: boolean;
   hasMultiConvo: boolean;
   hasPrompts: boolean;
+  hasAgents: boolean;
+  hasModelSelect: boolean;
+  hasToolBadges: boolean;
+  hasSharedLinks: boolean;
   isLocalProvider: boolean;
   twoFactorEnabled: boolean;
   allowAccountDeletion: boolean;

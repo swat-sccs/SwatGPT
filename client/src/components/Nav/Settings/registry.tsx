@@ -158,6 +158,7 @@ export const registry: SettingEntry[] = [
     section: 'sending',
     labelKey: 'com_nav_during_run_action',
     keywords: ['steer', 'queue', 'interrupt', 'generating'],
+    show: (ctx) => ctx.hasAgents,
     Component: DuringRunAction,
   },
   {
@@ -166,6 +167,7 @@ export const registry: SettingEntry[] = [
     section: 'sending',
     labelKey: 'com_ui_steer_interrupts_default',
     keywords: ['steer', 'interrupt', 'preempt', 'generating', 'stop'],
+    show: (ctx) => ctx.hasAgents,
     Component: toggleControl({
       stateAtom: store.steerInterruptsByDefault,
       localizationKey: 'com_ui_steer_interrupts_default',
@@ -190,6 +192,7 @@ export const registry: SettingEntry[] = [
     tab: CHAT,
     section: 'sending',
     labelKey: 'com_nav_save_badges_state',
+    show: (ctx) => ctx.hasToolBadges,
     Component: toggleControl({
       stateAtom: store.saveBadgesState,
       localizationKey: 'com_nav_save_badges_state',
@@ -203,6 +206,7 @@ export const registry: SettingEntry[] = [
     tab: CHAT,
     section: 'commands',
     labelKey: 'com_nav_at_command_description',
+    show: (ctx) => ctx.hasModelSelect,
     Component: toggleControl({
       stateAtom: store.atCommand,
       localizationKey: 'com_nav_at_command_description',
@@ -294,6 +298,7 @@ export const registry: SettingEntry[] = [
     tab: CHAT,
     section: 'messages',
     labelKey: 'com_nav_auto_expand_tools',
+    show: (ctx) => ctx.hasToolBadges,
     Component: toggleControl({
       stateAtom: store.autoExpandTools,
       localizationKey: 'com_nav_auto_expand_tools',
@@ -328,6 +333,7 @@ export const registry: SettingEntry[] = [
     tab: CHAT,
     section: 'conversations',
     labelKey: 'com_nav_modular_chat',
+    show: (ctx) => ctx.hasModelSelect,
     Component: toggleControl({
       stateAtom: store.modularChat,
       localizationKey: 'com_nav_modular_chat',
@@ -352,6 +358,7 @@ export const registry: SettingEntry[] = [
     section: 'conversations',
     labelKey: 'com_ui_fork_default',
     keywords: ['fork', 'branch', 'split'],
+    show: (ctx) => ctx.hasAgents,
     Component: ForkSettings,
   },
   // Chat · Prompts
@@ -361,6 +368,7 @@ export const registry: SettingEntry[] = [
     section: 'prompts',
     labelKey: 'com_nav_advanced_prompts',
     keywords: ['prompt'],
+    show: (ctx) => ctx.hasPrompts,
     Component: AdvancedPrompts,
   },
   {
@@ -368,6 +376,7 @@ export const registry: SettingEntry[] = [
     tab: CHAT,
     section: 'prompts',
     labelKey: 'com_nav_always_make_prod',
+    show: (ctx) => ctx.hasPrompts,
     Component: toggleControl({
       stateAtom: store.alwaysMakeProd,
       localizationKey: 'com_nav_always_make_prod',
@@ -379,6 +388,7 @@ export const registry: SettingEntry[] = [
     tab: CHAT,
     section: 'prompts',
     labelKey: 'com_nav_auto_send_prompts',
+    show: (ctx) => ctx.hasPrompts,
     Component: toggleControl({
       stateAtom: store.autoSendPrompts,
       localizationKey: 'com_nav_auto_send_prompts',
@@ -512,6 +522,7 @@ export const registry: SettingEntry[] = [
     tab: DATA,
     section: 'data',
     labelKey: 'com_ui_settings_label_shared_links',
+    show: (ctx) => ctx.hasSharedLinks,
     Component: SharedLinks,
   },
   // Data controls · API keys
@@ -537,6 +548,7 @@ export const registry: SettingEntry[] = [
     tab: DATA,
     section: 'apiKeys',
     labelKey: 'com_ui_settings_label_revoke_keys',
+    show: (ctx) => ctx.hasUserProvidedEndpoints,
     Component: RevokeKeys,
   },
   // Langfuse

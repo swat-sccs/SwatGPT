@@ -15,6 +15,10 @@ const settingsContext: SettingsContextValue = {
   hasUserProvidedEndpoints: false,
   hasMultiConvo: false,
   hasPrompts: false,
+  hasAgents: false,
+  hasModelSelect: false,
+  hasToolBadges: false,
+  hasSharedLinks: false,
   isLocalProvider: true,
   twoFactorEnabled: false,
   allowAccountDeletion: true,
@@ -85,6 +89,46 @@ describe('settings registry', () => {
           langfuseConnectionAccess: true,
         }),
       ).toBe(true);
+    });
+  });
+
+  describe('disabled campus-feature visibility', () => {
+    it('hides agent, prompt, tool, and share settings when those features are off', () => {
+      const hiddenIds = [
+        'duringRunDefaultAction',
+        'steerInterruptsByDefault',
+        'saveBadgesState',
+        'atCommand',
+        'autoExpandTools',
+        'modularChat',
+        'forkSettings',
+        'advancedPrompts',
+        'sharedLinks',
+        'revokeKeys',
+      ];
+
+      for (const id of hiddenIds) {
+        const entry = registry.find((item) => item.id === id);
+        expect(entry?.show?.(settingsContext)).toBe(false);
+      }
+    });
+
+    it('shows those settings when the matching feature is on', () => {
+      const enabled = {
+        ...settingsContext,
+        hasAgents: true,
+        hasModelSelect: true,
+        hasToolBadges: true,
+        hasPrompts: true,
+        hasSharedLinks: true,
+        hasUserProvidedEndpoints: true,
+      };
+
+      expect(registry.find((item) => item.id === 'forkSettings')?.show?.(enabled)).toBe(true);
+      expect(registry.find((item) => item.id === 'atCommand')?.show?.(enabled)).toBe(true);
+      expect(registry.find((item) => item.id === 'advancedPrompts')?.show?.(enabled)).toBe(true);
+      expect(registry.find((item) => item.id === 'sharedLinks')?.show?.(enabled)).toBe(true);
+      expect(registry.find((item) => item.id === 'revokeKeys')?.show?.(enabled)).toBe(true);
     });
   });
 });
