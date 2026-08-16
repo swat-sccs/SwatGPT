@@ -76,12 +76,14 @@ function renderPanel({
   onCollapse = jest.fn(),
   onExpand = jest.fn(),
   initialPanel = DEFAULT_PANEL,
+  links = createLinks(),
   initializeState,
 }: {
   expanded?: boolean;
   onCollapse?: jest.Mock;
   onExpand?: jest.Mock;
   initialPanel?: string;
+  links?: ReturnType<typeof createLinks>;
   initializeState?: (snapshot: MutableSnapshot) => void;
 } = {}) {
   if (initialPanel !== DEFAULT_PANEL) {
@@ -93,7 +95,7 @@ function renderPanel({
       <RecoilRoot initializeState={initializeState}>
         <ActivePanelProvider>
           <ExpandedPanel
-            links={createLinks()}
+            links={links}
             expanded={expanded}
             onCollapse={onCollapse}
             onExpand={onExpand}
@@ -141,6 +143,21 @@ describe('ExpandedPanel', () => {
       fireEvent.click(inactiveButton);
       expect(onExpand).toHaveBeenCalledTimes(1);
       expect(localStorage.getItem('side:active-panel')).toBe('prompts');
+    });
+  });
+
+  describe('single-panel rail', () => {
+    it('hides the panel icon strip when only one panel exists', () => {
+      renderPanel({ links: createLinks().slice(0, 1) });
+      expect(screen.queryByRole('button', { name: 'com_ui_chat_history' })).not.toBeInTheDocument();
+      expect(screen.getByTestId('close-sidebar-button')).toBeInTheDocument();
+      expect(screen.getByTestId('new-chat-button')).toBeInTheDocument();
+    });
+
+    it('shows the panel icon strip when multiple panels exist', () => {
+      renderPanel();
+      expect(screen.getByRole('button', { name: 'com_ui_chat_history' })).toBeInTheDocument();
+      expect(screen.getByRole('button', { name: 'com_ui_prompts' })).toBeInTheDocument();
     });
   });
 

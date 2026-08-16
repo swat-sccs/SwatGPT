@@ -34,6 +34,7 @@ import { MemoryPanel } from '~/components/SidePanel/Memories';
 import FilesPanel from '~/components/SidePanel/Files/Panel';
 import { PromptsAccordion } from '~/components/Prompts';
 import { SkillsAccordion } from '~/components/Skills';
+import { isFilesPanelEnabled, isInterfaceUseEnabled } from '~/utils';
 
 export default function useSideNavLinks({
   hidePanel,
@@ -97,6 +98,7 @@ export default function useSideNavLinks({
     const links: NavLink[] = [];
 
     if (
+      isInterfaceUseEnabled(interfaceConfig.agents) &&
       endpointsConfig?.[EModelEndpoint.agents] &&
       hasAccessToAgents &&
       hasAccessToCreateAgents &&
@@ -130,7 +132,7 @@ export default function useSideNavLinks({
       });
     }
 
-    if (hasAccessToSkills && skillsEnabled) {
+    if (isInterfaceUseEnabled(interfaceConfig.skills) && hasAccessToSkills && skillsEnabled) {
       links.push({
         title: 'com_ui_skills',
         label: '',
@@ -150,7 +152,11 @@ export default function useSideNavLinks({
       });
     }
 
-    if (hasAccessToMemories && hasAccessToReadMemories) {
+    if (
+      isInterfaceUseEnabled(interfaceConfig.memories) &&
+      hasAccessToMemories &&
+      hasAccessToReadMemories
+    ) {
       links.push({
         title: 'com_ui_memories',
         label: '',
@@ -170,13 +176,15 @@ export default function useSideNavLinks({
       });
     }
 
-    links.push({
-      title: 'com_sidepanel_attach_files',
-      label: '',
-      icon: AttachmentIcon,
-      id: 'files',
-      Component: FilesPanel,
-    });
+    if (isFilesPanelEnabled(interfaceConfig)) {
+      links.push({
+        title: 'com_sidepanel_attach_files',
+        label: '',
+        icon: AttachmentIcon,
+        id: 'files',
+        Component: FilesPanel,
+      });
+    }
 
     if (
       interfaceConfig.parameters === true &&
@@ -228,6 +236,7 @@ export default function useSideNavLinks({
     skillsEnabled,
     hasAccessToMemories,
     hasAccessToReadMemories,
+    interfaceConfig.fileSearch,
     interfaceConfig.parameters,
     endpointType,
     hasAccessToBookmarks,
@@ -236,6 +245,9 @@ export default function useSideNavLinks({
     hasAccessToCreateMCP,
     includeHidePanel,
     hidePanel,
+    interfaceConfig.agents,
+    interfaceConfig.skills,
+    interfaceConfig.memories,
   ]);
 
   return Links;

@@ -12,8 +12,10 @@ import { MarketplaceProvider } from '~/components/Agents/MarketplaceContext';
 import AgentMarketplace from '~/components/Agents/Marketplace';
 import { OAuthSuccess, OAuthError } from '~/components/OAuth';
 import { AuthContextProvider } from '~/hooks/AuthContext';
+import { areProjectsEnabled, isInterfaceUseEnabled } from '~/utils';
 import RouteErrorBoundary from './RouteErrorBoundary';
 import StartupLayout from './Layouts/Startup';
+import InterfaceGate from './InterfaceGate';
 import LoginLayout from './Layouts/Login';
 import dashboardRoutes from './Dashboard';
 import WithRum from '~/lib/rum/WithRum';
@@ -33,22 +35,46 @@ const AuthLayout = () => (
 
 const loadInlinePromptsView = () =>
   import('~/components/Prompts/layouts/InlinePromptsView').then((m) => ({
-    Component: m.default,
+    Component: function PromptsRoute() {
+      return (
+        <InterfaceGate allow={(iface) => isInterfaceUseEnabled(iface.prompts)}>
+          <m.default />
+        </InterfaceGate>
+      );
+    },
   }));
 
 const loadSkillsView = () =>
   import('~/components/Skills/layouts/SkillsView').then((m) => ({
-    Component: m.default,
+    Component: function SkillsRoute() {
+      return (
+        <InterfaceGate allow={(iface) => isInterfaceUseEnabled(iface.skills)}>
+          <m.default />
+        </InterfaceGate>
+      );
+    },
   }));
 
 const loadProjectsView = () =>
   import('~/components/Projects').then((m) => ({
-    Component: m.ProjectsView,
+    Component: function ProjectsRoute() {
+      return (
+        <InterfaceGate allow={areProjectsEnabled}>
+          <m.ProjectsView />
+        </InterfaceGate>
+      );
+    },
   }));
 
 const loadProjectWorkspace = () =>
   import('~/components/Projects').then((m) => ({
-    Component: m.ProjectWorkspace,
+    Component: function ProjectWorkspaceRoute() {
+      return (
+        <InterfaceGate allow={areProjectsEnabled}>
+          <m.ProjectWorkspace />
+        </InterfaceGate>
+      );
+    },
   }));
 
 const baseEl = document.querySelector('base');
@@ -174,17 +200,21 @@ export const router = createBrowserRouter(
             {
               path: 'agents',
               element: (
-                <MarketplaceProvider>
-                  <AgentMarketplace />
-                </MarketplaceProvider>
+                <InterfaceGate allow={(iface) => isInterfaceUseEnabled(iface.agents)}>
+                  <MarketplaceProvider>
+                    <AgentMarketplace />
+                  </MarketplaceProvider>
+                </InterfaceGate>
               ),
             },
             {
               path: 'agents/:category',
               element: (
-                <MarketplaceProvider>
-                  <AgentMarketplace />
-                </MarketplaceProvider>
+                <InterfaceGate allow={(iface) => isInterfaceUseEnabled(iface.agents)}>
+                  <MarketplaceProvider>
+                    <AgentMarketplace />
+                  </MarketplaceProvider>
+                </InterfaceGate>
               ),
             },
           ],

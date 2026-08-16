@@ -43,6 +43,7 @@ export * from './toolLabels';
 export * from './favoritesError';
 export * from './approval';
 export * from './steer';
+export * from './interfaceFlags';
 export * from './activityLabels';
 export * from './numbers';
 export { default as cn } from './cn';

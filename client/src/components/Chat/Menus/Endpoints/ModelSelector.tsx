@@ -13,6 +13,7 @@ import { useShortcutAriaKey, useShortcutHint } from '~/hooks/useKeyboardShortcut
 import { ModelSelectorChatProvider } from './ModelSelectorChatContext';
 import { getSelectedIcon, getDisplayValue } from './utils';
 import { CustomMenu as Menu } from './CustomMenu';
+import { shouldHideModelSelector } from '~/utils';
 import DialogManager from './DialogManager';
 import { useLocalize } from '~/hooks';
 
@@ -132,8 +133,7 @@ export default function ModelSelector({ startupConfig }: ModelSelectorProps) {
   const interfaceConfig = startupConfig?.interface ?? defaultInterface;
   const modelSpecs = startupConfig?.modelSpecs?.list ?? [];
 
-  // Hide the selector when modelSelect is false and there are no model specs to show
-  if (interfaceConfig.modelSelect === false && modelSpecs.length === 0) {
+  if (shouldHideModelSelector(interfaceConfig.modelSelect, modelSpecs.length)) {
     return null;
   }
 

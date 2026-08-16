@@ -165,20 +165,24 @@ function ExpandedPanel({
         }
       />
       <NewChatButton setActive={setActive} />
-      <div className="mx-2 border-b border-border-light" />
-      <div className="flex flex-col gap-1 overflow-y-auto">
-        {links.map((link) => (
-          <NavIconButton
-            key={link.id}
-            link={link}
-            isActive={link.id === effectiveActive}
-            expanded={expanded ?? true}
-            setActive={setActive}
-            onExpand={onExpand}
-            onCollapse={onCollapse}
-          />
-        ))}
-      </div>
+      {links.length > 1 && (
+        <>
+          <div className="mx-2 border-b border-border-light" />
+          <div className="flex flex-col gap-1 overflow-y-auto">
+            {links.map((link) => (
+              <NavIconButton
+                key={link.id}
+                link={link}
+                isActive={link.id === effectiveActive}
+                expanded={expanded ?? true}
+                setActive={setActive}
+                onExpand={onExpand}
+                onCollapse={onCollapse}
+              />
+            ))}
+          </div>
+        </>
+      )}
 
       <div className="mt-auto">
         <Suspense fallback={<Skeleton className="h-9 w-9 rounded-lg" />}>
