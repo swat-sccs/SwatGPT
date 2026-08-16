@@ -8,7 +8,6 @@ services:
       - "${PORT}:${PORT}"
     depends_on:
       - mongodb
-      - rag_api
     image: registry.librechat.ai/danny-avila/librechat-dev:latest
     restart: always
     user: "${UID}:${GID}"
@@ -19,15 +18,13 @@ services:
       - MONGO_URI=mongodb://mongodb:27017/LibreChat
       - MEILI_HOST=http://meilisearch:7700
       - LIBRECHAT_TEMP_CREDENTIALS_PATH=/app/data/.env.temp
-      - RAG_PORT=${RAG_PORT:-8000}
-      - RAG_API_URL=http://rag_api:${RAG_PORT:-8000}
       - PROXY=${PROXY:-}
       - HTTP_PROXY=${HTTP_PROXY:-}
       - HTTPS_PROXY=${HTTPS_PROXY:-}
-      - NO_PROXY=${NO_PROXY:-localhost,127.0.0.1,::1},${no_proxy:-},mongodb,chat-mongodb,meilisearch,chat-meilisearch,rag_api,vectordb,host.docker.internal
+      - NO_PROXY=${NO_PROXY:-localhost,127.0.0.1,::1},${no_proxy:-},mongodb,chat-mongodb,meilisearch,chat-meilisearch,qdrant,host.docker.internal
       - http_proxy=${http_proxy:-}
       - https_proxy=${https_proxy:-}
-      - no_proxy=${no_proxy:-localhost,127.0.0.1,::1},${NO_PROXY:-},mongodb,chat-mongodb,meilisearch,chat-meilisearch,rag_api,vectordb,host.docker.internal
+      - no_proxy=${no_proxy:-localhost,127.0.0.1,::1},${NO_PROXY:-},mongodb,chat-mongodb,meilisearch,chat-meilisearch,qdrant,host.docker.internal
     volumes:
       - type: bind
         source: ./.env
@@ -72,28 +69,17 @@ services:
       - MEILI_MASTER_KEY=${MEILI_MASTER_KEY}
     volumes:
       - ./meili_data_v1.35.1:/meili_data
-  vectordb:
-    container_name: vectordb
-    image: pgvector/pgvector:0.8.0-pg15-trixie
-    environment:
-      POSTGRES_DB: mydatabase
-      POSTGRES_USER: myuser
-      POSTGRES_PASSWORD: mypassword
+  qdrant:
+    container_name: chat-qdrant
+    image: qdrant/qdrant:v1.15.1
+    user: "${UID}:${GID}"
     restart: always
+    environment:
+      - QDRANT__STORAGE__SNAPSHOTS_PATH=/qdrant/storage/snapshots
+    ports:
+      - "127.0.0.1:6333:6333"
     volumes:
-      - pgdata2:/var/lib/postgresql/data
-  rag_api:
-    container_name: rag_api
-    image: registry.librechat.ai/danny-avila/librechat-rag-api-dev-lite:latest
-    environment:
-      - DB_HOST=vectordb
-      - RAG_PORT=${RAG_PORT:-8000}
-    restart: always
-    depends_on:
-      - vectordb
-    env_file:
-      - .env
+      - ./qdrant_data:/qdrant/storage
 
 volumes:
-  pgdata2:
   librechat-data:

@@ -192,3 +192,4 @@ codedb.snapshot
 scripts/activity-labels/results/
 __pycache__/
 /context/
+/qdrant_data/
