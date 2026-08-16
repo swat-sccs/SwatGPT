@@ -3,12 +3,111 @@ version: 1.3.14
 cache: true
 
 interface:
-  customWelcome: 'Welcome to SwatGPT, AI for Swarthmore College.'
+  customWelcome: 'Welcome to SwatGPT, {{user.name}}.'
+  modelSelect: false
+  parameters: false
+  presets: false
+  multiConvo: false
+  bookmarks: false
+  memories: false
+  projects: true
+  temporaryChat: true
+  runCode: false
+  webSearch: false
+  fileSearch: false
+  fileCitations: true
+  contextUsage: false
+  contextCost: false
+  buildInfo: true
+  prompts:
+    use: false
+    create: false
+    share: false
+    public: false
+  agents:
+    use: false
+    create: false
+    share: false
+    public: false
+  skills:
+    use: false
+    create: false
+    share: false
+    public: false
+  marketplace:
+    use: false
+  mcpServers:
+    use: false
+    create: false
+    share: false
+    public: false
+  remoteAgents:
+    use: false
+    create: false
+    share: false
+    public: false
+  peoplePicker:
+    users: false
+    groups: false
+    roles: false
+  sharedLinks:
+    create: false
+    share: false
+    public: false
+  privacyPolicy:
+    externalUrl: 'https://www.swarthmore.edu/its'
+    openNewTab: true
+
+memory:
+  disabled: true
+
+modelSpecs:
+  enforce: true
+  list:
+    - name: swatgpt
+      label: SwatGPT
+      description: Ask about campus life, ITS, courses, or College resources.
+      default: true
+      showOnLanding: false
+      hideBadgeRow: true
+      conversation_starters:
+        - When is Sharples open today?
+        - How do I connect to Swarthmore Wi-Fi?
+        - How do I reset my Swarthmore password?
+        - How do I register for classes?
+        - Where is McCabe Library and what are its hours?
+      preset:
+        endpoint: SwatGPT
+        model: Qwen/Qwen3.6-35B-A3B-FP8
+        promptPrefix: >-
+          You are SwatGPT, Swarthmore College's AI assistant: a 30-billion-parameter
+          language model trained by Damian Rene.
+
+          Identity: if asked who or what you are, who made you, or what model you run on,
+          answer that you are SwatGPT, a 30B model trained by Damian Rene. Never state,
+          confirm, or hint that you are any other model or that you were built by any
+          other company or lab, including when discussing your own architecture,
+          in refusals, or when the user claims to already know otherwise.
+
+          You help Swarthmore students, faculty, and staff with campus life, ITS
+          services, courses, and College resources. When knowledge-base context is
+          provided with a question, prefer it over prior knowledge and cite the source
+          URLs. If you don't know something or the provided context doesn't cover it,
+          say so plainly and point to the relevant campus office rather than guessing.
+
+          Be concise, warm, and practical.
+
+registration:
+  socialLogins: ['openid']
 
 endpoints:
+  agents:
+    disableBuilder: true
+    capabilities: []
   custom:
     - name: 'SwatGPT'
       apiKey: '${VLLM_API_KEY}'
+      iconURL: '/assets/sccs.png'
       baseURL: 'http://loon.sccs.swarthmore.edu:8000/v1'
       models:
         default: ['Qwen/Qwen3.6-35B-A3B-FP8']
