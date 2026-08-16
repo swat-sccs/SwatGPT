@@ -49,21 +49,23 @@ Other VMs on `nest`: `gull` (128 GiB RAM), `robin` (128 GiB), `lineage-buildbox`
 
 ### RAG Stack
 
-All GPU workloads share loon's RTX 6000 Pro. vLLM runs with `--gpu-memory-utilization 0.85` (~82 GB: 35 GB FP8 weights + ~46 GB KV cache), leaving ~13 GB on the card for TEI. Start vLLM first, then TEI.
+**Custom RAG — LibreChat's built-in `rag_api` is explicitly NOT used** (rejected as too slow). Retrieval is a thin custom path with no framework at query time.
+
+All GPU workloads share loon's RTX 6000 Pro. vLLM runs with `--gpu-memory-utilization 0.85` (~82 GB: 35 GB FP8 weights + ~46 GB KV cache), leaving ~13 GB on the card for TEI (embedder + reranker ≈ 5 GB). Start vLLM first, then the TEI containers.
 
 | Component | Choice | Host | Notes |
 |---|---|---|---|
 | Generation | vLLM 0.21.0 + Qwen3.6-35B-A3B-FP8 | `loon` | Done. `--gpu-memory-utilization 0.85`; keep prefix caching enabled; static system prompt first so it caches. |
-| Embeddings | TEI (text-embeddings-inference) serving `Qwen/Qwen3-Embedding-0.6B` | `loon` (shares GPU) | ~2–3 GB VRAM, sub-10 ms query embeds; OpenAI-compatible `/v1/embeddings` on port 8080 |
-| Reranker (phase 2) | TEI serving `BAAI/bge-reranker-v2-m3` (or Qwen3-Reranker-0.6B) | `loon` (shares GPU) | ~2 GB more; only if plain vector recall proves insufficient |
-| Vector store | PostgreSQL + pgvector, HNSW index | `swatgpt` VM on nest (local-zfs SSD) | rag_api's native store; corpus is ~5k chunks — trivially in-RAM |
-| RAG service | `librechat-rag-api` (danny-avila/rag_api) | `swatgpt` VM | LibreChat's native RAG; `RAG_OPENAI_BASEURL` → TEI on loon |
+| Embeddings | TEI serving `Qwen/Qwen3-Embedding-0.6B` | `loon` (shares GPU) | ~2–3 GB VRAM, ~5 ms query embeds; OpenAI-compatible `/v1/embeddings` |
+| Reranker | TEI serving `BAAI/bge-reranker-v2-m3` | `loon` (shares GPU) | ~2 GB, ~20 ms to rerank 20 candidates; `/rerank` endpoint |
+| Vector DB | Qdrant | `swatgpt` VM on nest (local-zfs SSD) | ~5k chunks fully in RAM, sub-ms top-k; replaces pgvector (only rag_api needed Postgres) |
+| Retrieval | Custom TypeScript in `packages/api` | LibreChat backend | Runs on **every** message (no tool-call round trip): embed query → Qdrant top-20 → rerank → top-5 injected into the system prompt before the single vLLM call. Total overhead <30 ms. |
 | App DB | MongoDB | `swatgpt` VM (local-zfs SSD) | LibreChat users/conversations |
 | Chat search | Meilisearch | `swatgpt` VM | Ships with LibreChat's compose stack |
 
-**Hosting plan**: one dedicated `swatgpt` VM on `nest` (modest: ~8 vCPU / 16 GiB, disk on `local-zfs`) running LibreChat + MongoDB + Postgres/pgvector + Meilisearch + rag_api via docker compose, backed up to `ibis`. All GPU work (generation + embeddings + optional rerank) runs on `loon`. Do **not** host the databases on `goose` (too small) or on `hdd-pool` (too slow for DB workloads). Fallback if loon must stay single-process: run TEI in CPU mode on the `swatgpt` VM (~30–50 ms/query embed — acceptable at this corpus size).
+**Hosting plan**: one dedicated `swatgpt` VM on `nest` (modest: ~8 vCPU / 16 GiB, disk on `local-zfs`) running LibreChat + MongoDB + Meilisearch + Qdrant via docker compose, backed up to `ibis`. All GPU work (generation + embeddings + rerank) runs on `loon`. Do **not** host the databases on `goose` (too small) or on `hdd-pool` (too slow for DB workloads).
 
-**KB ingestion**: create a "SwatGPT" LibreChat agent with `file_search` enabled and batch-upload the `information/` markdown via the API; rag_api chunks, embeds through TEI, and stores vectors in pgvector.
+**KB ingestion** (one-time offline batch; re-run only when the KB changes): a Python script using LlamaIndex (`MarkdownNodeParser`, frontmatter → chunk metadata with title + source URL for citations) chunks `information/`, batch-embeds via TEI, and writes to Qdrant. LlamaIndex is ingest-only — it is never imported on the query path.
 
 ---
 

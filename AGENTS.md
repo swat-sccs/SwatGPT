@@ -21,11 +21,14 @@ This LibreChat fork is being built into **SwatGPT**, an AI assistant for Swarthm
 
 ### RAG Stack
 
+Custom RAG — **LibreChat's built-in `rag_api` is NOT used** (too slow). No framework on the query path.
+
 - **Generation**: vLLM + Qwen3.6-35B on `loon` (done), `--gpu-memory-utilization 0.85` to leave ~13 GB for TEI.
-- **Embeddings**: TEI serving `Qwen/Qwen3-Embedding-0.6B`, co-located on `loon` (~2–3 GB VRAM; start vLLM first). Optional reranker (`bge-reranker-v2-m3`) there too in phase 2.
-- **Vector store**: PostgreSQL + pgvector (HNSW) via LibreChat's native `rag_api`.
-- **Hosting**: dedicated `swatgpt` VM on `nest` (~8 vCPU / 16 GiB, `local-zfs` SSD) running LibreChat + MongoDB + Postgres/pgvector + Meilisearch + rag_api; backups to `ibis`. Databases never on `goose` or `hdd-pool`.
-- **Ingestion**: "SwatGPT" agent with `file_search`; batch-upload `information/` via the API.
+- **Embeddings + reranker**: TEI on `loon` sharing the GPU (start vLLM first) — `Qwen/Qwen3-Embedding-0.6B` (~2–3 GB) and `BAAI/bge-reranker-v2-m3` (~2 GB).
+- **Vector DB**: Qdrant on the `swatgpt` VM (~5k chunks in RAM, sub-ms search).
+- **Retrieval**: custom TypeScript in `packages/api`, runs on every message — embed query → Qdrant top-20 → rerank → top-5 injected into the system prompt before the single vLLM call (<30 ms overhead, no tool-call round trip).
+- **Hosting**: dedicated `swatgpt` VM on `nest` (~8 vCPU / 16 GiB, `local-zfs` SSD) running LibreChat + MongoDB + Meilisearch + Qdrant; backups to `ibis`. Databases never on `goose` or `hdd-pool`.
+- **Ingestion**: one-time offline LlamaIndex script (MarkdownNodeParser, frontmatter → metadata for citations) → TEI batch embed → Qdrant. Ingest-only; LlamaIndex never runs at query time.
 
 ## Frontend theming and styling
 
