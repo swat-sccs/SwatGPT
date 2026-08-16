@@ -1422,6 +1422,8 @@ export const interfaceSchema = z
     multiConvo: z.boolean().optional(),
     bookmarks: z.boolean().optional(),
     memories: z.boolean().optional(),
+    /** Chat-project folders in the sidebar. Defaults on; set false to hide. */
+    projects: z.boolean().optional(),
     presets: z.boolean().optional(),
     prompts: z
       .union([
@@ -1516,6 +1518,7 @@ export const interfaceSchema = z
     multiConvo: true,
     bookmarks: true,
     memories: true,
+    projects: true,
     prompts: {
       use: true,
       create: true,

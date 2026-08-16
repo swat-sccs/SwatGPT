@@ -615,7 +615,7 @@ describe('INTERFACE_PERMISSION_FIELDS', () => {
   });
 
   it('does not contain UI-only fields', () => {
-    const uiFields = ['modelSelect', 'parameters', 'presets'];
+    const uiFields = ['modelSelect', 'parameters', 'presets', 'projects'];
     for (const field of uiFields) {
       expect(INTERFACE_PERMISSION_FIELDS.has(field)).toBe(false);
     }

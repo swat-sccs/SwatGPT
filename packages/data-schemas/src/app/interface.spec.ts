@@ -200,6 +200,30 @@ describe('loadDefaultInterface', () => {
     expect(interfaceConfig?.defaultPinnedTools).toEqual(['artifacts', 'execute_code', 'mcp']);
   });
 
+  it('shows projects by default', async () => {
+    const interfaceConfig = await loadDefaultInterface({
+      config: {},
+      configDefaults: getConfigDefaults(),
+    });
+
+    expect(interfaceConfig?.projects).toBe(true);
+  });
+
+  it('preserves a disabled projects flag', async () => {
+    const config: Partial<TCustomConfig> = {
+      interface: {
+        projects: false,
+      },
+    };
+
+    const interfaceConfig = await loadDefaultInterface({
+      config,
+      configDefaults: getConfigDefaults(),
+    });
+
+    expect(interfaceConfig?.projects).toBe(false);
+  });
+
   it('omits default pinned tools when not explicitly configured', async () => {
     const interfaceConfig = await loadDefaultInterface({
       config: {},
