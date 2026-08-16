@@ -115,3 +115,6 @@ endpoints:
       titleConvo: true
       titleModel: 'Qwen/Qwen3.6-35B-A3B-FP8'
       modelDisplayLabel: 'SwatGPT'
+      addParams:
+        chat_template_kwargs:
+          enable_thinking: false

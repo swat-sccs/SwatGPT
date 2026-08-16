@@ -274,6 +274,7 @@ export const registry: SettingEntry[] = [
     tab: CHAT,
     section: 'messages',
     labelKey: 'com_nav_show_thinking',
+    show: () => false,
     Component: toggleControl({
       stateAtom: showThinkingAtom,
       localizationKey: 'com_nav_show_thinking',
