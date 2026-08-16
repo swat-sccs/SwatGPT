@@ -82,6 +82,21 @@ function About() {
 
   return (
     <div className="flex flex-col text-sm text-text-primary">
+      <div className="mb-6 space-y-3 text-sm text-text-secondary">
+        <p>{localize('com_nav_about_swatgpt')}</p>
+        <p>{localize('com_nav_about_swatgpt_sources')}</p>
+        <p>
+          {localize('com_nav_about_swatgpt_disclaimer')}{' '}
+          <a
+            href={startupConfig?.helpAndFaqURL || 'https://www.swarthmore.edu/its'}
+            className="text-link underline"
+            target="_blank"
+            rel="noreferrer"
+          >
+            {localize('com_nav_help_faq')}
+          </a>
+        </p>
+      </div>
       <dl className="flex flex-col divide-y divide-border-light">
         <Row label={localize('com_nav_about_version')} value={version} />
         <Row

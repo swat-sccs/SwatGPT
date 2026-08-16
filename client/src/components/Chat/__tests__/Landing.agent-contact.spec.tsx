@@ -125,6 +125,15 @@ describe('Landing agent contact', () => {
     expect(screen.queryByText('No contact available')).not.toBeInTheDocument();
   });
 
+  it('shows the campus wordmark when no agent or assistant is selected', () => {
+    mockConversation = { endpoint: 'SwatGPT' };
+
+    render(<Landing centerFormOnLanding={false} />);
+
+    expect(screen.getByRole('img')).toHaveAttribute('src', 'assets/sccs.png');
+    expect(screen.queryByTestId('convo-icon')).not.toBeInTheDocument();
+  });
+
   it('does not show contact for assistants', () => {
     mockConversation = {
       endpoint: 'assistants',

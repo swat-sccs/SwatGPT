@@ -38,7 +38,7 @@ function Footer({ className, startupConfig }: FooterProps) {
   const mainContentParts = (
     typeof config?.customFooter === 'string'
       ? config.customFooter
-      : '[SwatGPT](https://www.swarthmore.edu) - ' + localize('com_ui_latest_footer')
+      : localize('com_ui_swatgpt_footer')
   ).split('|');
 
   useEffect(() => {

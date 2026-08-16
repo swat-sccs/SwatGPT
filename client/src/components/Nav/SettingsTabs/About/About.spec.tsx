@@ -38,6 +38,8 @@ describe('About', () => {
     it('renders version, commit (short), branch, and build date when buildInfo is populated', () => {
       render(<About />);
 
+      expect(screen.getByText('com_nav_about_swatgpt')).toBeInTheDocument();
+      expect(screen.getByText('com_nav_about_swatgpt_sources')).toBeInTheDocument();
       expect(screen.getByText(Constants.VERSION as string)).toBeInTheDocument();
       expect(screen.getByText('abcdef1')).toBeInTheDocument();
       expect(screen.getByText('dev')).toBeInTheDocument();

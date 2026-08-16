@@ -80,7 +80,7 @@ export default function Landing({ centerFormOnLanding }: { centerFormOnLanding: 
   );
 
   const brandedSpecLabel = modelSpec?.showOnLanding ? modelSpec.label : '';
-  const brandedSpecDescription = (modelSpec?.showOnLanding && modelSpec.description) || '';
+  const brandedSpecDescription = modelSpec?.description || '';
   const name = entity?.name ?? brandedSpecLabel;
   const description =
     (entity?.description || brandedSpecDescription || conversation?.greeting) ?? '';
@@ -141,6 +141,8 @@ export default function Landing({ centerFormOnLanding }: { centerFormOnLanding: 
       : customWelcome;
 
   const greetingText = resolvedWelcome ?? scheduledGreeting;
+  const subtitle =
+    description && description !== greetingText && description !== customWelcome ? description : '';
 
   return (
     <div
@@ -150,27 +152,35 @@ export default function Landing({ centerFormOnLanding }: { centerFormOnLanding: 
         <div
           className={`flex ${textHasMultipleLines ? 'flex-col' : 'flex-col md:flex-row'} items-center justify-center gap-2`}
         >
-          <div className={`relative size-10 justify-center ${textHasMultipleLines ? 'mb-2' : ''}`}>
-            <ConvoIcon
-              agentsMap={agentsMap}
-              assistantMap={assistantMap}
-              conversation={conversation}
-              endpointsConfig={endpointsConfig}
-              containerClassName={containerClassName}
-              context="landing"
-              className="h-2/3 w-2/3 text-text-primary"
-              size={41}
+          {!isAgent && !isAssistant ? (
+            <img
+              src="assets/sccs.png"
+              alt={localize('com_ui_logo', { 0: startupConfig?.appTitle ?? 'SwatGPT' })}
+              className={`h-14 w-14 rounded-xl object-contain ${textHasMultipleLines ? 'mb-2' : ''}`}
             />
-            {startupConfig?.showBirthdayIcon && (
-              <TooltipAnchor
-                className="absolute bottom-[27px] right-2"
-                description={localize('com_ui_happy_birthday')}
-                aria-label={localize('com_ui_happy_birthday')}
-              >
-                <BirthdayIcon />
-              </TooltipAnchor>
-            )}
-          </div>
+          ) : (
+            <div className={`relative size-10 justify-center ${textHasMultipleLines ? 'mb-2' : ''}`}>
+              <ConvoIcon
+                agentsMap={agentsMap}
+                assistantMap={assistantMap}
+                conversation={conversation}
+                endpointsConfig={endpointsConfig}
+                containerClassName={containerClassName}
+                context="landing"
+                className="h-2/3 w-2/3 text-text-primary"
+                size={41}
+              />
+              {startupConfig?.showBirthdayIcon && (
+                <TooltipAnchor
+                  className="absolute bottom-[27px] right-2"
+                  description={localize('com_ui_happy_birthday')}
+                  aria-label={localize('com_ui_happy_birthday')}
+                >
+                  <BirthdayIcon />
+                </TooltipAnchor>
+              )}
+            </div>
+          )}
           {((isAgent || isAssistant) && name) || name ? (
             <div className="flex flex-col items-center gap-0 p-2">
               <SplitText
@@ -203,15 +213,15 @@ export default function Landing({ centerFormOnLanding }: { centerFormOnLanding: 
             />
           )}
         </div>
-        {description &&
+        {subtitle &&
           (descriptionIsHTML ? (
             <div
               className="animate-fadeIn mt-4 flex max-w-md items-center justify-center gap-2 text-center text-sm font-normal text-text-primary [&_img]:inline-block [&_img]:h-4 [&_img]:w-4"
-              dangerouslySetInnerHTML={{ __html: sanitizeDescription(description) }}
+              dangerouslySetInnerHTML={{ __html: sanitizeDescription(subtitle) }}
             />
           ) : (
             <div className="animate-fadeIn mt-4 max-w-md text-center text-sm font-normal text-text-primary">
-              {description}
+              {subtitle}
             </div>
           ))}
         {selectedAgent && (
