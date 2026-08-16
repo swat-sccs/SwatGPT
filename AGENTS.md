@@ -30,6 +30,12 @@ Custom RAG — **LibreChat's built-in `rag_api` is NOT used** (too slow). No fra
 - **Hosting**: dedicated `swatgpt` VM on `nest` (~8 vCPU / 16 GiB, `local-zfs` SSD) running LibreChat + MongoDB + Meilisearch + Qdrant; backups to `ibis`. Databases never on `goose` or `hdd-pool`.
 - **Ingestion**: one-time offline LlamaIndex script (MarkdownNodeParser, frontmatter → metadata for citations) → TEI batch embed → Qdrant. Ingest-only; LlamaIndex never runs at query time.
 
+### Auth and ingress (summary — full details in CLAUDE.md)
+
+- **SCCS-only login** via Keycloak OIDC — LibreChat native OpenID, no code. Keycloak `https://auth.sccs.swarthmore.edu`, realm `master`, confidential client `swatgpt`. Email login/registration disabled; `registration.socialLogins: ['openid']`; admin via Keycloak client role `admin` (`resource_access.swatgpt.roles`, access token).
+- **Public URL** `https://chat.sccs.swarthmore.edu` → Traefik v3 on `gull` (swarm manager; loon is a worker) → `http://130.58.218.30:3080`. Route file: `/srv/traefik/dynamic/swatgpt.yml` on gull (file provider, `watch: true`, resolver `letsEncrypt`, entrypoints `http`/`https`).
+- **Interim deployment**: docker compose on loon at `~/SwatGPT` (not yet the planned `swatgpt` VM). `.env` needs `UID=13253`/`GID=100`; bind-mount dirs must be owned by that UID or containers crash-loop on permissions.
+
 ## Frontend theming and styling
 
 For frontend work, compose existing `@librechat/client` primitives and variants before adding

@@ -186,6 +186,7 @@ claude-flow
 # Removed Windows wrapper files per user request
 hive-mind-prompt-*.txt
 CLAUDE.md
+AGENTS.md
 .gsd
 codedb.snapshot
 scripts/activity-labels/results/

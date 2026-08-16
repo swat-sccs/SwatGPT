@@ -39,7 +39,7 @@ Everything is hosted on SCCS servers. The real physical ceiling is `nest` plus t
 | `loon` | VM 109 on nest | RTX PRO 6000 96 GB passthrough | vLLM inference server | Up |
 | `goose` | VM on nest | Ubuntu 24.04, ~41 GB disk, small RAM/CPU slice | Dokploy + small apps only — do not pile heavy workloads here | Up |
 
-Other VMs on `nest`: `gull` (128 GiB RAM), `robin` (128 GiB), `lineage-buildbox` (72 GiB), `puffin` (VM 105, holds a 16 TB bulk disk), ~15 VMs total.
+Other VMs on `nest`: `gull` (128 GiB RAM — Docker Swarm manager + Traefik ingress, see below), `robin` (128 GiB), `lineage-buildbox` (72 GiB), `puffin` (VM 105, holds a 16 TB bulk disk), ~15 VMs total.
 
 **Constraints to respect:**
 
@@ -66,6 +66,28 @@ All GPU workloads share loon's RTX 6000 Pro. vLLM runs with `--gpu-memory-utiliz
 **Hosting plan**: one dedicated `swatgpt` VM on `nest` (modest: ~8 vCPU / 16 GiB, disk on `local-zfs`) running LibreChat + MongoDB + Meilisearch + Qdrant via docker compose, backed up to `ibis`. All GPU work (generation + embeddings + rerank) runs on `loon`. Do **not** host the databases on `goose` (too small) or on `hdd-pool` (too slow for DB workloads).
 
 **KB ingestion** (one-time offline batch; re-run only when the KB changes): a Python script using LlamaIndex (`MarkdownNodeParser`, frontmatter → chunk metadata with title + source URL for citations) chunks `information/`, batch-embeds via TEI, and writes to Qdrant. LlamaIndex is ingest-only — it is never imported on the query path.
+
+### Auth — SCCS-only login (Keycloak OIDC)
+
+Login is **exclusively** via SCCS credentials through Keycloak; email login/registration is disabled. Pure configuration — LibreChat's native OpenID support, zero code changes (same IdP pattern as `swat-sccs/planner`, which uses NextAuth + KeycloakProvider).
+
+- **Public URL**: `https://chat.sccs.swarthmore.edu` (`DOMAIN_CLIENT`/`DOMAIN_SERVER` in `.env`).
+- **Keycloak**: `https://auth.sccs.swarthmore.edu`, realm `master` (issuer `https://auth.sccs.swarthmore.edu/realms/master`), confidential client `swatgpt` (secret in `.env` → `OPENID_CLIENT_SECRET`). Valid redirect URIs: `https://chat.sccs.swarthmore.edu/*` (LibreChat callback path is `/oauth/openid/callback`).
+- **`.env`**: `OPENID_CLIENT_ID/SECRET/ISSUER/SESSION_SECRET` set; `ALLOW_EMAIL_LOGIN=false`, `ALLOW_REGISTRATION=false`, `ALLOW_SOCIAL_LOGIN=true`, `ALLOW_SOCIAL_REGISTRATION=true`; button label "Continue with SCCS".
+- **`librechat.yaml`**: `registration.socialLogins: ['openid']`.
+- **Admin elevation**: Keycloak *client role* `admin` on the `swatgpt` client → LibreChat admin, via `OPENID_ADMIN_ROLE=admin`, `OPENID_ADMIN_ROLE_PARAMETER_PATH=resource_access.swatgpt.roles`, `OPENID_ADMIN_ROLE_TOKEN_KIND=access`.
+- **Pending**: flip `OPENID_AUTO_REDIRECT=true` once login is confirmed end-to-end; tighten the Keycloak client's Web origins from `*` to `https://chat.sccs.swarthmore.edu`; create/assign the `admin` client role in Keycloak.
+
+### Ingress — Traefik on gull
+
+- `gull` (130.58.218.21) is the **Docker Swarm manager** (`loon` is a worker node); Portainer UI at `https://portainer.sccs.swarthmore.edu`.
+- Traefik v3.7.9 runs as swarm service `traefik_reverse-proxy` on gull. Static config: `/srv/traefik/traefik.yml`; **dynamic file provider**: `/srv/traefik/dynamic/` with `watch: true` (drop a file, no restart needed). Entrypoints are named `http`/`https`; cert resolver is `letsEncrypt` (case-sensitive); a CrowdSec bouncer middleware chain (`default@file`) applies at the entrypoint level, so routes inherit it automatically. Editing requires sudo on gull.
+- SwatGPT route: `/srv/traefik/dynamic/swatgpt.yml` — ``Host(`chat.sccs.swarthmore.edu`)`` → `http://130.58.218.30:3080` (loon). DNS: `chat.sccs.swarthmore.edu` → CNAME `gull.sccs.swarthmore.edu`.
+
+### Current deployment (interim)
+
+- The stack currently runs via **docker compose on loon** at `~/SwatGPT` (app image `swatgpt:local` built from this repo's Dockerfile) — not yet on the planned `swatgpt` VM.
+- `.env` must have `UID=13253` / `GID=100` (the `aidahxr` user on loon) and the bind-mounted dirs (`data-node`, `meili_data_*`, `logs`, `uploads`, `images`) must be owned by that UID — otherwise Mongo/Meilisearch/the app crash-loop with permission errors. `PORT=3080`; `MEILI_MASTER_KEY` and `ADMIN_PANEL_SESSION_SECRET` must be set.
 
 ---
 
