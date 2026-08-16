@@ -1,6 +1,7 @@
 import { logger } from '@librechat/data-schemas';
 import type { RerankResult } from './rerank';
 import type { KbPayload } from './search';
+import { buildSparseQuery } from './lexical';
 import { retrieveKbContext } from './retrieve';
 
 const EMBEDDINGS_URL = 'http://tei-embed.test';
@@ -59,12 +60,13 @@ describe('retrieveKbContext', () => {
   function mockServices(options: {
     embedding?: number[];
     hits?: QdrantHit[];
+    sparseHits?: QdrantHit[];
     scores?: RerankResult[];
     searchResponse?: Response;
     rerankResponse?: Response;
     embeddingsResponse?: Response;
   }): void {
-    fetchMock.mockImplementation(async (input: string | URL | Request) => {
+    fetchMock.mockImplementation(async (input: string | URL | Request, init?: RequestInit) => {
       const url = String(input);
       if (url.includes('/v1/embeddings')) {
         return (
@@ -72,8 +74,13 @@ describe('retrieveKbContext', () => {
           jsonResponse({ data: [{ embedding: options.embedding ?? [0.1, 0.2, 0.3] }] })
         );
       }
-      if (url.includes('/points/search')) {
-        return options.searchResponse ?? jsonResponse({ result: options.hits ?? [] });
+      if (url.includes('/points/query')) {
+        if (options.searchResponse) {
+          return options.searchResponse;
+        }
+        const body = JSON.parse(init?.body as string) as { using: string };
+        const points = body.using === 'sparse' ? (options.sparseHits ?? []) : (options.hits ?? []);
+        return jsonResponse({ result: { points } });
       }
       if (url.includes('/rerank')) {
         return options.rerankResponse ?? jsonResponse(options.scores ?? []);
@@ -99,7 +106,7 @@ describe('retrieveKbContext', () => {
       { index: 5, score: 0.1 },
     ];
 
-    it('reorders results by rerank score and formats the top 5', async () => {
+    it('reorders results by rerank score and formats the chunks above the floor', async () => {
       mockServices({ hits, scores });
       const context = await retrieveKbContext(QUERY);
 
@@ -113,7 +120,7 @@ describe('retrieveKbContext', () => {
       expect(context).toContain('[3] Title 0 — Section 0');
       expect(context).toContain('[4] Title 4 — Section 4');
       expect(context).toContain('[5] Title 1 — Section 1');
-      expect(context).not.toContain('Title 3');
+      expect(context).toContain('[6] Title 3 — Section 3');
       expect(context).not.toContain('Title 5');
       expect(warnSpy).not.toHaveBeenCalled();
     });
@@ -122,27 +129,91 @@ describe('retrieveKbContext', () => {
       mockServices({ hits, scores, embedding: [0.5, 0.6] });
       await retrieveKbContext(`  ${QUERY}  `);
 
-      expect(fetchMock).toHaveBeenCalledTimes(3);
+      expect(fetchMock).toHaveBeenCalledTimes(4);
       expect(String(fetchMock.mock.calls[0][0])).toBe(`${EMBEDDINGS_URL}/v1/embeddings`);
       expect(requestBody(0)).toEqual({ model: 'gte-modernbert-base', input: QUERY });
 
-      expect(String(fetchMock.mock.calls[1][0])).toBe(`${QDRANT_URL}/collections/kb/points/search`);
-      expect(requestBody(1)).toEqual({ vector: [0.5, 0.6], limit: 20, with_payload: true });
+      expect(String(fetchMock.mock.calls[1][0])).toBe(`${QDRANT_URL}/collections/kb/points/query`);
+      expect(requestBody(1)).toEqual({
+        query: [0.5, 0.6],
+        using: 'dense',
+        limit: 20,
+        with_payload: true,
+      });
 
-      expect(String(fetchMock.mock.calls[2][0])).toBe(`${RERANK_URL}/rerank`);
+      expect(String(fetchMock.mock.calls[2][0])).toBe(`${QDRANT_URL}/collections/kb/points/query`);
       expect(requestBody(2)).toEqual({
+        query: buildSparseQuery(QUERY),
+        using: 'sparse',
+        limit: 20,
+        with_payload: true,
+      });
+
+      expect(String(fetchMock.mock.calls[3][0])).toBe(`${RERANK_URL}/rerank`);
+      expect(requestBody(3)).toEqual({
+        query: QUERY,
+        texts: hits.map((hit) => hit.payload.text),
+      });
+    });
+
+    it('deduplicates chunks found by both channels before reranking', async () => {
+      mockServices({ hits, sparseHits: [hits[2], hits[0]], scores });
+      await retrieveKbContext(QUERY);
+
+      expect(requestBody(3)).toEqual({
         query: QUERY,
         texts: hits.map((hit) => hit.payload.text),
       });
     });
 
     it('accepts base URLs that already include the service path', async () => {
+      mockServices({ hits, scores });
       process.env.TEI_EMBEDDINGS_URL = `${EMBEDDINGS_URL}/v1/embeddings`;
       process.env.TEI_RERANK_URL = `${RERANK_URL}/rerank`;
-      mockServices({ hits, scores });
       await retrieveKbContext(QUERY);
 
       expect(String(fetchMock.mock.calls[0][0])).toBe(`${EMBEDDINGS_URL}/v1/embeddings`);
+      expect(String(fetchMock.mock.calls[3][0])).toBe(`${RERANK_URL}/rerank`);
+    });
+  });
+
+  describe('lexical guarantee', () => {
+    it('keeps the top lexical hit in the context when topical chunks fill every slot', async () => {
+      const dense = [0, 1, 2, 3, 4, 5, 6, 7, 8].map(kbHit);
+      const lexical = kbHit(100);
+      const scores: RerankResult[] = [
+        ...dense.map((_hit, index) => ({ index, score: 0.9 - index * 0.01 })),
+        { index: 9, score: 0.4 },
+      ];
+      mockServices({ hits: dense, sparseHits: [lexical], scores });
+      const context = await retrieveKbContext(QUERY);
+
+      expect(context).toContain('Title 100');
+      expect(context).toContain('Title 6');
+      expect(context).not.toContain('Title 7');
+      expect(context).not.toContain('Title 8');
+    });
+
+    it('drops the lexical hit when it is below the rerank score floor', async () => {
+      const dense = [0, 1, 2, 3, 4, 5, 6, 7, 8].map(kbHit);
+      const scores: RerankResult[] = [
+        ...dense.map((_hit, index) => ({ index, score: 0.9 - index * 0.01 })),
+        { index: 9, score: 0.2 },
+      ];
+      mockServices({ hits: dense, sparseHits: [kbHit(100)], scores });
+      const context = await retrieveKbContext(QUERY);
+
+      expect(context).not.toContain('Title 100');
+      expect(context).toContain('Title 7');
+    });
+
+    it('skips the sparse channel for queries with no lexical tokens', async () => {
+      mockServices({ hits: [kbHit(0)], scores: [{ index: 0, score: 0.9 }] });
+      const context = await retrieveKbContext('a I ?');
+
+      expect(context).toContain('Title 0');
+      expect(fetchMock).toHaveBeenCalledTimes(3);
+      expect(requestBody(1)).toMatchObject({ using: 'dense' });
       expect(String(fetchMock.mock.calls[2][0])).toBe(`${RERANK_URL}/rerank`);
     });
   });
@@ -204,7 +275,7 @@ describe('retrieveKbContext', () => {
     it('returns undefined without warning when Qdrant returns no hits', async () => {
       mockServices({ hits: [] });
       await expect(retrieveKbContext(QUERY)).resolves.toBeUndefined();
-      expect(fetchMock).toHaveBeenCalledTimes(2);
+      expect(fetchMock).toHaveBeenCalledTimes(3);
       expect(warnSpy).not.toHaveBeenCalled();
     });
   });

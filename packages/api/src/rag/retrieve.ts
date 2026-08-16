@@ -1,6 +1,7 @@
 import { logger } from '@librechat/data-schemas';
+import type { KbCandidate, KbPayload } from './search';
 import type { RerankResult } from './rerank';
-import type { KbPayload } from './search';
+import { buildSparseQuery } from './lexical';
 import { formatContext } from './format';
 import { rerankChunks } from './rerank';
 import { embedQuery } from './embed';
@@ -8,7 +9,8 @@ import { searchKb } from './search';
 
 const RERANK_SCORE_FLOOR = 0.3;
 const TOTAL_BUDGET_MS = 1500;
-const TOP_CHUNKS = 5;
+const TOP_CHUNKS = 8;
+const LEXICAL_TOP = 3;
 
 interface RagConfig {
   embeddingsUrl: string;
@@ -26,16 +28,37 @@ function readConfig(): RagConfig | undefined {
   return { embeddingsUrl, rerankUrl, qdrantUrl };
 }
 
-function selectTopChunks(chunks: KbPayload[], scores: RerankResult[]): KbPayload[] {
+/**
+ * Picks the final context chunks by rerank score, with one guarantee: the
+ * best-reranked candidate among the lexical channel's top hits always gets a
+ * slot. The reranker judges topical relevance, so a chunk that grounds an
+ * entity the user named (e.g. the "Cornell Science Library" page for a query
+ * mentioning Cornell) would otherwise lose every slot to near-duplicate
+ * topical chunks.
+ */
+function selectTopChunks(candidates: KbCandidate[], scores: RerankResult[]): KbPayload[] {
   const eligible = scores.filter(
-    (result) => result.score >= RERANK_SCORE_FLOOR && chunks[result.index] !== undefined,
+    (result) => result.score >= RERANK_SCORE_FLOOR && candidates[result.index] !== undefined,
   );
   eligible.sort((a, b) => b.score - a.score);
-  return eligible.slice(0, TOP_CHUNKS).map((result) => chunks[result.index]);
+  const top = eligible.slice(0, TOP_CHUNKS);
+  const lexicalRank = (result: RerankResult): number =>
+    candidates[result.index].lexicalRank ?? Number.POSITIVE_INFINITY;
+  const isLexical = (result: RerankResult): boolean => lexicalRank(result) <= LEXICAL_TOP;
+  const guaranteed = eligible
+    .filter(isLexical)
+    .reduce<
+      RerankResult | undefined
+    >((best, result) => (best && lexicalRank(best) <= lexicalRank(result) ? best : result), undefined);
+  if (guaranteed && top.length === TOP_CHUNKS && !top.some(isLexical)) {
+    top[top.length - 1] = guaranteed;
+  }
+  return top.map((result) => candidates[result.index].payload);
 }
 
 /**
- * Retrieves Swarthmore KB context for a user query: embed → Qdrant top-20 → rerank → top-5.
+ * Retrieves Swarthmore KB context for a user query:
+ * embed → Qdrant hybrid (dense + lexical, RRF) → rerank → top chunks.
  * Fail-open by design — any error, timeout, or missing configuration yields `undefined`
  * so a RAG failure never fails the chat message.
  */
@@ -52,17 +75,22 @@ export async function retrieveKbContext(query: string): Promise<string | undefin
   const timer = setTimeout(() => controller.abort(), TOTAL_BUDGET_MS);
   try {
     const vector = await embedQuery(config.embeddingsUrl, trimmed, controller.signal);
-    const chunks = await searchKb(config.qdrantUrl, vector, controller.signal);
-    if (!chunks.length) {
+    const candidates = await searchKb(
+      config.qdrantUrl,
+      vector,
+      buildSparseQuery(trimmed),
+      controller.signal,
+    );
+    if (!candidates.length) {
       return undefined;
     }
     const scores = await rerankChunks(
       config.rerankUrl,
       trimmed,
-      chunks.map((chunk) => chunk.text),
+      candidates.map((candidate) => candidate.payload.text),
       controller.signal,
     );
-    const top = selectTopChunks(chunks, scores);
+    const top = selectTopChunks(candidates, scores);
     if (!top.length) {
       return undefined;
     }

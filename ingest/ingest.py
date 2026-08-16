@@ -6,6 +6,7 @@ imported on the query path.
 """
 
 import os
+import re
 import sys
 import time
 import uuid
@@ -28,6 +29,12 @@ UPSERT_BATCH_SIZE = int(os.environ.get("UPSERT_BATCH_SIZE", "256"))
 
 ALIAS = "kb"
 VECTOR_DIM = 768
+DENSE_VECTOR = "dense"
+SPARSE_VECTOR = "sparse"
+FNV_OFFSET = 2166136261
+FNV_PRIME = 16777619
+MIN_TOKEN_LENGTH = 2
+TOKEN_RE = re.compile(r"[a-z0-9]+")
 CHUNK_SIZE = 512
 CHUNK_OVERLAP = 64
 GROUPS = (("", "kb"), ("www", "www"), ("catalog", "course"))
@@ -94,6 +101,26 @@ def chunk_doc(path, doc_type, post, md_parser, splitter, duplicate_sources):
     return points
 
 
+def fnv1a(token):
+    """FNV-1a 32-bit. Must stay byte-identical to packages/api/src/rag/lexical.ts."""
+    h = FNV_OFFSET
+    for byte in token.encode():
+        h = ((h ^ byte) * FNV_PRIME) & 0xFFFFFFFF
+    return h
+
+
+def sparse_vector(text):
+    counts = {}
+    for token in TOKEN_RE.findall(text.lower()):
+        if len(token) < MIN_TOKEN_LENGTH:
+            continue
+        token_id = fnv1a(token)
+        counts[token_id] = counts.get(token_id, 0) + 1
+    return models.SparseVector(
+        indices=list(counts.keys()), values=[float(v) for v in counts.values()]
+    )
+
+
 def check_tei(client):
     resp = client.get(f"{TEI_URL}/health")
     if resp.status_code != 200:
@@ -122,7 +149,12 @@ def create_collection(qdrant):
     name = f"kb_{time.strftime('%Y%m%d%H%M%S')}"
     qdrant.create_collection(
         collection_name=name,
-        vectors_config=models.VectorParams(size=VECTOR_DIM, distance=models.Distance.COSINE),
+        vectors_config={
+            DENSE_VECTOR: models.VectorParams(size=VECTOR_DIM, distance=models.Distance.COSINE)
+        },
+        sparse_vectors_config={
+            SPARSE_VECTOR: models.SparseVectorParams(modifier=models.Modifier.IDF)
+        },
     )
     qdrant.create_payload_index(
         collection_name=name,
@@ -139,7 +171,11 @@ def upsert_all(qdrant, name, points, vectors):
             collection_name=name,
             wait=True,
             points=[
-                models.PointStruct(id=p["id"], vector=vec, payload=p["payload"])
+                models.PointStruct(
+                    id=p["id"],
+                    vector={DENSE_VECTOR: vec, SPARSE_VECTOR: sparse_vector(p["embed_text"])},
+                    payload=p["payload"],
+                )
                 for p, vec in zip(batch, vectors[start : start + UPSERT_BATCH_SIZE])
             ],
         )
@@ -218,6 +254,7 @@ def verify():
             result = qdrant.query_points(
                 collection_name=ALIAS,
                 query=vector,
+                using=DENSE_VECTOR,
                 limit=5,
                 with_payload=["title", "source"],
             )
