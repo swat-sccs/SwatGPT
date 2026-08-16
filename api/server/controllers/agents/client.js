@@ -94,6 +94,7 @@ const {
   resolveYouTubeInjectionConfig,
   decrementPendingRequest,
   maybePrewarmCodeSandbox,
+  retrieveKbContext,
 } = require('@librechat/api');
 const {
   Run,
@@ -1238,6 +1239,11 @@ class AgentClient extends BaseClient {
       mapCondition: (message) => message.addedConvo === true,
     });
 
+    /** KB retrieval overlaps the rest of message building; fails open to `undefined`. */
+    const kbContextPromise = retrieveKbContext(
+      orderedMessages[orderedMessages.length - 1]?.text ?? '',
+    );
+
     let payload;
     /** @type {number | undefined} */
     let promptTokens;
@@ -1522,16 +1528,22 @@ class AgentClient extends BaseClient {
      * Memory context is handled separately and applied per-agent based on config.
      */
     const sharedRunContextParts = [];
-    const [augmentedPrompt, [memories, configServers], agentScopedContext] = await Promise.all([
-      this.contextHandlers?.createContext(),
-      earlySharedContextPromise,
-      agentScopedContextPromise,
-    ]);
+    const [augmentedPrompt, [memories, configServers], agentScopedContext, kbContext] =
+      await Promise.all([
+        this.contextHandlers?.createContext(),
+        earlySharedContextPromise,
+        agentScopedContextPromise,
+        kbContextPromise,
+      ]);
 
     /** Augmented prompt from RAG/context handlers */
     this.augmentedPrompt = augmentedPrompt;
     if (this.augmentedPrompt) {
       sharedRunContextParts.push(this.augmentedPrompt);
+    }
+
+    if (kbContext) {
+      sharedRunContextParts.push(kbContext);
     }
 
     /** Memory context (user preferences/memories). Keyed context (with memory

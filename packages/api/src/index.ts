@@ -72,6 +72,8 @@ export * from './tools';
 export * from './web';
 /* Langfuse */
 export * from './langfuse';
+/* RAG */
+export * from './rag';
 /* Cache */
 export * from './cache';
 /* Shared Links */
