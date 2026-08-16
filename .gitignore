@@ -191,3 +191,4 @@ AGENTS.md
 codedb.snapshot
 scripts/activity-labels/results/
 __pycache__/
+/context/
