@@ -56,9 +56,9 @@ describe('dark dialog surface', () => {
       'utf8',
     );
 
-    expect(appStyles).toMatch(/--gray-875:\s*18 18 18;/);
+    expect(appStyles).toMatch(/--gray-875:\s*17 23 34;/);
     expect(appStyles).toMatch(/--surface-dialog:\s*var\(--gray-875\);/);
-    expect(darkTheme['rgb-surface-dialog']).toBe('18 18 18');
+    expect(darkTheme['rgb-surface-dialog']).toBe('17 23 34');
   });
 });
 
@@ -69,9 +69,9 @@ describe('dark hover surface', () => {
       'utf8',
     );
 
-    expect(appStyles).toMatch(/--gray-650:\s*57 57 57;/);
+    expect(appStyles).toMatch(/--gray-650:\s*43 53 70;/);
     expect(appStyles).toMatch(/--surface-hover:\s*var\(--gray-650\);/);
-    expect(darkTheme['rgb-surface-hover']).toBe('57 57 57');
+    expect(darkTheme['rgb-surface-hover']).toBe('43 53 70');
   });
 });
 
@@ -84,8 +84,8 @@ describe('composer hover surface', () => {
 
     expect(appStyles).toMatch(/--surface-composer-hover:\s*var\(--gray-200\);/);
     expect(appStyles).toMatch(/--surface-composer-hover:\s*var\(--gray-600\);/);
-    expect(defaultTheme['rgb-surface-composer-hover']).toBe('227 227 227');
-    expect(darkTheme['rgb-surface-composer-hover']).toBe('66 66 66');
+    expect(defaultTheme['rgb-surface-composer-hover']).toBe('232 225 211');
+    expect(darkTheme['rgb-surface-composer-hover']).toBe('52 63 82');
   });
 });
 

@@ -10,20 +10,21 @@
 :root {
   --white: 255 255 255;
   --black: 0 0 0;
-  --gray-20: 236 236 241;
-  --gray-50: 247 247 248;
-  --gray-100: 236 236 236;
-  --gray-200: 227 227 227;
-  --gray-300: 205 205 205;
-  --gray-400: 153 150 150;
-  --gray-500: 89 89 89;
-  --gray-600: 66 66 66;
-  --gray-650: 57 57 57;
-  --gray-700: 47 47 47;
-  --gray-800: 33 33 33;
-  --gray-850: 23 23 23;
-  --gray-875: 18 18 18;
-  --gray-900: 13 13 13;
+  /* SCCS light "print" palette (swat-sccs/clubs): warm paper grounds, navy ink darks */
+  --gray-20: 246 242 234;
+  --gray-50: 250 246 239;
+  --gray-100: 241 235 224;
+  --gray-200: 232 225 211;
+  --gray-300: 213 208 196;
+  --gray-400: 138 143 156;
+  --gray-500: 87 92 106;
+  --gray-600: 68 74 90;
+  --gray-650: 58 64 80;
+  --gray-700: 49 54 70;
+  --gray-800: 26 31 46;
+  --gray-850: 20 24 37;
+  --gray-875: 16 20 31;
+  --gray-900: 12 16 26;
   --green-50: 236 253 245;
   --green-100: 209 250 229;
   --green-200: 167 243 208;
@@ -148,20 +149,22 @@
 
 html {
   --brand-purple: 126 34 206;
-  --presentation: var(--white);
+  /* Card tone from the clubs print palette (#fffdf8) — brighter than the paper ground */
+  --surface-card: 255 253 248;
+  --presentation: var(--surface-card);
   --text-primary: var(--gray-800);
   --text-secondary: var(--gray-600);
   --text-secondary-alt: var(--gray-500);
   --text-tertiary: var(--gray-500);
   --text-warning: var(--amber-700);
-  --text-destructive: var(--red-600);
+  --text-destructive: var(--red-700);
   --link: var(--blue-600);
   --link-hover: var(--blue-700);
   --link-visited: 147 51 234;
-  --accent-primary: 161 24 51;
-  --accent-primary-hover: 138 20 43;
+  --accent-primary: 168 74 18;
+  --accent-primary-hover: 143 62 14;
   --ring-primary: var(--gray-500);
-  --header-primary: var(--white);
+  --header-primary: var(--surface-card);
   --header-hover: var(--gray-50);
   --header-button-hover: var(--gray-50);
   --surface-active: var(--gray-100);
@@ -169,20 +172,20 @@ html {
   --surface-hover: var(--gray-200);
   --surface-hover-alt: var(--gray-300);
   --surface-composer-hover: var(--gray-200);
-  --surface-primary: var(--white);
+  --surface-primary: var(--surface-card);
   --surface-primary-alt: var(--gray-50);
   --surface-primary-contrast: var(--gray-100);
   --surface-secondary: var(--gray-50);
   --surface-secondary-alt: var(--gray-200);
   --surface-tertiary: var(--gray-100);
-  --surface-tertiary-alt: var(--white);
-  --surface-dialog: var(--white);
+  --surface-tertiary-alt: var(--surface-card);
+  --surface-dialog: var(--surface-card);
   --surface-overlay: var(--gray-500);
-  --surface-submit: 161 24 51;
-  --surface-submit-hover: 138 20 43;
+  --surface-submit: 168 74 18;
+  --surface-submit-hover: 143 62 14;
   --surface-destructive: var(--red-700);
   --surface-destructive-hover: var(--red-800);
-  --surface-chat: var(--white);
+  --surface-chat: var(--surface-card);
   --surface-qr: var(--white);
   --border-light: var(--gray-200);
   --border-light-alpha: 1;
@@ -218,7 +221,7 @@ html {
   --surface-inverted: var(--gray-850);
   --surface-inverted-hover: var(--gray-700);
   --text-inverted: var(--white);
-  --surface-fixed: var(--white);
+  --surface-fixed: var(--surface-card);
   --surface-fixed-hover: var(--gray-100);
   --text-fixed: var(--gray-800);
   --radius: 0.5rem;
@@ -236,6 +239,21 @@ html {
   --switch-unchecked: 0 0% 58%;
 }
 .dark {
+  /* SCCS dark palette (swat-sccs/planner): navy grounds, steel/silver text */
+  --gray-20: 240 242 245;
+  --gray-50: 236 239 243;
+  --gray-100: 217 217 217;
+  --gray-200: 190 199 209;
+  --gray-300: 159 173 188;
+  --gray-400: 146 154 166;
+  --gray-500: 74 86 106;
+  --gray-600: 52 63 82;
+  --gray-650: 43 53 70;
+  --gray-700: 37 46 62;
+  --gray-800: 26 35 50;
+  --gray-850: 21 29 43;
+  --gray-875: 17 23 34;
+  --gray-900: 12 16 25;
   --brand-purple: 171 104 255;
   --presentation: var(--gray-800);
   --text-primary: var(--gray-100);
@@ -247,8 +265,8 @@ html {
   --link: var(--blue-400);
   --link-hover: var(--blue-300);
   --link-visited: 192 132 252;
-  --accent-primary: 217 83 111;
-  --accent-primary-hover: 229 127 148;
+  --accent-primary: 244 101 35;
+  --accent-primary-hover: 246 128 74;
   --header-primary: var(--gray-700);
   --header-hover: var(--gray-600);
   --header-button-hover: var(--gray-700);
@@ -266,8 +284,8 @@ html {
   --surface-tertiary-alt: var(--gray-700);
   --surface-dialog: var(--gray-875);
   --surface-overlay: 0 0 0;
-  --surface-submit: 161 24 51;
-  --surface-submit-hover: 138 20 43;
+  --surface-submit: 244 101 35;
+  --surface-submit-hover: 232 84 18;
   --surface-destructive: var(--red-800);
   --surface-destructive-hover: var(--red-900);
   --surface-chat: var(--gray-700);
@@ -302,9 +320,9 @@ html {
   --surface-inverted: var(--white);
   --surface-inverted-hover: var(--gray-100);
   --text-inverted: var(--gray-850);
-  --surface-fixed: var(--white);
-  --surface-fixed-hover: var(--gray-100);
-  --text-fixed: var(--gray-800);
+  --surface-fixed: var(--surface-card);
+  --surface-fixed-hover: 241 235 224;
+  --text-fixed: 26 31 46;
   --switch-unchecked: 0 0% 40%;
 }
 .gizmo {
@@ -1894,7 +1912,7 @@ html {
 .dark .webkit-dark-styles:focus {
   -webkit-text-fill-color: #fff;
   background-clip: content-box;
-  -webkit-box-shadow: 0 0 0 50vh #0d0d0d inset;
+  -webkit-box-shadow: 0 0 0 50vh #0c1019 inset;
 }
 
 /* Ordered Listing */

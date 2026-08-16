@@ -2,14 +2,15 @@ import { IThemeRGB } from '../types';
 
 /**
  * Dark theme
- * RGB values extracted from the existing dark mode CSS variables
+ * SCCS dark palette (swat-sccs/planner): navy grounds, steel/silver text,
+ * SCCS orange accent
  */
 export const darkTheme: IThemeRGB = {
   // Text colors
-  'rgb-text-primary': '236 236 236', // #ececec (gray-100)
-  'rgb-text-secondary': '205 205 205', // #cdcdcd (gray-300)
-  'rgb-text-secondary-alt': '153 150 150', // #999696 (gray-400)
-  'rgb-text-tertiary': '153 150 150', // #999696 (gray-400)
+  'rgb-text-primary': '217 217 217', // #d9d9d9 (planner foreground)
+  'rgb-text-secondary': '159 173 188', // #9fadbc (planner steel)
+  'rgb-text-secondary-alt': '146 154 166', // #929aa6
+  'rgb-text-tertiary': '146 154 166', // #929aa6
   'rgb-text-warning': '245 158 11', // #f59e0b (amber-500)
   'rgb-text-destructive': '248 113 113', // #f87171 (red-400)
 
@@ -17,50 +18,50 @@ export const darkTheme: IThemeRGB = {
   'rgb-link': '96 165 250', // #60a5fa (blue-400)
   'rgb-link-hover': '147 197 253', // #93c5fd (blue-300)
   'rgb-link-visited': '192 132 252', // #c084fc (purple-400)
-  'rgb-accent-primary': '217 83 111', // #D9536F
-  'rgb-accent-primary-hover': '229 127 148', // #E57F94
+  'rgb-accent-primary': '244 101 35', // #f46523 (SCCS orange)
+  'rgb-accent-primary-hover': '246 128 74', // #f6804a
 
-  // Ring colors (not defined in dark mode, using default)
-  'rgb-ring-primary': '89 89 89', // #595959 (gray-500)
+  // Ring colors
+  'rgb-ring-primary': '74 86 106', // #4a566a
 
   // Header colors
-  'rgb-header-primary': '47 47 47', // #2f2f2f (gray-700)
-  'rgb-header-hover': '66 66 66', // #424242 (gray-600)
-  'rgb-header-button-hover': '47 47 47', // #2f2f2f (gray-700)
+  'rgb-header-primary': '37 46 62', // #252e3e
+  'rgb-header-hover': '52 63 82', // #343f52
+  'rgb-header-button-hover': '37 46 62', // #252e3e
 
   // Surface colors
-  'rgb-surface-active': '89 89 89', // #595959 (gray-500)
-  'rgb-surface-active-alt': '47 47 47', // #2f2f2f (gray-700)
-  'rgb-surface-hover': '57 57 57', // #393939 (gray-650)
-  'rgb-surface-hover-alt': '66 66 66', // #424242 (gray-600)
-  'rgb-surface-composer-hover': '66 66 66', // #424242 (gray-600)
-  'rgb-surface-primary': '13 13 13', // #0d0d0d (gray-900)
-  'rgb-surface-primary-alt': '23 23 23', // #171717 (gray-850)
-  'rgb-surface-primary-contrast': '23 23 23', // #171717 (gray-850)
-  'rgb-surface-secondary': '33 33 33', // #212121 (gray-800)
-  'rgb-surface-secondary-alt': '33 33 33', // #212121 (gray-800)
-  'rgb-surface-tertiary': '47 47 47', // #2f2f2f (gray-700)
-  'rgb-surface-tertiary-alt': '47 47 47', // #2f2f2f (gray-700)
-  'rgb-surface-dialog': '18 18 18', // #121212 (legacy dark dialog)
+  'rgb-surface-active': '74 86 106', // #4a566a
+  'rgb-surface-active-alt': '37 46 62', // #252e3e
+  'rgb-surface-hover': '43 53 70', // #2b3546
+  'rgb-surface-hover-alt': '52 63 82', // #343f52
+  'rgb-surface-composer-hover': '52 63 82', // #343f52
+  'rgb-surface-primary': '12 16 25', // #0c1019 (planner background)
+  'rgb-surface-primary-alt': '21 29 43', // #151d2b (planner navbar)
+  'rgb-surface-primary-contrast': '21 29 43', // #151d2b (planner navbar)
+  'rgb-surface-secondary': '26 35 50', // #1a2332
+  'rgb-surface-secondary-alt': '26 35 50', // #1a2332
+  'rgb-surface-tertiary': '37 46 62', // #252e3e
+  'rgb-surface-tertiary-alt': '37 46 62', // #252e3e
+  'rgb-surface-dialog': '17 23 34', // #111722
   'rgb-surface-overlay': '0 0 0', // #000 (black)
-  'rgb-surface-submit': '161 24 51', // #A11833
-  'rgb-surface-submit-hover': '138 20 43', // #8A142B
+  'rgb-surface-submit': '244 101 35', // #f46523 (SCCS orange)
+  'rgb-surface-submit-hover': '232 84 18', // #e85412
   'rgb-surface-destructive': '153 27 27', // #991b1b (red-800)
   'rgb-surface-destructive-hover': '127 29 29', // #7f1d1d (red-900)
-  'rgb-surface-chat': '47 47 47', // #2f2f2f (gray-700)
+  'rgb-surface-chat': '37 46 62', // #252e3e
   'rgb-surface-inverted': '255 255 255', // #fff (white)
-  'rgb-surface-inverted-hover': '236 236 236', // #ececec (gray-100)
-  'rgb-text-inverted': '23 23 23', // #171717 (gray-850)
-  'rgb-surface-fixed': '255 255 255', // #fff (white) — same in light + dark
-  'rgb-surface-fixed-hover': '236 236 236', // #ececec (gray-100) — same in light + dark
-  'rgb-text-fixed': '33 33 33', // #212121 (gray-800) — same in light + dark
+  'rgb-surface-inverted-hover': '217 217 217', // #d9d9d9
+  'rgb-text-inverted': '21 29 43', // #151d2b
+  'rgb-surface-fixed': '255 253 248', // #fffdf8 (card) — same in light + dark
+  'rgb-surface-fixed-hover': '241 235 224', // #f1ebe0 (beige) — same in light + dark
+  'rgb-text-fixed': '26 31 46', // #1a1f2e (ink) — same in light + dark
 
   // Border colors
-  'rgb-border-light': '47 47 47', // #2f2f2f (gray-700)
-  'rgb-border-medium': '66 66 66', // #424242 (gray-600)
-  'rgb-border-medium-alt': '66 66 66', // #424242 (gray-600)
-  'rgb-border-heavy': '89 89 89', // #595959 (gray-500)
-  'rgb-border-xheavy': '153 150 150', // #999696 (gray-400)
+  'rgb-border-light': '37 46 62', // #252e3e
+  'rgb-border-medium': '52 63 82', // #343f52
+  'rgb-border-medium-alt': '52 63 82', // #343f52
+  'rgb-border-heavy': '74 86 106', // #4a566a
+  'rgb-border-xheavy': '146 154 166', // #929aa6
   'rgb-border-destructive': '239 68 68', // #ef4444 (red-500)
 
   // Status colors
@@ -71,7 +72,7 @@ export const darkTheme: IThemeRGB = {
   'rgb-status-info': '147 197 253', // #93c5fd (blue-300)
   'rgb-status-info-subtle': '23 37 84', // #172554 (blue-950)
   'rgb-status-info-border': '30 64 175', // #1e40af (blue-800)
-  'rgb-status-info-strong': '66 66 66', // #424242 (gray-600)
+  'rgb-status-info-strong': '52 63 82', // #343f52
   'rgb-status-warning': '252 211 77', // #fcd34d (amber-300)
   'rgb-status-warning-subtle': '69 26 3', // #451a03 (amber-950)
   'rgb-status-warning-border': '146 64 14', // #92400e (amber-800)
@@ -80,14 +81,14 @@ export const darkTheme: IThemeRGB = {
   'rgb-status-error-subtle': '69 10 10', // #450a0a (red-950)
   'rgb-status-error-border': '153 27 27', // #991b1b (red-800)
   'rgb-status-error-strong': '153 27 27', // #991b1b (red-800)
-  'rgb-status-neutral': '205 205 205', // #cdcdcd (gray-300)
-  'rgb-status-neutral-subtle': '33 33 33', // #212121 (gray-800)
-  'rgb-status-neutral-border': '47 47 47', // #2f2f2f (gray-700)
+  'rgb-status-neutral': '159 173 188', // #9fadbc (planner steel)
+  'rgb-status-neutral-subtle': '26 35 50', // #1a2332
+  'rgb-status-neutral-border': '37 46 62', // #252e3e
   'rgb-text-on-status': '255 255 255', // #fff (white)
 
   // Brand colors
   'rgb-brand-purple': '171 104 255', // #ab68ff
 
   // Presentation
-  'rgb-presentation': '33 33 33', // #212121 (gray-800)
+  'rgb-presentation': '26 35 50', // #1a2332
 };

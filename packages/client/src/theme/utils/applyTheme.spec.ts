@@ -101,7 +101,7 @@ describe('applyTheme', () => {
     expect(document.documentElement.style.getPropertyValue('--status-error')).toBe(
       defaultTheme['rgb-status-error'],
     );
-    expect(document.documentElement.style.getPropertyValue('--surface-overlay')).toBe('89 89 89');
+    expect(document.documentElement.style.getPropertyValue('--surface-overlay')).toBe('87 92 106');
   });
 
   it('applies a resolved appearance atomically', () => {
