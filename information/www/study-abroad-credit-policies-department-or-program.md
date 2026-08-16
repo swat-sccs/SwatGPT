@@ -1,0 +1,145 @@
+---
+title: "Credit Policies by Department or Program"
+source: https://www.swarthmore.edu/study-abroad/credit-policies-department-or-program
+section: study-abroad
+content_hash: 52d35543dbb30827d469c4fd2744bcdb782328affab98f8fd8ca722049a68977
+---
+
+# Credit Policies by Department or Program
+
+- **** Global Engagement (OCST)**
+  - Most courses that do not need to fulfill a specific requirement are eligible to receive OCST credit.
+  - If a student receives OCST credit for a course, they cannot retroactively apply this course to meet any major/minor requirements.
+  - If a student receives OCST credit for a course, they cannot retroactively apply this course to meet any distribution requirements.
+  - Instruction in languages not taught at Swarthmore is only eligible for OCST credit.
+  - Computer Science, Economics, Business, and Finance courses cannot receive OCST credit.
+- **Arabic**
+  - Please consult directly with the department/program for specific guidance on policies governing credit for study abroad and/or domestic study away.
+- **Art**
+  - The Art Department can grant a maximum of 2 study abroad credits.
+  - If students are taking more than the equivalent of 2 credits in Art, they would submit any courses above this threshold for OCST credit.
+- **Art History**
+  - In order to have a course abroad approved by the Art History department, a student must have taken at least one prior course in Art History at Swarthmore. If they have not, they would instead request OCST credit, and identify Global Engagement as the department evaluating the course.
+- **Biology**
+  - Please consult directly with the department/program for specific guidance on policies governing credit for study abroad and/or domestic study away.
+- **Black Studies**
+  - Please consult directly with the department/program for specific guidance on policies governing credit for study abroad and/or domestic study away.
+- **Business/Finance**
+  - Business and Finance courses must be evaluated by the Economics Department and cannot receive OCST credit.
+  - Business and finance courses can only be evaluated for Business Elective (BUSI) credit.
+  - BUSI credit counts toward total credit needed to graduate, but do not count toward the economics major/minor or for any distribution requirement.
+  - Students may receive a maximum of 2 BUSI credits on their Swarthmore transcript (including from study abroad courses, summer courses, Penn courses, etc.)
+- **Chemistry & Biochemistry**
+  - Please consult directly with the department/program for specific guidance on policies governing credit for study abroad and/or domestic study away.
+- **Chinese**
+  - Students are encouraged to speak with faculty members in Chinese while considering study abroad programs and when requesting credits. It is recommended that students speak with the faculty before departure and upon return.
+- **Classics**
+  - Please consult directly with the department/program for specific guidance on policies governing credit for study abroad and/or domestic study away.
+- **Computer Science**
+  - All Computer Science courses must be evaluated by the Computer Science Department and cannot receive OCST credit.
+  - In cases where a course abroad is equivalent to less than 1 full credit per course, the Computer Science Department does not allow the option for “extra work.” However, in some cases, students can combine multiple partial-credit courses to satisfy a single Swarthmore CS requirement.
+  - Typically, credits from study abroad are counted as electives towards the CS major or minor.
+  - Students can request to have these courses count towards a group requirement (Group 1, Group 2, or Group 3), but this process requires additional approval and in most cases will not be approved until after they have completed the course and the department has had the chance to review their work.
+  - The CS department requires that students complete at least half of the credits needed for the major or minor at Swarthmore. This means that at most four off-campus/transfer courses can be used to satisfy the CS major, and at most three can be used to satisfy the CS minor.
+  - Taking CS courses while abroad will impact students' ability to register for additional CPSC classes at Swarthmore after they return to campus. For more information, consult the Computer Science Department’s page on these course caps.
+- **Dance**
+  - Please consult directly with the department/program for specific guidance on policies governing credit for study abroad and/or domestic study away.
+- **Education**
+  - In order to receive credit for education courses taken abroad, students must have taken or plan to take EDUC014, Introduction to Education. Transfer credit will not be awarded until after a student has met this requirement.
+  - If not seeking credit from the Education department, students would instead request OCST credit, and identify Global Engagement as the department evaluating the course.
+- **Environmental Studies**
+  - Please consult directly with the department/program for specific guidance on policies governing credit for study abroad and/or domestic study away.
+- **Economics**
+  - All Economics must be evaluated by the Economics Department and cannot receive OCST credit.
+  - For information on credit policies for Business & Finance courses, see the separate dropdown menu above.
+  - Credit can be awarded only for courses with content that does not reproduce courses a student has taken for credit in the Tri-Co system.
+  - Problems arise when courses abroad are labeled as economics, but are in fact courses in law, history, or political science. The department does not accept such courses for economics credit.
+  - Courses abroad should be taught by a qualified economist and be largely analytical in content, as are nearly all courses in economics departments in U.S. colleges and universities.
+  - Core requirements of the economics major (ECON 001, 011, 021, 031) can only be fulfilled by courses that deliver a full Swarthmore credit. The department does not offer an “extra work” option
+  - Students who receive a transfer credit for ECON 001 cannot enroll in ECON 011 or 021 before taking at least one other economics course.
+- **Engineering**
+  - There is no limit on the number of Engineering credits that students can earn abroad, as long as they are pre-authorized by the Department Chair.
+  - Lab/Practicum Requirement: In order to receive Engineering credit, classes abroad must include a lab/practicum. In order to meet this requirement, students can either register for Engineering courses that qualify or can register for an independent lab course that is taken parallel to an Engineering course. When neither is possible, students seeking Engineering credit should contact the Engineering Chair for guidance on alternate supplemental lab/practicum possibilities (for example: assisting with research in a lab, creating an independent lab project, or completing “extra work” post-semester resulting in a lab report).
+- **English Literature**
+  - To have a course abroad approved by the English Literature department, students must have taken at least one prior course in English Literature at Swarthmore. If they have not, they would instead request OCST credit, and identify Global Engagement as the department evaluating the course.
+- **Film and Media Studies**
+  - Students in any major may apply to receive Film and Media Studies credit for courses in critical studies or production taken abroad.
+  - The Film and Media Department can grant a maximum of 2 study abroad credits.
+  - If students are taking more than the equivalent of 2 credits in Film and Media Studies, they would submit any courses above this threshold for OCST credit.
+- **French and Francophone Studies**
+  - For semester programs in Francophone countries, students may receive a maximum of 3 credits for coursework abroad. In order to receive more than 1 credit, students must take at least one 1-credit (Advanced Level) French course at Swarthmore immediately upon return.
+  - For semester programs in non-Francophone countries, students are limited to a maximum of 1 credit for coursework abroad. To receive this credit, the student must take at least one 1-credit French course at Swarthmore immediately upon return. Coursework in non-Francophone countries will not count towards major or minor requirements.
+  - French majors may count up to 3 credits taken abroad towards satisfying their course requirements; French minors may count up to 2 credits taken abroad towards satisfying their course requirements. This includes credits given for language instruction.
+  - Coursework completed abroad may not serve as the base for a major or minor Honors preparation.
+  - If students are taking more than the equivalent of 3 credits in French, they would submit any courses above this threshold for OCST credit.
+- **Gender and Sexuality**
+  - Minors may apply for no more than one credit of work done abroad to meet their GSST requirements.
+  - Individualized majors may apply up to two credits from study abroad coursework to meet GSST requirements.
+- **German**
+  - All students who wish to receive German Studies credit for courses in German languages, literatures and cultures taken abroad must consult with the German Studies section head before departure and upon return to be eligible for pre-estimation and final transfer credits.
+  - In addition, students who wish to major/minor or are approved majors/minors in German Studies, need to enroll in one additional course in GMST at Swarthmore upon return to qualify for a transfer credit from abroad.
+- **Global Studies**
+  - Individualized majors may apply up to three credits from study abroad coursework to meet GLBL requirements.
+  - Minors may apply for no more than one credit of work done abroad to meet their GLBL requirements.
+- **History**
+  - To have a course abroad approved by the History department, students must have taken at least one prior course in History at Swarthmore. If they have not, they would instead request OCST credit, and identify Global Engagement as the department evaluating the course.
+- **Latino and Latin American Studies**
+  - Students may apply up to two credits from work taken abroad in Latin America to their Latin American and Latino Studies academic program.
+  - Courses taken abroad must have a clear Latin American focus.
+  - Study abroad coursework must be pursued in Spanish or Portuguese.
+  - Students are strongly encouraged to complete the introductory course requirement prior to their immersive off-campus learning experience. This means one of the following courses: HIST 004, POLS 057, or SPAN 012.
+- **Linguistics**
+  - There is no limit on the number of courses taken abroad that may count towards the Linguistics major or minor.
+  - Usually courses completed abroad will count as electives, but the chair may approve relevant courses to fulfill core major requirements.
+- **Mathematics & Statistics**
+  - The department allows courses taken elsewhere to count for the major. However, the number of upper-level transfer credits for the major is limited.
+  - Normally, at least 3 of the 5 upper-level courses used to fulfill the major must be taken at Swarthmore, including at least one of the core courses MATH 063 and MATH 067.
+  - Exceptions should be proposed and approved during the Sophomore Plan process, not after the fact.
+  - For MATH 063 and 067, students are responsible for the syllabus we use, and should the course not cover our entire syllabus, the student will not complete the major until they have demonstrated knowledge of the missing topics.
+  - For honors preparations, students are responsible for the syllabi we use; Mathematics/Statistics will not offer special honors exams based on work done at other institutions.
+- **Music**
+  - Please consult directly with the department/program for specific guidance on policies governing credit for study abroad and/or domestic study away.
+- **Peace & Conflict Studies**
+  - Please consult directly with the department/program for specific guidance on policies governing credit for study abroad and/or domestic study away.
+- **Philosophy**
+  - With prior approval from the Chair, a student may take philosophy courses abroad and have them count both toward a major and as part of an Honors Program.
+  - Courses abroad do not always fit neatly into a philosophy major and are not always suitable for full course credit.
+- **Physical Education**
+  - With prior approval from the Chair or designee, a student may take physical education courses abroad and have them count toward the Physical Education (PHED) requirement.
+  - A student is unable to fulfill the physical education requirement through participation in sports teams and athletic clubs while abroad.
+  - Students must maintain full academic enrollment abroad. Choosing to fulfill the PE requirement in place of academic credit must not result in an underload.
+  - Students may not receive OCST credit and fulfill the Physical Education requirement for the same course.
+- **Physics & Astronomy**
+  - The Physics department can grant a maximum of 1 Swarthmore credit per study abroad course. If the GEO-recommended number of credits for course(s) exceeds 1 Swarthmore credit, supplemental OCST credit will be awarded.
+- **Political Science**
+  - Political Science can grant a maximum of 3 study abroad credits.
+  - If students are taking more than the equivalent of 3 credits in Political Science, they would submit any courses above this threshold for OCST credit.
+- **Psychology**
+  - All non-majors taking Psychology courses should submit these for OCST credit. Coursework abroad does not count towards the minor in psychology.
+  - Before the Psychology Department can review any request in ACES, students must submit this form for each course they plan to submit to the department.
+  - Students seeking psychology credit for a course taken abroad must have taken PSYC 001 or a relevant first year seminar in psychology, or placed out of this requirement through AP or IB work.
+  - With prior approval from the department, students are usually able to apply one credit of psychology coursework from a study abroad program towards the psychology major. This is the maximum.
+  - Occasionally, a psychology course abroad can be approved to count as a core course (i.e., one of the four) if it covers very similar content. Normally, core courses must be completed at Swarthmore.
+  - A major taking more than the equivalent of 1 credit in Psychology would submit any courses above this threshold for OCST credit.
+- **Religion**
+  - Please consult directly with the department/program for specific guidance on policies governing credit for study abroad and/or domestic study away.
+- **Russian**
+  - Please consult directly with the department/program for specific guidance on policies governing credit for study abroad and/or domestic study away.
+- **Sociology & Anthropology**
+  - Students will select "Sociology & Anthropology" in the dropdown menu in ACES. The department will review the course(s) and indicate whether the course(s) is pre-approved for SOCI, ANTH or SOAN credit.
+  - When uploading course documents for credit pre-estimation, the Sociology & Anthropology department prefers a full syllabus in English that includes a detailed reading list.
+  - Courses must be taught by a Sociologist or Anthropologist and the subject matter must be at least 80% relevant to Sociology and/or Anthropology.
+  - The Sociology & Anthropology department can grant a maximum of 2 study abroad credits.
+  - If students are taking more than the equivalent of 2 credits in Sociology or Anthropology, they would submit any courses above this threshold for OCST credit.
+- **Spanish**
+  - All Spanish majors and minors are required to complete a study abroad program in a Spanish-speaking country. Upon returning from abroad, majors or minors must enroll in an advanced course in the department.
+  - In order to be better prepared for academic work in Spanish, we recommend students take a writing course in Spanish (SPAN 008, SPAN 012, SPAN 022, or SPAN 023) at Swarthmore prior to going abroad.
+  - Spanish coursework completed abroad in literature and focused on cultural topics can be considered for credit.
+  - The Spanish Department can grant a maximum of 2 study abroad credits.
+  - If students are taking more than the equivalent of 2 credits in Spanish, they would submit any courses above this threshold for OCST credit.
+  - Generally, study abroad courses in Spanish do not fulfill the College's Language Requirement.
+- **Theater**
+  - Please consult directly with the department/program for specific guidance on policies governing credit for study abroad and/or domestic study away.
+- **Individualized Majors**
+  - Individualized majors may need to request major credit from a department/program outside their major.
+  - Students should consult directly with the faculty coordinator of their major to make sure that a course can count toward their individualized major if approved by a separate department/program.

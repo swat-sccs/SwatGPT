@@ -1,0 +1,30 @@
+---
+title: "Lang Center Opportunities Database"
+source: https://www.swarthmore.edu/lang-center/lang-center-opportunities-database
+section: lang-center
+content_hash: 7dc6b6edb381b405c52577eb1ae500f2f5e76c87aeaea6f149acc9960f4dc187
+---
+
+# Lang Center Opportunities Database
+
+Our database is an excellent resource for discovering exciting opportunities offered by the Lang Center and our partners, including funding, grants, programs, fellowships, jobs, and more! Some of our most popular programs are: **Lang Opportunity Scholarship**, **Social Impact Summer Scholarship**, **Chester Community Fellowship**.
+
+The CoLab at the Lang Center awards students $150 for a 10-hr project and $300 to complete a 20-hour remote project designed by community-based organizations, activists, and/or projects for social change. This program seeks to center community voices and put college resources to use in ways that are mutually beneficial to students and community partners. Community partners benefit from completed projects that might otherwise not be possible and students benefit from the opportunity to apply their academic learning to real-world projects aimed at social good. This opportunity is open to all class years.
+
+Dare 2 Soar is Swarthmore College's largest and oldest tutoring group, serving hundreds of Chester, PA children aged K-12. It was founded as a student-run organization by Khadijah White '04 with Francisca Mata '04 and Greg Lok '04, with a mission "to provide elementary school students and families of Chester with positive role models of color that attend college and serve the community," and "to demonstrate to the children what social action is truly about so that they might one day continue this mission." Application is open to all class years and tutors are paid hourly.
+
+The Lang Center supports faculty-led programs that encourage interdisciplinary learning and Engaged Scholarship. We are currently developing a formal application process. Stay tuned for more details!
+
+The Fund supports groups of Swarthmore students who propose and implement social and civic action projects whose scope and sustainability will advance solutions for the issues in question and also promote recognition of students' motivation and capability to address such major issues effectively. Any team of two or more currently enrolled students may apply for grants of up to $25,000 to fund projects that are visionary in scope and groundbreaking in practice. Open to groups of students of any class year.
+
+The Lang Opportunity Scholarship (LOS) Program each year selects members of Swarthmore’s sophomore class as Lang Scholars. Selection criteria include distinguished academic and co-curricular achievement, leadership qualities, and demonstrated commitment to civic and social responsibility. This program offers a diverse range of benefits including a $12,000 grant, a designated adviser, and networking opportunities to support the development of a project that creates a needed social resource in the U.S. or abroad. Applications are only open to sophomores.
+
+The Civic Scholar program seeks to open new pathways for communities and campus to engage with each other, enhance networks (social capital) of students and community members beyond Swarthmore College, and increase capacity of both students and communities to achieve their civic and social responsibility goals. To that end, this program provides students with mentoring, education, training, and funding over multiple years. Swarthmore Civic Scholars is a program of the Lang Center and the Richard Rubin Mentoring Program. Awards $6000 for each summer, $1500 each year for two academic years, and is open to first-generation and/or low-income first-years or sophomores.
+
+The Lang Center Associates are issue-based ambassadors who bring the Lang Center to students directly, acting as a living resource and embodiment of Engaged Scholarship. We hire applicants in the following issue areas: Arts, Media & Culture, Economic Development, Education & Access, Environment & Sustainability, Ethics & Human Rights, Politics & Public Policy, Public Health, and Science & Society. Applicants should be available for an average of 3 hours/week in the Spring for paid job training; the full-time role (4-6 hours per week) begins in August and goes through the academic year. This opportunity pays hourly and is open to current first-years, sophomores, and juniors.
+
+Projects for Peace is a global program that encourages young adults to develop innovative, community-centered, and scalable responses to the world’s most pressing issues. Along the way, these student leaders increase their knowledge, improve skills, and establish identities as peacebuilders and changemakers. Every year 100 or more student leaders are awarded a grant in the amount of $10,000 each to implement a “Project for Peace,” anywhere in the world, typically over summer break. Projects for Peace are grassroots activities that address root causes of conflict and promote peace. This opportunity is open to all class years. Draft applications are due December 1 of each year; final applications are due January 15.
+
+In the President’s Sustainability Research Fellowship (PSRF) at Swarthmore College, students learn by leading: by taking stewardship over vital sustainability challenges. The program matches motivated students with small teams of staff and faculty mentors to research, develop, and implement projects in a year-long course and associated internship. This program awards students an academic credit per semester and pays students for hourly internship work. This opportunity is open to all class years.
+
+Each summer, one Swarthmore student is awarded a fellowship to complete an independent reporting project with preferred focus on issues that reflect international concerns and have been unreported or under-reported in the mainstream media. Students are mentored by Pulitzer Center grantee journalists as well as Pulitzer Center staff. This opportunity awards $6000 and is open to all class years.

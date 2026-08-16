@@ -1,0 +1,20 @@
+---
+title: "Clery Act Compliance Committee Charter"
+source: https://www.swarthmore.edu/public-safety/clery-act-compliance-committee-charter
+section: public-safety
+content_hash: f9023ca97862b94f06fcfcdead676c749593bedd63d45347e1b37e780f3e00e7
+---
+
+# Clery Act Compliance Committee Charter
+
+The Swarthmore Clery Act Compliance Committee (SCACC) is responsible for overseeing the College's compliance with the Clery Act*. The Clery Comliance Officer will chair the committee along with representatives from various campus constituencies.  The SCAAC will coordinate with other campus groups to provide leadership and ensure full compliance in the areas of reporting, policy and procedure development and implementation, annually updating the Campus Security Authority (CSA) list, and providing educational programs.
+
+The College encourages every member of the community to report any criminal activity to the Department of Public Safety. The Department of Public Safety is responsible for gathering and sorting all reportable statistics for the Annual Fire Safety and Security Report (AFSSR) from all on-campus and all available off-campus resources and for the daily crime log, annual crime statistics and timely warnings.
+
+The SCACC will meet a minimum of three times each year in February, June and August, and more regularly, as needed. The February meeting is designed to review updates to the law, review policies and procedures connected to the Clery Act, and gather initial data for the AFSSR from the Swarthmore Public Safety Department, Swarthmore Police Department, Residential Life and Judicial Affairs. The June meeting will be held to update various policies (e.g. Crime Reporting, Emergency and Non-emergency procedures, and Security of Facilities), identify programming efforts (e.g. Campus Crime Procedures, Crime Prevention, Campus SaVE Act, Drug and Alcohol-Abuse education and Campus Security Authority (CSA) training), begin reviewing crime and disciplinary data to avoid duplication of the same incident, and review communication efforts with the Swarthmore, Nether Providence and Springfield Police Departments. The August meeting will be utilized to finalize the data elements for the AFSSR make any final policy updates, and confirm revised procedures for distributing the AFSSR.
+
+The Associate Dean and Director of Student Conduct and Senior Associate Dean of Student Life work with Public Safety to identify all actions that have been referred for campus disciplinary actions in the areas of liquor law violations, drug law violations, illegal weapons possessions, sexual misconduct/intimate partner violence and all other reportable incidents as defined by the Clery Act, including subsequent revisions as amended through 2013. The Office of Admissions is responsible for ensuring that prospective students have access to the AFSSR. The Office of Human Resources is responsible for ensuring that prospective employees have access to the Report. The Director of Public Safety, in conjunction with community partners, is responsible for preparation of the AFSSR, and publishing it with the Public Safety crime statistics and arranging for its direct delivery to all current students, faculty, and staff. The Director of Public Safety will be responsible for completing the Campus Safety and Security Survey annually, as required under Clery Act.
+
+----------------------
+
+* *The Clery Act of 1990, as amended and the United States Department of Education implementing regulation, 34 CFR Part 668 is a landmark federal law, originally known as the Campus Security Act, that requires colleges and universities across the United States to disclose statistics about crime on and around their campuses and information about certain safety and security policies.  For additional information please refer to: Jeanne Clery Disclosure of Campus Security Policy and Campus Crime Statistics Act (20 USC § 1092(f)). The law is tied to an institution's participation in federal student financial aid programs and it applies to most public and private institutions of higher education. The Act is enforced by the U.S. Department of Education.*

@@ -1,0 +1,13 @@
+---
+title: "Thomas Roby '85"
+source: https://www.swarthmore.edu/honors-program/thomas-roby-85
+section: honors-program
+content_hash: 4b52f56da1460ea9c2c8bb81c60c74721dffbf44d6dca8b685a57c01bbdb687e
+---
+
+# Thomas Roby '85
+
+Although my years at Swarthmore were filled with memorable interactions with faculty and students, my main foci were math, linguistics, and folk dancing. I ended up doing honors in math with a minor in Greek, but tried to take a variety of courses before graduate school specialization set in. I took eleven credits in Greek, and was fortunate to have Gil Rose for eight of them (25 percent of the required credits for graduation!). The study of ancient Greek poetry was a highlight of my undergraduate education, and the writing skills honed there still serve me well today.
+In math seminars we learned to read texts on our own, solve problems together, and seek alternate sources. Steve Maurer's combinatorics seminar challenged us further to read individual papers and to present the material. This preparation for graduate school and math research was invaluable. It was also at Swarthmore that I began folk dancing, recruited by friends for a performance, and tapped into a longstanding tradition that continues to this day. The traditional tunes, mathematical choreographic structure, different dialects and flavors of related dance forms, and the social interactions all clicked for me.
+
+Although the possibility of sometime becoming an honors examiner in mathematics had occurred to me, I never expected the opportunity that materialized in 2002. Professor of Linguistics Donna Jo Napoli, whom I had never met, e-mailed me to ask if I would serve as an external examiner for a student writing an "honors paper" (a new concept to someone from the six-seminar days) in the area of math/linguistics/folk dancing. Although I lacked formal credentials in linguistics, my specific knowledge of various kinds of folk dancing was key. Setting a paper topic was an interesting challenge; seeing the result - "Dialectical Divergence in Country Dancing" - and meeting the student for the oral was a pleasure. In 2004, I was a linguistics examiner for a paper on the grammar of improvisational Norwegian dancing, and then, last year, I returned as a mathematics examiner (abstract algebra). The latter was more similar to my own experience: setting problems for a three-hour exam based on syllabi, grading students' work, and following up with oral examinations. In every case, it was delightful to meet students from later generations, participating in an academic process that maintains its spirit, despite changes in detail.
