@@ -21,8 +21,8 @@ jobs:
           git fetch "https://x-access-token:${{ secrets.GITHUB_TOKEN }}@github.com/${{ github.repository }}.git" "+refs/heads/main:refs/remotes/origin/main"
           git reset --hard "${{ github.sha }}" || git reset --hard origin/main
 
-      - name: Build app image
-        run: docker compose build api
+      - name: Build app and Dash MCP images
+        run: docker compose build api swatgpt-mcp
 
       - name: Deploy
         run: docker compose up -d --remove-orphans

@@ -37,7 +37,7 @@ interface:
   marketplace:
     use: false
   mcpServers:
-    use: false
+    use: true
     create: false
     share: false
     public: false
@@ -55,11 +55,26 @@ interface:
     share: false
     public: false
   privacyPolicy:
-    externalUrl: 'https://www.swarthmore.edu/its'
+    externalUrl: 'https://www.sccs.swarthmore.edu/docs/policy'
     openNewTab: true
 
 memory:
   disabled: true
+
+mcpSettings:
+  allowedAddresses:
+    - 'swatgpt-mcp:3000'
+
+mcpServers:
+  swatgpt:
+    title: 'The Dash'
+    description: 'Current and historical info from the The Dash'
+    type: streamable-http
+    url: 'http://swatgpt-mcp:3000/mcp'
+    timeout: 30000
+    startup: true
+    chatMenu: false
+    serverInstructions: true
 
 modelSpecs:
   enforce: true
@@ -70,6 +85,7 @@ modelSpecs:
       default: true
       showOnLanding: false
       hideBadgeRow: true
+      mcpServers: ['swatgpt']
       conversation_starters:
         - When is Sharples open today?
         - How do I connect to Swarthmore Wi-Fi?
@@ -81,7 +97,7 @@ modelSpecs:
         model: Qwen/Qwen3.6-35B-A3B-FP8
         promptPrefix: >-
           You are SwatGPT, Swarthmore College's AI assistant: a 30-billion-parameter
-          language model trained by Damian Rene.
+          language model trained by SCCS.
 
           Identity: if asked who or what you are, who made you, or what model you run on,
           answer that you are SwatGPT, a 30B model trained by Damian Rene. Never state,
@@ -94,6 +110,9 @@ modelSpecs:
           provided with a question, prefer it over prior knowledge and cite the source
           URLs. If you don't know something or the provided context doesn't cover it,
           say so plainly and point to the relevant campus office rather than guessing.
+         
+          If you have access to the swatgpt mcp server try and use the mcp server before 
+          giving up. 
 
           Your users are members of the Swarthmore community, so interpret place
           names, buildings, and campus shorthand as Swarthmore references unless the

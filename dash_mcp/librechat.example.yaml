@@ -1,0 +1,15 @@
+# Merge these keys into LibreChat's existing librechat.yaml.
+mcpSettings:
+  allowedAddresses:
+    - 'swatgpt-mcp:3000'
+
+mcpServers:
+  swatgpt:
+    title: 'SwatGPT Campus Data'
+    description: 'Read-only current and historical public data from the Swarthmore Dash.'
+    type: streamable-http
+    url: 'http://swatgpt-mcp:3000/mcp'
+    timeout: 30000
+    startup: true
+    chatMenu: false
+    serverInstructions: true

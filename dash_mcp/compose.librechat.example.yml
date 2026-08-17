@@ -1,63 +1,40 @@
+# Merge this file into the same Compose project as LibreChat so the API
+# container can resolve http://swatgpt-mcp:3000. Set SWATGPT_MCP_PATH to this
+# repository's absolute path before starting Compose.
 services:
-  api:
-    image: swatgpt:local
-    build:
-      context: .
-      target: node
-    depends_on:
-      mongodb:
-        condition: service_started
-      swatgpt-mcp:
-        condition: service_healthy
-    volumes:
-      - type: bind
-        source: ./librechat.yaml
-        target: /app/librechat.yaml
-
   swatgpt-postgres:
     image: postgres:17-alpine
     restart: unless-stopped
     environment:
       POSTGRES_DB: ${SWATGPT_POSTGRES_DB:-swatgpt}
       POSTGRES_USER: ${SWATGPT_POSTGRES_USER:-swatgpt}
-      POSTGRES_PASSWORD: ${SWATGPT_POSTGRES_PASSWORD:?Set SWATGPT_POSTGRES_PASSWORD in .env}
+      POSTGRES_PASSWORD: ${SWATGPT_POSTGRES_PASSWORD:?Set SWATGPT_POSTGRES_PASSWORD}
     volumes:
       - swatgpt-postgres-data:/var/lib/postgresql/data
     healthcheck:
-      test:
-        [
-          'CMD-SHELL',
-          'pg_isready -U ${SWATGPT_POSTGRES_USER:-swatgpt} -d ${SWATGPT_POSTGRES_DB:-swatgpt}',
-        ]
+      test: ["CMD-SHELL", "pg_isready -U ${SWATGPT_POSTGRES_USER:-swatgpt} -d ${SWATGPT_POSTGRES_DB:-swatgpt}"]
       interval: 5s
       timeout: 5s
       retries: 20
 
   swatgpt-mcp:
     build:
-      context: ./dash_mcp
+      context: ${SWATGPT_MCP_PATH:?Set SWATGPT_MCP_PATH to the dash_mcp repository}
     restart: unless-stopped
     depends_on:
       swatgpt-postgres:
         condition: service_healthy
     environment:
       DATABASE_URL: postgres://${SWATGPT_POSTGRES_USER:-swatgpt}:${SWATGPT_POSTGRES_PASSWORD}@swatgpt-postgres:5432/${SWATGPT_POSTGRES_DB:-swatgpt}
-      HOST: 0.0.0.0
-      PORT: 3000
       MCP_ALLOWED_HOSTS: swatgpt-mcp,localhost,127.0.0.1
-      DASH_BASE_URL: https://dash.swarthmore.edu
-      UPSTREAM_TIMEOUT_MS: ${SWATGPT_UPSTREAM_TIMEOUT_MS:-10000}
-      UPSTREAM_RETRIES: ${SWATGPT_UPSTREAM_RETRIES:-2}
-      UPSTREAM_CONCURRENCY: ${SWATGPT_UPSTREAM_CONCURRENCY:-6}
       POLLING_ENABLED: ${SWATGPT_POLLING_ENABLED:-true}
       ALERT_POLL_INTERVAL_SECONDS: ${SWATGPT_ALERT_POLL_INTERVAL_SECONDS:-60}
       REALTIME_POLL_INTERVAL_SECONDS: ${SWATGPT_REALTIME_POLL_INTERVAL_SECONDS:-300}
       CONTENT_POLL_INTERVAL_SECONDS: ${SWATGPT_CONTENT_POLL_INTERVAL_SECONDS:-900}
       CONFIG_POLL_INTERVAL_SECONDS: ${SWATGPT_CONFIG_POLL_INTERVAL_SECONDS:-3600}
       OBSERVATION_RETENTION_DAYS: ${SWATGPT_OBSERVATION_RETENTION_DAYS:-30}
-      LOG_LEVEL: ${SWATGPT_LOG_LEVEL:-info}
     expose:
-      - '3000'
+      - "3000"
 
 volumes:
   swatgpt-postgres-data:
