@@ -126,7 +126,7 @@ registration:
 endpoints:
   agents:
     disableBuilder: true
-    capabilities: []
+    capabilities: ['tools']
   custom:
     - name: 'SwatGPT'
       apiKey: '${VLLM_API_KEY}'
