@@ -3,7 +3,7 @@ import { PgStore } from './storage/store.js';
 import type { ArchiveQuery, DashboardRegistry, Domain, FeedResult, JsonObject, NormalizedRecord } from './types.js';
 import {
   asObject, asObjects, campusDayRange, cleanText, currentCampusDate, fuzzyMatch,
-  normalizeRawRecord, toPublicRecord, withoutTypename,
+  log, normalizeRawRecord, toPublicRecord, withoutTypename,
 } from './util.js';
 import { DashClient, resultData } from './upstream/client.js';
 import { RegistryDiscovery } from './upstream/discovery.js';
@@ -19,7 +19,13 @@ export class SwatService {
 
   async initialize(): Promise<void> {
     await this.store.migrate();
-    await this.discovery.load();
+    try {
+      await this.discovery.load();
+    } catch (error) {
+      log('warn', 'Dash configuration unavailable at startup; serving PostgreSQL snapshots while background discovery retries', {
+        error: error instanceof Error ? error.message : String(error),
+      });
+    }
   }
 
   registry(): DashboardRegistry {
@@ -30,8 +36,9 @@ export class SwatService {
     return this.discovery.load(true);
   }
 
-  async getAlerts(limit = 20): Promise<FeedResult<JsonObject>> {
+  async getAlerts(limit = 20, refresh = false): Promise<FeedResult<JsonObject>> {
     const fetchedAt = new Date();
+    if (!refresh) return this.cachedRecords('alerts', limit, fetchedAt, undefined, this.config.alertPollMs);
     try {
       const registry = this.registry();
       const [critical, calendars] = await Promise.all([
@@ -54,15 +61,30 @@ export class SwatService {
         const source = cleanText(asObject(calendar)?.calendarName, 300) ?? `announcement-calendar-${index + 1}`;
         records.push(...resultData(calendar).map((raw) => normalizeRawRecord('alerts', source, raw)));
       });
-      await this.persist(records);
+      await this.persist(records, [
+        { domain: 'alerts', source: 'critical-announcement' },
+        { domain: 'alerts', source: 'app-announcement' },
+        ...calendars.map((calendar, index) => ({
+          domain: 'alerts' as const,
+          source: cleanText(asObject(calendar)?.calendarName, 300) ?? `announcement-calendar-${index + 1}`,
+        })),
+      ]);
       return makeResult(records.map(toPublicRecord), fetchedAt, records.map((item) => item.source), limit);
     } catch (error) {
+      if (refresh) throw error;
       return this.recordsFallback('alerts', limit, fetchedAt, error);
     }
   }
 
-  async getWeather(days = 3): Promise<FeedResult<JsonObject>> {
+  async getWeather(days = 3, refresh = false): Promise<FeedResult<JsonObject>> {
     const fetchedAt = new Date();
+    if (!refresh) {
+      const fallback = await this.store.latestObservation('weather');
+      if (!fallback) return makeUnavailableResult(fetchedAt, 'weather');
+      const item = { ...fallback.payload };
+      if (Array.isArray(item.forecast)) item.forecast = item.forecast.slice(0, days);
+      return makeCachedResult([item], fetchedAt, ['weatherfeed'], fallback.observed_at, this.config.realtimePollMs);
+    }
     try {
       const raw = await this.client.query<unknown>('Weather', queries.weather);
       const data = asObject(asObject(raw)?.data) ?? {};
@@ -72,15 +94,24 @@ export class SwatService {
       await this.store.addObservation('weather', String(data.location ?? 'Swarthmore'), item, fetchedAt);
       return makeResult([item], fetchedAt, ['weatherfeed'], 1);
     } catch (error) {
+      if (refresh) throw error;
       const fallback = await this.store.latestObservation('weather');
       if (!fallback) throw error;
       return makeStaleResult([fallback.payload], fetchedAt, ['weatherfeed'], fallback.observed_at, error);
     }
   }
 
-  async getHours(input: { place?: string; category?: string; date?: string; limit?: number }): Promise<FeedResult<JsonObject>> {
+  async getHours(input: { place?: string; category?: string; date?: string; limit?: number }, refresh = false): Promise<FeedResult<JsonObject>> {
     const fetchedAt = new Date();
     const limit = input.limit ?? 30;
+    if (!refresh) {
+      const range = campusDayRange(input.date ?? currentCampusDate());
+      return this.cachedRecords('hours', limit, fetchedAt, (item) =>
+        fuzzyMatch(JSON.stringify(item), input.place) &&
+        fuzzyMatch(JSON.stringify(item), input.category) &&
+        recordOverlapsRange(item, new Date(range.start), new Date(range.end)),
+      this.config.contentPollMs);
+    }
     try {
       const range = campusDayRange(input.date ?? currentCampusDate());
       const sources = this.registry().hours.filter((source) =>
@@ -105,16 +136,25 @@ export class SwatService {
         }
         return events;
       }))).flat();
-      await this.persist(records);
+      await this.persist(records, sources.map((source) => ({ domain: 'hours', source: source.place })));
       return makeResult(records.map(toPublicRecord), fetchedAt, sources.map((source) => source.place), limit);
     } catch (error) {
+      if (refresh) throw error;
       return this.recordsFallback('hours', limit, fetchedAt, error, input.place ?? input.category);
     }
   }
 
-  async getDining(input: { location?: string; date?: string; meal?: string; query?: string; limit?: number }): Promise<FeedResult<JsonObject>> {
+  async getDining(input: { location?: string; date?: string; meal?: string; query?: string; limit?: number }, refresh = false): Promise<FeedResult<JsonObject>> {
     const fetchedAt = new Date();
     const limit = input.limit ?? 30;
+    if (!refresh) {
+      const range = campusDayRange(input.date ?? currentCampusDate());
+      return this.cachedRecords('dining', limit, fetchedAt, (item) => {
+        const text = JSON.stringify(item);
+        return fuzzyMatch(text, input.location) && fuzzyMatch(text, input.meal) &&
+          fuzzyMatch(text, input.query) && recordOverlapsRange(item, new Date(range.start), new Date(range.end));
+      }, this.config.contentPollMs);
+    }
     try {
       const range = campusDayRange(input.date ?? currentCampusDate());
       const sources = this.registry().dining.filter((source) => fuzzyMatch(source.location, input.location));
@@ -128,36 +168,55 @@ export class SwatService {
           ...item, dining_location: source.location, dining_labels: source.labels,
         }, { location: source.location }));
       }))).flat();
-      await this.persist(records);
+      await this.persist(records, sources.map((source) => ({ domain: 'dining', source: source.location })));
       if (input.meal) records = records.filter((record) => fuzzyMatch(`${record.title} ${record.description ?? ''}`, input.meal));
       if (input.query) records = records.filter((record) => fuzzyMatch(record.searchText, input.query));
       return makeResult(records.map(toPublicRecord), fetchedAt, sources.map((source) => source.location), limit);
     } catch (error) {
+      if (refresh) throw error;
       return this.recordsFallback('dining', limit, fetchedAt, error, input.location ?? input.meal ?? input.query);
     }
   }
 
-  async searchEvents(input: { query?: string; start?: string; end?: string; limit?: number }): Promise<FeedResult<JsonObject>> {
+  async searchEvents(input: { query?: string; start?: string; end?: string; limit?: number }, refresh = false): Promise<FeedResult<JsonObject>> {
     const fetchedAt = new Date();
     const limit = input.limit ?? 20;
+    if (!refresh) {
+      const start = input.start ? new Date(campusDayRange(input.start).start) : fetchedAt;
+      const end = input.end ? new Date(campusDayRange(input.end).end) : new Date(start.getTime() + 30 * 86_400_000);
+      return this.cachedRecords('events', limit, fetchedAt, (item) =>
+        fuzzyMatch(JSON.stringify(item), input.query) && recordOverlapsRange(item, start, end),
+      this.config.contentPollMs);
+    }
     try {
       const start = input.start ? new Date(campusDayRange(input.start).start) : fetchedAt;
       const end = input.end ? new Date(campusDayRange(input.end).end) : new Date(start.getTime() + 30 * 86_400_000);
       const days = Math.max(1, Math.min(365, Math.ceil((end.getTime() - fetchedAt.getTime()) / 86_400_000)));
       const raw = await this.client.query<unknown>('CampusEvents', queries.events, { currentOnly: false, days });
       let records = resultData(raw).map((item) => normalizeRawRecord('events', 'SwatCentral', item));
-      await this.persist(records);
+      await this.persist(records, [{ domain: 'events', source: 'SwatCentral' }]);
       records = filterRange(records, start, end);
       if (input.query) records = records.filter((record) => fuzzyMatch(record.searchText, input.query));
       return makeResult(records.map(toPublicRecord), fetchedAt, ['SwatCentral'], limit);
     } catch (error) {
+      if (refresh) throw error;
       return this.recordsFallback('events', limit, fetchedAt, error, input.query);
     }
   }
 
-  async searchNews(input: { query?: string; source?: string; publishedAfter?: string; publishedBefore?: string; limit?: number }): Promise<FeedResult<JsonObject>> {
+  async searchNews(input: { query?: string; source?: string; publishedAfter?: string; publishedBefore?: string; limit?: number }, refresh = false): Promise<FeedResult<JsonObject>> {
     const fetchedAt = new Date();
     const limit = input.limit ?? 20;
+    if (!refresh) {
+      const after = input.publishedAfter ? new Date(campusDayRange(input.publishedAfter).start) : undefined;
+      const before = input.publishedBefore ? new Date(campusDayRange(input.publishedBefore).end) : undefined;
+      return this.cachedRecords('news', limit, fetchedAt, (item) => {
+        const text = JSON.stringify(item);
+        const published = typeof item.published === 'string' ? new Date(item.published) : undefined;
+        return fuzzyMatch(text, input.query) && fuzzyMatch(String(item.source ?? ''), input.source) &&
+          (!after || !published || published >= after) && (!before || !published || published <= before);
+      }, this.config.contentPollMs);
+    }
     try {
       const registry = this.registry();
       const prevDays = input.publishedAfter
@@ -170,7 +229,7 @@ export class SwatService {
         prevDaysToQuery: prevDays,
       });
       let records = resultData(raw).map((item) => normalizeRawRecord('news', cleanText(item.source, 300) ?? 'Around Campus', item));
-      await this.persist(records);
+      await this.persist(records, registry.news.map((source) => ({ domain: 'news', source: source.title })));
       if (input.query) records = records.filter((record) => fuzzyMatch(record.searchText, input.query));
       if (input.source) records = records.filter((record) => fuzzyMatch(record.source, input.source));
       if (input.publishedAfter) {
@@ -183,16 +242,23 @@ export class SwatService {
       }
       return makeResult(records.map(toPublicRecord), fetchedAt, registry.news.map((source) => source.title), limit);
     } catch (error) {
+      if (refresh) throw error;
       return this.recordsFallback('news', limit, fetchedAt, error, input.query ?? input.source);
     }
   }
 
-  async getTransit(input: { origin: 'swarthmore' | '30th_street' | 'media'; destination: 'swarthmore' | '30th_street' | 'media'; limit?: number }): Promise<FeedResult<JsonObject>> {
+  async getTransit(input: { origin: 'swarthmore' | '30th_street' | 'media'; destination: 'swarthmore' | '30th_street' | 'media'; limit?: number }, refresh = false): Promise<FeedResult<JsonObject>> {
     const fetchedAt = new Date();
     const limit = input.limit ?? 4;
     const stations = { swarthmore: 'Swarthmore', '30th_street': '30th%20Street%20Station', media: 'Media' } as const;
     if (input.origin === input.destination) throw new Error('Origin and destination must be different');
     const source = `${input.origin}->${input.destination}`;
+    if (!refresh) {
+      const fallback = await this.store.latestObservation('transit', source);
+      if (!fallback) return makeUnavailableResult(fetchedAt, 'transit');
+      const items = Array.isArray(fallback.payload.departures) ? fallback.payload.departures as JsonObject[] : [fallback.payload];
+      return makeCachedResult(items.slice(0, limit), fetchedAt, [source], fallback.observed_at, this.config.realtimePollMs);
+    }
     try {
       const raw = await this.client.query<unknown>('Transit', queries.transit, {
         departureStation: stations[input.origin], arrivalStation: stations[input.destination], maxResults: limit,
@@ -202,6 +268,7 @@ export class SwatService {
       await this.store.addObservation('transit', source, observation, fetchedAt);
       return makeResult(items, fetchedAt, [source], limit);
     } catch (error) {
+      if (refresh) throw error;
       const fallback = await this.store.latestObservation('transit', source);
       if (!fallback) throw error;
       const items = Array.isArray(fallback.payload.departures) ? fallback.payload.departures as JsonObject[] : [fallback.payload];
@@ -209,13 +276,22 @@ export class SwatService {
     }
   }
 
-  async getSports(input: { sport?: string; gender?: string; start?: string; end?: string; limit?: number }): Promise<FeedResult<JsonObject>> {
+  async getSports(input: { sport?: string; gender?: string; start?: string; end?: string; limit?: number }, refresh = false): Promise<FeedResult<JsonObject>> {
     const fetchedAt = new Date();
     const limit = input.limit ?? 20;
+    if (!refresh) {
+      const start = input.start ? new Date(campusDayRange(input.start).start) : undefined;
+      const end = input.end ? new Date(campusDayRange(input.end).end) : undefined;
+      return this.cachedRecords('sports', limit, fetchedAt, (item) => {
+        const text = JSON.stringify(item);
+        return fuzzyMatch(text, input.sport) && fuzzyMatch(text, input.gender) &&
+          (!start && !end || recordOverlapsRange(item, start ?? new Date(0), end ?? new Date('9999-12-31')));
+      }, this.config.contentPollMs);
+    }
     try {
       const raw = await this.client.query<unknown>('Sports', queries.sports, { count: 100 });
       let records = resultData(raw).map((item) => normalizeRawRecord('sports', 'Swarthmore Athletics', item));
-      await this.persist(records);
+      await this.persist(records, [{ domain: 'sports', source: 'Swarthmore Athletics' }]);
       if (input.sport) records = records.filter((record) => fuzzyMatch(String(record.payload.sport_title ?? record.title), input.sport));
       if (input.gender) records = records.filter((record) => fuzzyMatch(String(record.payload.gender ?? ''), input.gender));
       if (input.start || input.end) records = filterRange(
@@ -225,24 +301,29 @@ export class SwatService {
       );
       return makeResult(records.map(toPublicRecord), fetchedAt, ['Swarthmore Athletics'], limit);
     } catch (error) {
+      if (refresh) throw error;
       return this.recordsFallback('sports', limit, fetchedAt, error, input.sport ?? input.gender);
     }
   }
 
-  async getMindCandy(): Promise<FeedResult<JsonObject>> {
+  async getMindCandy(refresh = false): Promise<FeedResult<JsonObject>> {
     const fetchedAt = new Date();
+    if (!refresh) return this.cachedRecords('mind_candy', 10, fetchedAt, undefined, this.config.contentPollMs);
     try {
       const raw = await this.client.query<unknown>('MindCandy', queries.mindCandy, { maxResults: 10 });
       const records = resultData(raw).map((item) => normalizeRawRecord('mind_candy', 'The Dash', item));
-      await this.persist(records);
+      await this.persist(records, [{ domain: 'mind_candy', source: 'The Dash' }]);
       return makeResult(records.map(toPublicRecord), fetchedAt, ['The Dash'], 10);
     } catch (error) {
+      if (refresh) throw error;
       return this.recordsFallback('mind_candy', 10, fetchedAt, error);
     }
   }
 
-  async getResources(section?: string, limit = 30): Promise<FeedResult<JsonObject>> {
+  async getResources(section?: string, limit = 30, refresh = false): Promise<FeedResult<JsonObject>> {
     const fetchedAt = new Date();
+    if (!refresh) return this.cachedRecords('resources', limit, fetchedAt,
+      (item) => fuzzyMatch(JSON.stringify(item), section), this.config.contentPollMs);
     try {
       const selected = this.registry().resources.filter((item) => fuzzyMatch(item.section, section));
       const records = selected.flatMap((resource) => resource.content.map((content, index) => {
@@ -251,9 +332,10 @@ export class SwatService {
         const title = cleanText(header?.processed ?? header?.value ?? object.title, 500) ?? `${resource.section} resource ${index + 1}`;
         return normalizeRawRecord('resources', resource.section, { ...object, id: object.id ?? `${resource.section}-${index}`, title });
       }));
-      await this.persist(records);
+      await this.persist(records, selected.map((resource) => ({ domain: 'resources', source: resource.section })));
       return makeResult(records.map(toPublicRecord), fetchedAt, selected.map((item) => item.section), limit);
     } catch (error) {
+      if (refresh) throw error;
       return this.recordsFallback('resources', limit, fetchedAt, error, section);
     }
   }
@@ -275,29 +357,54 @@ export class SwatService {
 
   async syncRealtime(): Promise<void> {
     assertPollResults(await Promise.allSettled([
-      this.getWeather(7),
-      this.getTransit({ origin: 'swarthmore', destination: '30th_street', limit: 4 }),
-      this.getTransit({ origin: '30th_street', destination: 'swarthmore', limit: 4 }),
-      this.getTransit({ origin: 'swarthmore', destination: 'media', limit: 4 }),
+      this.getWeather(7, true),
+      this.getTransit({ origin: 'swarthmore', destination: '30th_street', limit: 4 }, true),
+      this.getTransit({ origin: '30th_street', destination: 'swarthmore', limit: 4 }, true),
+      this.getTransit({ origin: 'swarthmore', destination: 'media', limit: 4 }, true),
     ]));
   }
 
   async syncContent(): Promise<void> {
     const today = currentCampusDate();
     assertPollResults(await Promise.allSettled([
-      this.getHours({ date: today, limit: 100 }), this.getDining({ date: today, limit: 100 }),
-      this.searchEvents({ limit: 100 }), this.searchNews({ limit: 100 }), this.getSports({ limit: 100 }),
-      this.getMindCandy(), this.getResources(undefined, 100),
+      this.getHours({ date: today, limit: 100 }, true), this.getDining({ date: today, limit: 100 }, true),
+      this.searchEvents({ limit: 100 }, true), this.searchNews({ limit: 100 }, true), this.getSports({ limit: 100 }, true),
+      this.getMindCandy(true), this.getResources(undefined, 100, true),
     ]));
   }
 
-  private async persist(records: NormalizedRecord[]): Promise<void> {
+  private async persist(records: NormalizedRecord[], expectedSources: Array<{ domain: Domain; source: string }> = []): Promise<void> {
     const grouped = new Map<string, NormalizedRecord[]>();
+    const sourceInfo = new Map<string, { domain: Domain; source: string }>();
+    for (const expected of expectedSources) {
+      const key = `${expected.domain}\0${expected.source}`;
+      grouped.set(key, []);
+      sourceInfo.set(key, expected);
+    }
     for (const record of records) {
       const key = `${record.domain}\0${record.source}`;
       grouped.set(key, [...(grouped.get(key) ?? []), record]);
+      sourceInfo.set(key, { domain: record.domain, source: record.source });
     }
-    await Promise.all([...grouped.values()].map((items) => this.store.replaceSourceRecords(items[0]!.domain, items[0]!.source, items)));
+    await Promise.all([...grouped.entries()].map(([key, items]) => {
+      const source = sourceInfo.get(key)!;
+      return this.store.replaceSourceRecords(source.domain, source.source, items);
+    }));
+  }
+
+  private async cachedRecords(
+    domain: Domain,
+    limit: number,
+    fetchedAt: Date,
+    predicate: ((item: JsonObject) => boolean) | undefined,
+    pollIntervalMs: number,
+  ): Promise<FeedResult<JsonObject>> {
+    let items = await this.store.currentRecords(domain, Math.max(limit * 20, 500));
+    if (predicate) items = items.filter(predicate);
+    const dataAsOf = await this.store.latestRecordObservedAt(domain);
+    if (!dataAsOf) return makeUnavailableResult(fetchedAt, domain);
+    const sources = items.map((item) => typeof item.source === 'string' ? item.source : 'SwatGPT PostgreSQL cache');
+    return makeCachedResult(items, fetchedAt, sources, dataAsOf, pollIntervalMs, limit);
   }
 
   private async recordsFallback(domain: Domain, limit: number, fetchedAt: Date, error: unknown, query?: string): Promise<FeedResult<JsonObject>> {
@@ -326,11 +433,48 @@ function filterRange(records: NormalizedRecord[], start: Date, end: Date): Norma
   });
 }
 
+function recordOverlapsRange(item: JsonObject, start: Date, end: Date): boolean {
+  const rawStart = typeof item.start === 'string' ? item.start : typeof item.published === 'string' ? item.published : undefined;
+  if (!rawStart) return true;
+  const itemStart = new Date(rawStart);
+  if (Number.isNaN(itemStart.getTime())) return true;
+  const itemEnd = typeof item.end === 'string' ? new Date(item.end) : itemStart;
+  const effectiveEnd = Number.isNaN(itemEnd.getTime()) ? itemStart : itemEnd;
+  return itemStart <= end && effectiveEnd >= start;
+}
+
 function makeResult<T>(items: T[], fetchedAt: Date, sources: string[], limit: number, dataAsOf = fetchedAt.toISOString()): FeedResult<T> {
   const bounded = items.slice(0, limit);
   return { items: bounded, meta: {
     source: [...new Set(sources)], fetched_at: fetchedAt.toISOString(), data_as_of: dataAsOf,
     stale: false, total: items.length, returned: bounded.length, truncated: items.length > bounded.length,
+  } };
+}
+
+function makeCachedResult<T>(
+  items: T[],
+  fetchedAt: Date,
+  sources: string[],
+  dataAsOf: string,
+  pollIntervalMs: number,
+  limit = items.length,
+): FeedResult<T> {
+  const bounded = items.slice(0, limit);
+  const cacheAgeMs = fetchedAt.getTime() - new Date(dataAsOf).getTime();
+  const stale = !Number.isFinite(cacheAgeMs) || cacheAgeMs > pollIntervalMs * 2;
+  return { items: bounded, meta: {
+    source: [...new Set(sources.length ? sources : ['SwatGPT PostgreSQL cache'])],
+    fetched_at: fetchedAt.toISOString(), data_as_of: dataAsOf, stale,
+    total: items.length, returned: bounded.length, truncated: items.length > bounded.length,
+    ...(stale ? { warning: `PostgreSQL cache is older than ${Math.round(pollIntervalMs * 2 / 1000)} seconds; the background Dash refresh may be failing.` } : {}),
+  } };
+}
+
+function makeUnavailableResult(fetchedAt: Date, domain: Domain): FeedResult<JsonObject> {
+  return { items: [], meta: {
+    source: ['SwatGPT PostgreSQL cache'], fetched_at: fetchedAt.toISOString(),
+    data_as_of: fetchedAt.toISOString(), stale: true, total: 0, returned: 0, truncated: false,
+    warning: `No cached ${domain} data is available yet; background synchronization will retry without blocking this chat.`,
   } };
 }
 

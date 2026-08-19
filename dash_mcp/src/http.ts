@@ -31,7 +31,7 @@ export class SwatHttpServer {
       const database = await this.service.store.ping();
       let registry = false;
       try { registry = this.service.registry().hashes.length > 0; } catch { registry = false; }
-      res.status(database && registry ? 200 : 503).json({ status: database && registry ? 'ready' : 'not-ready', database, registry });
+      res.status(database ? 200 : 503).json({ status: database ? 'ready' : 'not-ready', database, registry });
     });
 
     app.all('/mcp', async (req, res) => {

@@ -13,7 +13,7 @@ export class PollScheduler {
       log('info', 'Background polling is disabled');
       return;
     }
-    this.schedule('alerts', this.config.alertPollMs, () => this.service.getAlerts(100).then(() => undefined));
+    this.schedule('alerts', this.config.alertPollMs, () => this.service.getAlerts(100, true).then(() => undefined));
     this.schedule('realtime', this.config.realtimePollMs, () => this.service.syncRealtime());
     this.schedule('content', this.config.contentPollMs, () => this.service.syncContent());
     this.schedule('configuration', this.config.configPollMs, async () => { await this.service.refreshRegistry(); });
@@ -45,7 +45,15 @@ export class PollScheduler {
         }
       }
     };
-    const initialDelay = name === 'configuration' ? intervalMs : 250 + Math.floor(Math.random() * 1_000);
+    let initialDelay = 250 + Math.floor(Math.random() * 1_000);
+    if (name === 'configuration') {
+      try {
+        this.service.registry();
+        initialDelay = intervalMs;
+      } catch {
+        // Startup remains available from PostgreSQL; retry missing discovery promptly.
+      }
+    }
     const timer = setTimeout(run, initialDelay);
     this.timers.set(name, timer);
   }

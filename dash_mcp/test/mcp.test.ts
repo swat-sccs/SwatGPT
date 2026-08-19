@@ -32,4 +32,26 @@ describe('MCP protocol surface', () => {
     await client.close();
     await server.close();
   });
+
+  it('turns a stuck handler into a bounded MCP error response', async () => {
+    const service = {
+      config: { mcpToolTimeoutMs: 20 },
+      getMindCandy: vi.fn().mockReturnValue(new Promise(() => undefined)),
+    } as unknown as SwatService;
+    const server = createMcpServer(service);
+    const client = new Client({ name: 'swatgpt-test', version: '1.0.0' });
+    const [clientTransport, serverTransport] = InMemoryTransport.createLinkedPair();
+
+    await server.connect(serverTransport);
+    await client.connect(clientTransport);
+    const result = await client.callTool({ name: 'get_mind_candy', arguments: {} });
+
+    expect(result.isError).toBe(true);
+    expect(result.content).toEqual(expect.arrayContaining([
+      expect.objectContaining({ text: 'MCP tool timed out after 20ms' }),
+    ]));
+
+    await client.close();
+    await server.close();
+  });
 });

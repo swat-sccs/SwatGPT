@@ -9,6 +9,7 @@ const limit = (fallback: number, max = 50) => z.number().int().min(1).max(max).d
 const annotations = { readOnlyHint: true, destructiveHint: false, idempotentHint: true, openWorldHint: true } as const;
 
 export function createMcpServer(service: SwatService): McpServer {
+  const toolTimeoutMs = service.config?.mcpToolTimeoutMs ?? 5_000;
   const server = new McpServer({ name: 'swatgpt', version: '0.1.0' }, {
     instructions: [
       'Use these tools for public Swarthmore campus information.',
@@ -20,10 +21,10 @@ export function createMcpServer(service: SwatService): McpServer {
   });
 
   register(server, 'get_alerts', 'Get current critical, application, and calendar announcements from the Swarthmore Dash.',
-    z.object({ limit: limit(20) }), ({ limit }) => service.getAlerts(limit));
+    z.object({ limit: limit(20) }), ({ limit }) => service.getAlerts(limit), toolTimeoutMs);
 
   register(server, 'get_weather', 'Get current Swarthmore weather and a bounded forecast.',
-    z.object({ days: z.number().int().min(1).max(7).default(3) }), ({ days }) => service.getWeather(days));
+    z.object({ days: z.number().int().min(1).max(7).default(3) }), ({ days }) => service.getWeather(days), toolTimeoutMs);
 
   register(server, 'get_campus_hours', 'Get campus hours for a date. Place and category are optional fuzzy filters; omit them to discover available places.',
     z.object({
@@ -31,7 +32,7 @@ export function createMcpServer(service: SwatService): McpServer {
       category: z.string().trim().min(1).max(100).optional(),
       date,
       limit: limit(30),
-    }), (input) => service.getHours(input));
+    }), (input) => service.getHours(input), toolTimeoutMs);
 
   register(server, 'get_dining_menus', 'Get public dining menus and dining-calendar entries by location, date, meal, or text query.',
     z.object({
@@ -40,7 +41,7 @@ export function createMcpServer(service: SwatService): McpServer {
       meal: z.string().trim().min(1).max(100).optional(),
       query: z.string().trim().min(1).max(200).optional(),
       limit: limit(30),
-    }), (input) => service.getDining(input));
+    }), (input) => service.getDining(input), toolTimeoutMs);
 
   register(server, 'search_campus_events', 'Search SwatCentral campus events over a date window.',
     z.object({
@@ -48,7 +49,7 @@ export function createMcpServer(service: SwatService): McpServer {
       start: date,
       end: date,
       limit: limit(20),
-    }), (input) => service.searchEvents(input));
+    }), (input) => service.searchEvents(input), toolTimeoutMs);
 
   register(server, 'search_campus_news', 'Search public Around Campus RSS posts by text, source, or publication window.',
     z.object({
@@ -57,14 +58,14 @@ export function createMcpServer(service: SwatService): McpServer {
       publishedAfter: date,
       publishedBefore: date,
       limit: limit(20),
-    }), (input) => service.searchNews(input));
+    }), (input) => service.searchNews(input), toolTimeoutMs);
 
   register(server, 'get_transit_departures', 'Get live SEPTA departures among Swarthmore, 30th Street Station, and Media.',
     z.object({
       origin: z.enum(['swarthmore', '30th_street', 'media']),
       destination: z.enum(['swarthmore', '30th_street', 'media']),
       limit: z.number().int().min(1).max(10).default(4),
-    }), (input) => service.getTransit(input));
+    }), (input) => service.getTransit(input), toolTimeoutMs);
 
   register(server, 'get_sports', 'Get Swarthmore Athletics scores and scheduled contests with optional filters.',
     z.object({
@@ -73,14 +74,14 @@ export function createMcpServer(service: SwatService): McpServer {
       start: date,
       end: date,
       limit: limit(20),
-    }), (input) => service.getSports(input));
+    }), (input) => service.getSports(input), toolTimeoutMs);
 
   register(server, 'get_mind_candy', 'Get the current public Mind Candy feature from the Dash.',
-    z.object({}), () => service.getMindCandy());
+    z.object({}), () => service.getMindCandy(), toolTimeoutMs);
 
   register(server, 'get_campus_resources', 'Get informational links and notices grouped by Dash section.',
     z.object({ section: z.string().trim().min(1).max(100).optional(), limit: limit(30) }),
-    ({ section, limit }) => service.getResources(section, limit));
+    ({ section, limit }) => service.getResources(section, limit), toolTimeoutMs);
 
   register(server, 'search_archive', 'Search data versions observed by SwatGPT. The archive starts when this server is first deployed.',
     z.object({
@@ -94,10 +95,10 @@ export function createMcpServer(service: SwatService): McpServer {
       const from = observed_from ?? new Date(new Date(to).getTime() - 7 * 86_400_000).toISOString();
       if (new Date(from) > new Date(to)) throw new Error('observed_from must not be after observed_to');
       return service.searchArchive({ domain, query, observedFrom: from, observedTo: to, limit });
-    });
+    }, toolTimeoutMs);
 
   register(server, 'get_data_status', 'Get last synchronization status for diagnosing freshness or missing data.',
-    z.object({}), () => service.getDataStatus());
+    z.object({}), () => service.getDataStatus(), toolTimeoutMs);
 
   return server;
 }
@@ -108,13 +109,17 @@ function register<Schema extends z.ZodType>(
   description: string,
   inputSchema: Schema,
   handler: (input: z.infer<Schema>) => Promise<unknown>,
+  timeoutMs: number,
 ) {
   // The SDK's overloads preserve each concrete Zod shape; this shared wrapper
   // validates explicitly before dispatching so all tools get identical errors.
   const registerTool = server.registerTool.bind(server) as (...args: unknown[]) => unknown;
   registerTool(name, { title: humanize(name), description, inputSchema, annotations }, async (input: unknown) => {
     try {
-      const result = await handler(inputSchema.parse(input) as z.infer<Schema>);
+      const result = await withTimeout(
+        handler(inputSchema.parse(input) as z.infer<Schema>),
+        timeoutMs,
+      );
       return {
         content: [{ type: 'text' as const, text: JSON.stringify(result) }],
         structuredContent: result as Record<string, unknown>,
@@ -124,6 +129,18 @@ function register<Schema extends z.ZodType>(
       return { isError: true, content: [{ type: 'text' as const, text: message }] };
     }
   });
+}
+
+async function withTimeout<T>(promise: Promise<T>, timeoutMs: number): Promise<T> {
+  let timer: NodeJS.Timeout | undefined;
+  const timeout = new Promise<never>((_resolve, reject) => {
+    timer = setTimeout(() => reject(new Error(`MCP tool timed out after ${timeoutMs}ms`)), timeoutMs);
+  });
+  try {
+    return await Promise.race([promise, timeout]);
+  } finally {
+    if (timer) clearTimeout(timer);
+  }
 }
 
 function humanize(name: string): string {

@@ -85,6 +85,10 @@ export class DashClient {
         }
       } catch (error) {
         lastError = error instanceof Error ? error : new Error(String(error));
+        if (lastError.name === 'AbortError') {
+          lastError = new Error(`Dash request timed out after ${this.config.upstreamTimeoutMs}ms`);
+          lastError.name = 'TimeoutError';
+        }
         if (attempt === this.config.upstreamRetries || (lastError.name !== 'AbortError' && /HTTP 4\d\d/.test(lastError.message))) throw lastError;
       } finally {
         clearTimeout(timer);

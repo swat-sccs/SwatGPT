@@ -71,7 +71,7 @@ mcpServers:
     description: 'Current and historical info from the The Dash'
     type: streamable-http
     url: 'http://swatgpt-mcp:3000/mcp'
-    timeout: 30000
+    timeout: 7000
     startup: true
     chatMenu: false
     serverInstructions: true

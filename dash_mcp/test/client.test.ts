@@ -25,4 +25,15 @@ describe('Dash GraphQL client', () => {
     const config = loadConfig({ NODE_ENV: 'test', DATABASE_URL: 'postgres://unused', POLLING_ENABLED: 'false', UPSTREAM_RETRIES: '0' });
     await expect(new DashClient(config, fetchMock).query('Test', 'query Test { result: test }')).rejects.toThrow('bad query');
   });
+
+  it('reports an actionable timeout instead of the generic abort message', async () => {
+    const fetchMock = vi.fn<typeof fetch>().mockRejectedValue(new DOMException('This operation was aborted', 'AbortError'));
+    const config = loadConfig({
+      NODE_ENV: 'test', DATABASE_URL: 'postgres://unused', POLLING_ENABLED: 'false',
+      UPSTREAM_TIMEOUT_MS: '25', UPSTREAM_RETRIES: '0',
+    });
+
+    await expect(new DashClient(config, fetchMock).query('Test', 'query Test { result: test }'))
+      .rejects.toThrow('Dash request timed out after 25ms');
+  });
 });

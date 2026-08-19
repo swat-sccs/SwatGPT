@@ -6,7 +6,9 @@ SwatGPT MCP is an unofficial, read-only Model Context Protocol server for public
 
 The server discovers current Dash configuration and exposes alerts, weather, campus hours, dining menus, events, news, SEPTA departures, sports, Mind Candy, campus resources, archive search, and synchronization status. It does not expose arbitrary GraphQL queries or private Dash sessions.
 
-Each response includes source, retrieval time, data time, truncation, and stale-data metadata. Historical entity versions are retained indefinitely; high-frequency weather and transit observations default to 30 days.
+Chat-facing tools read the latest PostgreSQL snapshot and never wait for The Dash. Background polling refreshes that snapshot; upstream timeouts, retries, and even an outage during MCP startup therefore cannot hold a LibreChat response open. Each response includes source, retrieval time, data time, truncation, and stale-data metadata. Historical entity versions are retained indefinitely; high-frequency weather and transit observations default to 30 days.
+
+The container probes its HTTP health endpoint every 30 seconds. After three consecutive failed or timed-out probes, its watchdog force-terminates the unresponsive server process; Compose's `restart: unless-stopped` policy then restarts it. `HEALTHCHECK_PROBE_TIMEOUT_MS` and `HEALTHCHECK_FAILURE_THRESHOLD` can tune the 4-second probe timeout and three-failure threshold.
 
 ## Quick start
 

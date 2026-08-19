@@ -113,6 +113,10 @@ export class PgStore {
     const timestamp = observedAt.toISOString();
     try {
       await client.query('BEGIN');
+      await client.query(
+        'UPDATE source_records SET active=false WHERE domain=$1 AND source=$2 AND active=true',
+        [domain, source],
+      );
       for (const record of records) {
         const hash = contentHash(record.payload);
         const previous = await client.query<{ id: string; payload_hash: string }>(

@@ -9,7 +9,7 @@ mcpServers:
     description: 'Read-only current and historical public data from the Swarthmore Dash.'
     type: streamable-http
     url: 'http://swatgpt-mcp:3000/mcp'
-    timeout: 30000
+    timeout: 7000
     startup: true
     chatMenu: false
     serverInstructions: true

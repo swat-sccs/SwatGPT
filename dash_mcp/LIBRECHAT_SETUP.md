@@ -21,7 +21,7 @@ SWATGPT_POSTGRES_USER=swatgpt
 SWATGPT_POSTGRES_PASSWORD=replace-with-a-long-random-password
 ```
 
-Optional polling overrides are `SWATGPT_ALERT_POLL_INTERVAL_SECONDS`, `SWATGPT_REALTIME_POLL_INTERVAL_SECONDS`, `SWATGPT_CONTENT_POLL_INTERVAL_SECONDS`, `SWATGPT_CONFIG_POLL_INTERVAL_SECONDS`, and `SWATGPT_OBSERVATION_RETENTION_DAYS`.
+Optional polling overrides are `SWATGPT_ALERT_POLL_INTERVAL_SECONDS`, `SWATGPT_REALTIME_POLL_INTERVAL_SECONDS`, `SWATGPT_CONTENT_POLL_INTERVAL_SECONDS`, `SWATGPT_CONFIG_POLL_INTERVAL_SECONDS`, and `SWATGPT_OBSERVATION_RETENTION_DAYS`. `SWATGPT_MCP_TOOL_TIMEOUT_MS` bounds every tool call at 5 seconds by default; normal snapshot reads should complete much faster. The container watchdog restarts an unresponsive MCP after three failed 30-second health probes; tune it with `SWATGPT_HEALTHCHECK_PROBE_TIMEOUT_MS` and `SWATGPT_HEALTHCHECK_FAILURE_THRESHOLD` if needed.
 
 ## 2. Add the Compose sidecars
 
@@ -65,7 +65,7 @@ mcpServers:
     description: 'Read-only current and historical public data from the Swarthmore Dash.'
     type: streamable-http
     url: 'http://swatgpt-mcp:3000/mcp'
-    timeout: 30000
+    timeout: 7000
     startup: true
     chatMenu: false
     serverInstructions: true
@@ -102,10 +102,11 @@ Useful verification prompts:
 
 - **MCP target blocked / SSRF error:** Confirm `mcpSettings.allowedAddresses` contains exactly `swatgpt-mcp:3000`, then restart LibreChat.
 - **Name not resolved:** Confirm LibreChat and `swatgpt-mcp` were launched as one Compose project and appear on the same network with `docker compose ps`.
-- **MCP initialization fails:** Inspect `docker compose logs swatgpt-mcp`; the service waits for PostgreSQL and Dash configuration discovery before becoming ready.
+- **MCP initialization fails:** Inspect `docker compose logs swatgpt-mcp`; the service requires PostgreSQL, but a Dash configuration outage only produces a warning while cached tools remain available.
 - **Database authentication fails:** The password embedded in the generated `DATABASE_URL` must match `SWATGPT_POSTGRES_PASSWORD`. If you changed credentials after the PostgreSQL volume was initialized, update the database role or recreate only the SwatGPT volume if losing history is acceptable.
 - **No archive results:** History begins at the first successful poll; the HAR is not imported as production history.
-- **Stale response:** The live Dash request failed and the tool deliberately returned the latest archived value. Check upstream connectivity and the response's `warning` field.
+- **Stale response:** The PostgreSQL snapshot is older than two polling intervals. The tool still responds immediately; check the background poll errors and the response's `warning` field.
+- **Dash timeout/retry warning:** This comes from a background refresh. It no longer runs in the chat request path and cannot delay the MCP tool response.
 - **Tools missing after a YAML edit:** Restart LibreChat or reinitialize the server from its MCP settings panel.
 
 ## Operations
