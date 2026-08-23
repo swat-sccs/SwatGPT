@@ -21,10 +21,10 @@ services:
       - PROXY=${PROXY:-}
       - HTTP_PROXY=${HTTP_PROXY:-}
       - HTTPS_PROXY=${HTTPS_PROXY:-}
-      - NO_PROXY=${NO_PROXY:-localhost,127.0.0.1,::1},${no_proxy:-},mongodb,chat-mongodb,meilisearch,chat-meilisearch,qdrant,host.docker.internal
+      - NO_PROXY=${NO_PROXY:-localhost,127.0.0.1,::1},${no_proxy:-},mongodb,chat-mongodb,meilisearch,chat-meilisearch,qdrant,swatgpt-mcp,swatgpt-postgres,host.docker.internal
       - http_proxy=${http_proxy:-}
       - https_proxy=${https_proxy:-}
-      - no_proxy=${no_proxy:-localhost,127.0.0.1,::1},${NO_PROXY:-},mongodb,chat-mongodb,meilisearch,chat-meilisearch,qdrant,host.docker.internal
+      - no_proxy=${no_proxy:-localhost,127.0.0.1,::1},${NO_PROXY:-},mongodb,chat-mongodb,meilisearch,chat-meilisearch,qdrant,swatgpt-mcp,swatgpt-postgres,host.docker.internal
     volumes:
       - type: bind
         source: ./.env

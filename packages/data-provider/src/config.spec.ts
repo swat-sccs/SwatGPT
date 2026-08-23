@@ -410,6 +410,7 @@ describe('allowedAddressesSchema', () => {
       ['LOCALHOST:11434', 'uppercase hostname with port (preserved as-is by Zod)'],
       ['ollama.internal:11434', 'private-tld hostname with port'],
       ['host.docker.internal:11434', 'multi-segment hostname with port'],
+      ['swatgpt-mcp:3000', 'SwatGPT Dash MCP compose hostname with port'],
       ['10.0.0.5:11434', 'RFC 1918 10.x with port'],
       ['192.168.1.1:8080', 'RFC 1918 192.168.x with port'],
       ['172.16.0.1:443', 'RFC 1918 172.16.x with port'],

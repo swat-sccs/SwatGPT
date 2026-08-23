@@ -21,6 +21,13 @@ jobs:
           git fetch "https://x-access-token:${{ secrets.GITHUB_TOKEN }}@github.com/${{ github.repository }}.git" "+refs/heads/main:refs/remotes/origin/main"
           git reset --hard "${{ github.sha }}" || git reset --hard origin/main
 
+      - name: Require Dash MCP database password
+        run: |
+          if ! grep -qE '^SWATGPT_POSTGRES_PASSWORD=.+' .env; then
+            echo "SWATGPT_POSTGRES_PASSWORD is missing from .env; compose cannot start swatgpt-postgres/swatgpt-mcp"
+            exit 1
+          fi
+
       - name: Build app and Dash MCP images
         run: docker compose build api swatgpt-mcp
 
@@ -29,15 +36,47 @@ jobs:
 
       - name: Health check
         run: |
+          fail() {
+            echo "$1"
+            docker compose ps || true
+            docker compose logs --tail=80 api swatgpt-mcp swatgpt-postgres || true
+            exit 1
+          }
+
           code=000
           for i in $(seq 1 30); do
             code=$(curl -s -o /dev/null -w '%{http_code}' http://localhost:3080/) || true
             if [ "$code" = "200" ]; then
-              echo "healthy after ~$((i * 5))s"
-              exit 0
+              echo "LibreChat healthy after ~$((i * 5))s"
+              break
             fi
             sleep 5
           done
-          echo "health check failed (last status: $code)"
-          docker logs LibreChat --tail 50
-          exit 1
+          if [ "$code" != "200" ]; then
+            fail "LibreChat health check failed (last status: $code)"
+          fi
+
+          mcp_status=$(docker inspect --format='{{if .State.Health}}{{.State.Health.Status}}{{else}}{{.State.Status}}{{end}}' "$(docker compose ps -q swatgpt-mcp)")
+          if [ "$mcp_status" != "healthy" ]; then
+            fail "swatgpt-mcp is ${mcp_status:-missing}"
+          fi
+
+          docker compose exec -T api node -e "
+            fetch('http://swatgpt-mcp:3000/healthz').then(async (res) => {
+              const body = await res.text();
+              if (!res.ok) {
+                console.error(body);
+                process.exit(1);
+              }
+              console.log(body);
+            }).catch((error) => {
+              console.error(error);
+              process.exit(1);
+            });
+          " || fail "API container cannot reach http://swatgpt-mcp:3000/healthz"
+
+          last_mcp_init=$(docker compose logs api | grep -E 'Initialized with [0-9]+ configured server' | tail -1 || true)
+          echo "${last_mcp_init:-no MCP init log yet}"
+          if echo "$last_mcp_init" | grep -Eq 'and 0 tools'; then
+            fail "LibreChat started with the Dash MCP server configured but 0 tools"
+          fi

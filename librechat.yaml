@@ -72,6 +72,7 @@ mcpServers:
     type: streamable-http
     url: 'http://swatgpt-mcp:3000/mcp'
     timeout: 7000
+    initTimeout: 10000
     startup: true
     chatMenu: false
     serverInstructions: true

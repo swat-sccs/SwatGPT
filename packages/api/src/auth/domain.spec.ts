@@ -1624,6 +1624,12 @@ describe('SSRF allowedAddresses exemption', () => {
   });
 
   describe('isMCPDomainAllowed', () => {
+    it('allows the SwatGPT Dash sidecar at swatgpt-mcp:3000 when listed in allowedAddresses', async () => {
+      const config = { type: 'streamable-http', url: 'http://swatgpt-mcp:3000/mcp' };
+      expect(isSSRFTarget('swatgpt-mcp', ['swatgpt-mcp:3000'], '3000')).toBe(false);
+      expect(await isMCPDomainAllowed(config, null, ['swatgpt-mcp:3000'])).toBe(true);
+    });
+
     it('exempts a private-IP MCP server when its IP is in allowedAddresses', async () => {
       expect(
         await isMCPDomainAllowed({ url: 'https://10.0.0.5:8443/mcp' }, null, ['10.0.0.5:8443']),

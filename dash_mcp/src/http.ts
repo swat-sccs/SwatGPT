@@ -36,7 +36,7 @@ export class SwatHttpServer {
 
     app.all('/mcp', async (req, res) => {
       try {
-        const sessionId = typeof req.headers['mcp-session-id'] === 'string' ? req.headers['mcp-session-id'] : undefined;
+        const sessionId = headerString(req.headers['mcp-session-id']);
         if (sessionId) {
           const session = this.sessions.get(sessionId);
           if (!session) {
@@ -46,15 +46,15 @@ export class SwatHttpServer {
           await session.transport.handleRequest(req, res, req.body);
           return;
         }
-        if (req.method !== 'POST' || !isInitializeRequest(req.body)) {
+        if (req.method !== 'POST' || !isMcpInitializeRequest(req.body)) {
           res.status(400).json({ jsonrpc: '2.0', error: { code: -32000, message: 'MCP initialization required' }, id: null });
           return;
         }
 
-        let transport!: NodeStreamableHTTPServerTransport;
+        const nextSessionId = randomUUID();
         const mcpServer = createMcpServer(this.service);
-        transport = new NodeStreamableHTTPServerTransport({
-          sessionIdGenerator: randomUUID,
+        const transport = new NodeStreamableHTTPServerTransport({
+          sessionIdGenerator: () => nextSessionId,
           onsessioninitialized: (id) => {
             this.sessions.set(id, { transport, server: mcpServer });
             log('info', 'MCP session initialized', { sessionId: id });
@@ -65,8 +65,16 @@ export class SwatHttpServer {
             log('info', 'MCP session closed', { sessionId: id });
           },
         });
-        await mcpServer.connect(transport);
-        await transport.handleRequest(req, res, req.body);
+        this.sessions.set(nextSessionId, { transport, server: mcpServer });
+        try {
+          await mcpServer.connect(transport);
+          await transport.handleRequest(req, res, req.body);
+        } catch (error) {
+          this.sessions.delete(nextSessionId);
+          await transport.close().catch(() => undefined);
+          await mcpServer.close().catch(() => undefined);
+          throw error;
+        }
       } catch (error) {
         log('error', 'MCP HTTP request failed', { error: error instanceof Error ? error.message : String(error) });
         if (!res.headersSent) res.status(500).json({ jsonrpc: '2.0', error: { code: -32603, message: 'Internal server error' }, id: null });
@@ -88,4 +96,15 @@ export class SwatHttpServer {
     this.sessions.clear();
     if (this.httpServer) await new Promise<void>((resolve, reject) => this.httpServer!.close((error) => error ? reject(error) : resolve()));
   }
+}
+
+function headerString(value: string | string[] | undefined): string | undefined {
+  if (typeof value === 'string' && value.length > 0) return value;
+  if (Array.isArray(value)) return value.find((item) => typeof item === 'string' && item.length > 0);
+  return undefined;
+}
+
+function isMcpInitializeRequest(body: unknown): boolean {
+  if (isInitializeRequest(body)) return true;
+  return Boolean(body && typeof body === 'object' && (body as { method?: unknown }).method === 'initialize');
 }
