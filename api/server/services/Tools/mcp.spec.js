@@ -6,6 +6,8 @@ const mockGetGraphApiToken = jest.fn();
 const mockUpdateMCPServerTools = jest.fn();
 const mockGetMCPToolsCacheGeneration = jest.fn().mockResolvedValue('generation-current');
 const mockGetToolPublicationGeneration = jest.fn().mockReturnValue('generation-current');
+const mockGetNextAppToolsPublicationRevision = jest.fn();
+const mockIsAppServerConfig = jest.fn().mockResolvedValue(false);
 
 jest.mock('~/config', () => ({
   getMCPManager: jest.fn(() => ({
@@ -13,7 +15,10 @@ jest.mock('~/config', () => ({
     discoverServerTools: mockDiscoverServerTools,
     getToolPublicationGeneration: mockGetToolPublicationGeneration,
   })),
-  getMCPServersRegistry: jest.fn(() => ({ getServerConfig: jest.fn() })),
+  getMCPServersRegistry: jest.fn(() => ({
+    getServerConfig: jest.fn(),
+    isAppServerConfig: mockIsAppServerConfig,
+  })),
   getFlowStateManager: jest.fn(() => ({})),
 }));
 jest.mock('~/models', () => ({
@@ -25,6 +30,7 @@ jest.mock('~/models', () => ({
 jest.mock('~/server/services/Config', () => ({
   updateMCPServerTools: mockUpdateMCPServerTools,
   getMCPToolsCacheGeneration: mockGetMCPToolsCacheGeneration,
+  getNextAppToolsPublicationRevision: mockGetNextAppToolsPublicationRevision,
 }));
 jest.mock('~/server/services/GraphTokenService', () => ({
   getGraphApiToken: mockGetGraphApiToken,
@@ -49,6 +55,7 @@ describe('reinitMCPServer — customUserVars gating (issue #10969)', () => {
   beforeEach(() => {
     jest.clearAllMocks();
     mockUpdateMCPServerTools.mockResolvedValue({});
+    mockIsAppServerConfig.mockResolvedValue(false);
   });
 
   it('does not connect and exposes no tools when a required customUserVar is unset', async () => {
@@ -122,6 +129,33 @@ describe('reinitMCPServer — customUserVars gating (issue #10969)', () => {
       tools: [],
       serverConfig: { type: 'streamable-http', url: 'https://thingy.example.com/mcp' },
       publicationGeneration: 'generation-current',
+    });
+  });
+
+  it('reserves and publishes an ordered revision when republishing an app-shared server', async () => {
+    const appServerConfig = { type: 'streamable-http', url: 'https://thingy.example.com/mcp' };
+    mockIsAppServerConfig.mockResolvedValue(true);
+    mockGetNextAppToolsPublicationRevision.mockResolvedValue('42');
+    mockGetConnection.mockResolvedValue({ fetchTools: jest.fn().mockResolvedValue([]) });
+
+    await reinitMCPServer({
+      user,
+      serverName,
+      serverConfig: appServerConfig,
+      userMCPAuthMap: undefined,
+    });
+
+    expect(mockGetNextAppToolsPublicationRevision).toHaveBeenCalledWith(
+      serverName,
+      expect.any(String),
+    );
+    expect(mockUpdateMCPServerTools).toHaveBeenCalledWith({
+      userId: user.id,
+      serverName,
+      tools: [],
+      serverConfig: appServerConfig,
+      publicationGeneration: 'generation-current',
+      publicationRevision: '42',
     });
   });
 

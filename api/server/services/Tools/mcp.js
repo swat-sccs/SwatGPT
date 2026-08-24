@@ -1,6 +1,7 @@
 const { logger } = require('@librechat/data-schemas');
 const {
   getMissingCustomUserVars,
+  getMCPAppToolsPublicationGeneration,
   requiresEphemeralUserConnection,
   getMissingRuntimeBodyPlaceholderFields,
 } = require('@librechat/api');
@@ -10,7 +11,11 @@ const { findToken, createToken, updateToken, deleteTokens } = require('~/models'
 const { getGraphApiToken } = require('~/server/services/GraphTokenService');
 const { exchangeOboToken } = require('~/server/services/OboTokenService');
 const { createOboTrustChecker } = require('~/server/services/OboPolicyService');
-const { getMCPToolsCacheGeneration, updateMCPServerTools } = require('~/server/services/Config');
+const {
+  getMCPToolsCacheGeneration,
+  getNextAppToolsPublicationRevision,
+  updateMCPServerTools,
+} = require('~/server/services/Config');
 const { getLogStores } = require('~/cache');
 
 const MCP_REINITIALIZE_FAILURE_REASONS = {
@@ -66,6 +71,7 @@ async function reinitMCPServer({
   let oauthExpiresAt;
   let ephemeralServer = false;
   let publicationGeneration;
+  let publicationRevision;
 
   try {
     const registry = getMCPServersRegistry();
@@ -299,6 +305,16 @@ async function reinitMCPServer({
       }
     }
 
+    if (tools && serverConfig && !ephemeralServer) {
+      const appSharedServer = await registry.isAppServerConfig(serverName, serverConfig);
+      if (appSharedServer) {
+        publicationRevision = await getNextAppToolsPublicationRevision(
+          serverName,
+          getMCPAppToolsPublicationGeneration(serverConfig),
+        );
+      }
+    }
+
     if (tools) {
       availableTools = await updateMCPServerTools({
         userId: user.id,
@@ -306,6 +322,7 @@ async function reinitMCPServer({
         tools,
         serverConfig,
         ...(publicationGeneration && { publicationGeneration }),
+        ...(publicationRevision && { publicationRevision }),
       });
       if (availableTools == null) {
         tools = null;
