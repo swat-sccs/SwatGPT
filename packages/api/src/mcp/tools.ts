@@ -44,6 +44,10 @@ export interface MCPToolCacheDeps {
   getServerConfig: (serverName: string, userId?: string) => Promise<ParsedServerConfig | undefined>;
   getAllServerConfigs?: () => Promise<Record<string, ParsedServerConfig>>;
   isAppServerConfig?: (serverName: string, effectiveConfig: ParsedServerConfig) => Promise<boolean>;
+  getNextAppToolsPublicationRevision?: (
+    serverName: string,
+    configGeneration: string,
+  ) => Promise<string>;
 }
 
 export interface MCPToolCacheService {
@@ -94,6 +98,7 @@ export function createMCPToolCacheService(deps: MCPToolCacheDeps): MCPToolCacheS
     getServerConfig,
     getAllServerConfigs,
     isAppServerConfig,
+    getNextAppToolsPublicationRevision,
   } = deps;
 
   async function writeCachedTools(
@@ -372,19 +377,30 @@ export function createMCPToolCacheService(deps: MCPToolCacheDeps): MCPToolCacheS
         logger.debug(`[MCP Cache] Skipped unaddressed app-level publication for ${serverName}`);
         return false;
       }
-      if (!publicationRevision) {
-        logger.debug(`[MCP Cache] Skipped unordered app-level publication for ${serverName}`);
+      /** Recovery paths (e.g. reinitialize after the cache TTL lapses) fetch a live
+       *  tool list but carry no ordered revision. The snapshot they hold is the
+       *  newest by construction, so mint the next revision for it — otherwise the
+       *  write is refused and an expired app-level cache can never repopulate
+       *  until the process restarts. */
+      let orderedRevision = publicationRevision;
+      if (!orderedRevision && getNextAppToolsPublicationRevision) {
+        orderedRevision = await getNextAppToolsPublicationRevision(serverName, configGeneration);
+      }
+      if (!orderedRevision) {
+        logger.warn(
+          `[MCP Cache] Skipped unordered app-level publication for ${serverName}; its cached tools cannot be refreshed until restart`,
+        );
         return false;
       }
       const replaced = await setCachedAppServerTools(
         serverName,
         configGeneration,
         serverTools,
-        publicationRevision,
+        orderedRevision,
       );
       if (replaced === false) {
         logger.debug(
-          `[MCP Cache] Ignored superseded app-level tools for ${serverName} at revision ${publicationRevision ?? '0'}`,
+          `[MCP Cache] Ignored superseded app-level tools for ${serverName} at revision ${orderedRevision}`,
         );
         return false;
       }

@@ -171,6 +171,50 @@ describe('createMCPToolCacheService', () => {
       expect(deps.setCachedAppServerTools).not.toHaveBeenCalled();
     });
 
+    it('mints the next ordered revision when a recovery publication provides none', async () => {
+      const setCachedAppServerTools = jest.fn().mockResolvedValue(true);
+      const getNextAppToolsPublicationRevision = jest.fn().mockResolvedValue('7');
+      const deps = createMockDeps({ setCachedAppServerTools, getNextAppToolsPublicationRevision });
+
+      await expect(
+        createMCPToolCacheService(deps).replaceAppServerTools({
+          serverName: 'dynamic',
+          serverTools: {},
+          publicationGeneration: 'config-generation',
+        }),
+      ).resolves.toBe(true);
+
+      expect(getNextAppToolsPublicationRevision).toHaveBeenCalledWith(
+        'dynamic',
+        'config-generation',
+      );
+      expect(setCachedAppServerTools).toHaveBeenCalledWith('dynamic', 'config-generation', {}, '7');
+    });
+
+    it('repopulates an expired app-level cache from the reinitialize path', async () => {
+      const setCachedAppServerTools = jest.fn().mockResolvedValue(true);
+      const getNextAppToolsPublicationRevision = jest.fn().mockResolvedValue('3');
+      const deps = createMockDeps({
+        getServerConfig: jest.fn().mockResolvedValue(cacheableConfig),
+        getAllServerConfigs: jest.fn().mockResolvedValue({ dynamic: cacheableConfig }),
+        isAppServerConfig: jest.fn().mockResolvedValue(true),
+        setCachedAppServerTools,
+        getNextAppToolsPublicationRevision,
+      });
+
+      const result = await createMCPToolCacheService(deps).updateMCPServerTools({
+        userId: 'u1',
+        serverName: 'dynamic',
+        tools: [{ name: 'search' }],
+        publicationGeneration: 'connection-generation',
+      });
+
+      const expectedKey = toolName('search', 'dynamic');
+      expect(result).toEqual({ [expectedKey]: expect.any(Object) });
+      const generation = getMCPAppToolsPublicationGeneration(cacheableConfig);
+      expect(setCachedAppServerTools).toHaveBeenCalledWith('dynamic', generation, result, '3');
+    });
+
     it('rejects a tool boundary owned by another app server', async () => {
       const shadowed = toolName('search', 'foo_bar');
       const deps = createMockDeps({
