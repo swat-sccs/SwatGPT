@@ -147,17 +147,48 @@ export class SwatService {
   async getDining(input: { location?: string; date?: string; meal?: string; query?: string; limit?: number }, refresh = false): Promise<FeedResult<JsonObject>> {
     const fetchedAt = new Date();
     const limit = input.limit ?? 30;
+    const filters = normalizeDiningFilters(input.meal, input.query);
     if (!refresh) {
       const range = campusDayRange(input.date ?? currentCampusDate());
-      return this.cachedRecords('dining', limit, fetchedAt, (item) => {
+      const cached = await this.cachedRecords('dining', limit, fetchedAt, (item) => {
         const text = JSON.stringify(item);
-        return fuzzyMatch(text, input.location) && fuzzyMatch(text, input.meal) &&
-          fuzzyMatch(text, input.query) && recordOverlapsRange(item, new Date(range.start), new Date(range.end));
+        return diningLocationMatches(text, input.location) && fuzzyMatch(text, filters.meal) &&
+          fuzzyMatch(text, filters.query) && recordOverlapsRange(item, new Date(range.start), new Date(range.end));
       }, this.config.contentPollMs);
+
+      // PostgreSQL remains the shared cache. Only wait on The Dash when this
+      // specific lookup missed the snapshot or the snapshot is stale.
+      if (cached.items.length && !cached.meta.stale) return cached;
+      try {
+        const elapsedMs = Date.now() - fetchedAt.getTime();
+        const liveBudgetMs = Math.max(250, this.config.mcpToolTimeoutMs - elapsedMs - 500);
+        return await withDeadline(
+          this.getDining(input, true),
+          liveBudgetMs,
+          `Live Dash dining lookup exceeded ${liveBudgetMs}ms`,
+        );
+      } catch (error) {
+        if (cached.items.length) {
+          return makeStaleResult(cached.items, fetchedAt, cached.meta.source, cached.meta.data_as_of, error);
+        }
+        return makeUnavailableResult(
+          fetchedAt,
+          'dining',
+          `No matching cached dining data is available and the live Dash lookup failed: ${error instanceof Error ? error.message : String(error)}`,
+        );
+      }
     }
     try {
       const range = campusDayRange(input.date ?? currentCampusDate());
-      const sources = this.registry().dining.filter((source) => fuzzyMatch(source.location, input.location));
+      let registry: DashboardRegistry;
+      try {
+        registry = this.registry();
+      } catch {
+        registry = await this.discovery.load();
+      }
+      const sources = registry.dining.filter((source) =>
+        diningLocationMatches(`${source.location} ${source.sourceId} ${source.labels.join(' ')}`, input.location),
+      );
       let records = (await Promise.all(sources.map(async (source) => {
         const query = source.kind === 'cbord' ? queries.cbord : queries.calendar;
         const operation = source.kind === 'cbord' ? 'DiningMenu' : 'Calendar';
@@ -169,12 +200,12 @@ export class SwatService {
         }, { location: source.location }));
       }))).flat();
       await this.persist(records, sources.map((source) => ({ domain: 'dining', source: source.location })));
-      if (input.meal) records = records.filter((record) => fuzzyMatch(`${record.title} ${record.description ?? ''}`, input.meal));
-      if (input.query) records = records.filter((record) => fuzzyMatch(record.searchText, input.query));
+      if (filters.meal) records = records.filter((record) => fuzzyMatch(`${record.title} ${record.description ?? ''}`, filters.meal));
+      if (filters.query) records = records.filter((record) => fuzzyMatch(record.searchText, filters.query));
       return makeResult(records.map(toPublicRecord), fetchedAt, sources.map((source) => source.location), limit);
     } catch (error) {
       if (refresh) throw error;
-      return this.recordsFallback('dining', limit, fetchedAt, error, input.location ?? input.meal ?? input.query);
+      return this.recordsFallback('dining', limit, fetchedAt, error, input.location ?? filters.meal ?? filters.query);
     }
   }
 
@@ -443,6 +474,34 @@ function recordOverlapsRange(item: JsonObject, start: Date, end: Date): boolean 
   return itemStart <= end && effectiveEnd >= start;
 }
 
+function diningLocationMatches(value: string, query?: string): boolean {
+  if (!query || fuzzyMatch(value, query)) return true;
+  const normalizedQuery = query.toLocaleLowerCase();
+  const asksForDiningCenter = /\b(sharples|dcc)\b/.test(normalizedQuery) || normalizedQuery.includes('dining hall');
+  if (!asksForDiningCenter) return false;
+  const normalizedValue = value.toLocaleLowerCase();
+  return normalizedValue.includes('dining center') || /\bdcc\b/.test(normalizedValue);
+}
+
+function normalizeDiningFilters(meal?: string, query?: string): { meal?: string; query?: string } {
+  if (meal || !query) return { meal, query };
+  const detectedMeal = query.toLocaleLowerCase().match(/\b(breakfast|brunch|lunch|dinner|supper)\b/)?.[1];
+  if (!detectedMeal) return { query };
+  const meaningfulQuery = query
+    .toLocaleLowerCase()
+    .replace(/[^\p{L}\p{N}]+/gu, ' ')
+    .split(/\s+/)
+    .filter((word) => word && word !== detectedMeal && !DINING_QUERY_FILLER_WORDS.has(word))
+    .join(' ');
+  return { meal: detectedMeal, query: meaningfulQuery || undefined };
+}
+
+const DINING_QUERY_FILLER_WORDS = new Set([
+  'a', 'an', 'any', 'anything', 'are', 'at', 'available', 'being', 'do', 'does',
+  'for', 'have', 'is', 'menu', 'on', 's', 'served', 'serving', 'the', 'there',
+  'this', 'today', 'tonight', 'what', 'whats', 'which', 'with',
+]);
+
 function makeResult<T>(items: T[], fetchedAt: Date, sources: string[], limit: number, dataAsOf = fetchedAt.toISOString()): FeedResult<T> {
   const bounded = items.slice(0, limit);
   return { items: bounded, meta: {
@@ -470,11 +529,11 @@ function makeCachedResult<T>(
   } };
 }
 
-function makeUnavailableResult(fetchedAt: Date, domain: Domain): FeedResult<JsonObject> {
+function makeUnavailableResult(fetchedAt: Date, domain: Domain, warning?: string): FeedResult<JsonObject> {
   return { items: [], meta: {
     source: ['SwatGPT PostgreSQL cache'], fetched_at: fetchedAt.toISOString(),
     data_as_of: fetchedAt.toISOString(), stale: true, total: 0, returned: 0, truncated: false,
-    warning: `No cached ${domain} data is available yet; background synchronization will retry without blocking this chat.`,
+    warning: warning ?? `No cached ${domain} data is available yet; background synchronization will retry without blocking this chat.`,
   } };
 }
 
@@ -484,4 +543,16 @@ function makeStaleResult<T>(items: T[], fetchedAt: Date, sources: string[], data
     total: items.length, returned: items.length, truncated: false,
     warning: `Live Dash request failed; returning archived data: ${error instanceof Error ? error.message : String(error)}`,
   } };
+}
+
+async function withDeadline<T>(promise: Promise<T>, timeoutMs: number, message: string): Promise<T> {
+  let timer: NodeJS.Timeout | undefined;
+  const timeout = new Promise<never>((_resolve, reject) => {
+    timer = setTimeout(() => reject(new Error(message)), timeoutMs);
+  });
+  try {
+    return await Promise.race([promise, timeout]);
+  } finally {
+    if (timer) clearTimeout(timer);
+  }
 }

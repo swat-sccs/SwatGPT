@@ -34,12 +34,12 @@ export function createMcpServer(service: SwatService): McpServer {
       limit: limit(30),
     }), (input) => service.getHours(input), toolTimeoutMs);
 
-  register(server, 'get_dining_menus', 'Get public dining menus and dining-calendar entries by location, date, meal, or text query.',
+  register(server, 'get_dining_menus', 'Get public dining menus by location, date, meal, or text query. Sharples and DCC resolve to Dining Center. Results are cache-first and refresh from the public Dash when matching data is missing or stale.',
     z.object({
-      location: z.string().trim().min(1).max(100).optional(),
+      location: z.string().trim().min(1).max(100).describe('Dining venue; Sharples and DCC both mean Dining Center.').optional(),
       date,
-      meal: z.string().trim().min(1).max(100).optional(),
-      query: z.string().trim().min(1).max(200).optional(),
+      meal: z.string().trim().min(1).max(100).describe('Meal name, such as breakfast, lunch, brunch, or dinner.').optional(),
+      query: z.string().trim().min(1).max(200).describe('Optional food or station keywords, not the entire user question.').optional(),
       limit: limit(30),
     }), (input) => service.getDining(input), toolTimeoutMs);
 
