@@ -90,7 +90,7 @@ docker exec "$CID" wget -qO- http://localhost:9090/api/v1/targets | python3 -c '
 import json,sys
 for t in json.load(sys.stdin)["data"]["activeTargets"]:
     if t["scrapePool"] in ("vllm","tei","eagle","swatgpt_app"):
-        print(f"{t[\"scrapePool\"]:12} {t[\"scrapeUrl\"]:55} {t[\"health\"]}  {t.get(\"lastError\",\"\")[:80]}")'
+        print("%-12s %-52s %-5s %s" % (t["scrapePool"], t["scrapeUrl"], t["health"], t.get("lastError","")[:80]))'
 echo "--- rule groups"
 docker exec "$CID" wget -qO- http://localhost:9090/api/v1/rules | python3 -c '
 import json,sys
