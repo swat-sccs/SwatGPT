@@ -1,3 +1,4 @@
+import type { TAdminFlag } from 'librechat-data-provider';
 import type { Document, Types } from 'mongoose';
 
 export type FlagSource = 'keyword' | 'manual';
@@ -15,4 +16,22 @@ export interface IFlag extends Document {
   tenantId?: string;
   createdAt?: Date;
   updatedAt?: Date;
+}
+
+export interface ListFlagsOptions {
+  /** Keyset cursor from a previous page (`nextCursor`). */
+  cursor?: string;
+  limit?: number;
+  /** `true` → resolved only, `false` → open only, omitted → all. */
+  resolved?: boolean;
+}
+
+export interface FlagPage {
+  flags: TAdminFlag[];
+  nextCursor: string | null;
+}
+
+export interface UnresolvedFlagRange {
+  from?: Date;
+  to?: Date;
 }

@@ -16,6 +16,8 @@ const flagSchema: Schema<IFlag> = new Schema(
   { timestamps: true },
 );
 
-flagSchema.index({ resolvedAt: 1, createdAt: -1 });
+flagSchema.index({ resolvedAt: 1, createdAt: -1, _id: -1 });
+flagSchema.index({ conversationId: 1, resolvedAt: 1 });
+flagSchema.index({ user: 1, resolvedAt: 1, createdAt: -1 });
 
 export default flagSchema;
