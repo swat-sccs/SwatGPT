@@ -74,6 +74,8 @@ export * from './tools';
 export * from './web';
 /* Langfuse */
 export * from './langfuse';
+/* Directory */
+export * from './directory';
 /* RAG */
 export * from './rag';
 /* Cache */
