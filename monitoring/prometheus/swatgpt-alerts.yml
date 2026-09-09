@@ -1,0 +1,162 @@
+# SwatGPT alerting rules. Copy to /srv/monitor/prometheus/config/swatgpt-alerts.yml on gull
+# and reference it from prometheus.yml:
+#
+#   rule_files:
+#     - /etc/prometheus/swatgpt-alerts.yml
+#
+# Metric names: vLLM (vllm:*), the LibreChat exporter (http_requests_total,
+# rag_retrieval_total, ...), node_exporter on eagle (node_*), blackbox (probe_success).
+groups:
+  - name: swatgpt-vllm
+    rules:
+      - alert: SwatGPTVllmDown
+        expr: up{job="vllm"} == 0
+        for: 2m
+        labels:
+          severity: critical
+          service: swatgpt
+        annotations:
+          summary: "vLLM on loon is not answering scrapes"
+          description: "Prometheus has failed to scrape {{ $labels.instance }} for 2 minutes. Chat generation is down for everyone."
+
+      - alert: SwatGPTVllmQueueing
+        expr: max(vllm:num_requests_waiting) > 0
+        for: 5m
+        labels:
+          severity: warning
+          service: swatgpt
+        annotations:
+          summary: "vLLM has had queued requests for 5 minutes"
+          description: "{{ $value }} request(s) are waiting for a slot. Users see slow first tokens; check running requests, KV cache, and max-num-seqs."
+
+      - alert: SwatGPTVllmTtftHigh
+        expr: histogram_quantile(0.95, sum by (le) (rate(vllm:time_to_first_token_seconds_bucket[5m]))) > 5
+        for: 5m
+        labels:
+          severity: warning
+          service: swatgpt
+        annotations:
+          summary: "vLLM p95 time-to-first-token above 5s"
+          description: "p95 TTFT over the last 5 minutes is {{ $value | humanizeDuration }}. Prompts are too long, the queue is deep, or the prefix cache stopped hitting."
+
+      - alert: SwatGPTVllmKvCacheHigh
+        expr: max(vllm:kv_cache_usage_perc) > 0.9
+        for: 5m
+        labels:
+          severity: warning
+          service: swatgpt
+        annotations:
+          summary: "vLLM KV cache above 90%"
+          description: "KV cache usage is {{ $value | humanizePercentage }}. Preemption and queueing follow; lower max-num-seqs or max-model-len, or shorten the system prompt and KB context."
+
+  - name: swatgpt-retrieval
+    rules:
+      - alert: SwatGPTTeiDown
+        expr: up{job="tei"} == 0
+        for: 2m
+        labels:
+          severity: critical
+          service: swatgpt
+        annotations:
+          summary: "TEI {{ $labels.instance }} is not answering scrapes"
+          description: "Embeddings (:8001) or reranker (:8002) is down. Retrieval fails open, so users silently lose the Swarthmore knowledge base."
+
+      - alert: SwatGPTRetrievalNonHitRatioHigh
+        expr: |
+          (
+            sum(rate(rag_retrieval_total{job="swatgpt_app",result!="hit"}[10m]))
+            /
+            sum(rate(rag_retrieval_total{job="swatgpt_app"}[10m]))
+          ) > 0.2
+          and sum(rate(rag_retrieval_total{job="swatgpt_app"}[10m])) > 0
+        for: 10m
+        labels:
+          severity: warning
+          service: swatgpt
+        annotations:
+          summary: "More than 20% of KB retrievals returned no context"
+          description: "{{ $value | humanizePercentage }} of retrievals in the last 10 minutes were empty, timed out, errored, or ran with RAG disabled. TEI or Qdrant outage signal; see the retrieval panels for the breakdown by result."
+
+      - alert: SwatGPTRetrievalDisabled
+        expr: increase(rag_retrieval_total{job="swatgpt_app",result="disabled"}[10m]) > 0
+        for: 0m
+        labels:
+          severity: warning
+          service: swatgpt
+        annotations:
+          summary: "Retrieval is running without RAG configuration"
+          description: "retrieveKbContext is returning 'disabled': TEI_EMBEDDINGS_URL, TEI_RERANK_URL, or QDRANT_URL is unset in the app container."
+
+  - name: swatgpt-app
+    rules:
+      - alert: SwatGPTAppDown
+        expr: up{job="swatgpt_app"} == 0
+        for: 2m
+        labels:
+          severity: critical
+          service: swatgpt
+        annotations:
+          summary: "LibreChat exporter on eagle is not answering scrapes"
+          description: "Prometheus cannot scrape {{ $labels.instance }}/metrics. Either the app is down or METRICS_SECRET no longer matches /etc/prometheus/swatgpt_metrics_token (a 401 also counts as down)."
+
+      - alert: SwatGPTReadyzFailing
+        expr: probe_success{job="swatgpt_readyz"} == 0
+        for: 2m
+        labels:
+          severity: critical
+          service: swatgpt
+        annotations:
+          summary: "LibreChat /readyz is failing"
+          description: "The readiness probe for {{ $labels.instance }} has failed for 2 minutes. Requires the optional blackbox job in swatgpt-jobs.yml."
+
+      - alert: SwatGPTApp5xxRateHigh
+        expr: |
+          (
+            sum(rate(http_requests_total{job="swatgpt_app",status=~"5.."}[5m]))
+            /
+            sum(rate(http_requests_total{job="swatgpt_app"}[5m]))
+          ) > 0.02
+          and sum(rate(http_requests_total{job="swatgpt_app"}[5m])) > 0
+        for: 5m
+        labels:
+          severity: warning
+          service: swatgpt
+        annotations:
+          summary: "LibreChat 5xx ratio above 2%"
+          description: "{{ $value | humanizePercentage }} of HTTP responses in the last 5 minutes were 5xx. Check the app logs on eagle and the vLLM/TEI alerts first."
+
+  - name: swatgpt-eagle
+    rules:
+      - alert: SwatGPTEagleExporterDown
+        expr: up{job="eagle"} == 0
+        for: 5m
+        labels:
+          severity: warning
+          service: swatgpt
+        annotations:
+          summary: "eagle exporter {{ $labels.instance }} is not answering scrapes"
+          description: "node_exporter (:9100) or cadvisor (:8080) on eagle is unreachable. Host and container metrics are blind."
+
+      - alert: SwatGPTEagleDiskHigh
+        expr: |
+          (
+            1 - node_filesystem_avail_bytes{job="eagle",mountpoint="/",fstype!~"tmpfs|overlay"}
+                / node_filesystem_size_bytes{job="eagle",mountpoint="/",fstype!~"tmpfs|overlay"}
+          ) > 0.85
+        for: 10m
+        labels:
+          severity: warning
+          service: swatgpt
+        annotations:
+          summary: "eagle root filesystem above 85%"
+          description: "/ on eagle is {{ $value | humanizePercentage }} full. Run `docker builder prune` and `docker image prune` before MongoDB or Meilisearch run out of space."
+
+      - alert: SwatGPTEagleMemoryLow
+        expr: node_memory_MemAvailable_bytes{job="eagle"} / node_memory_MemTotal_bytes{job="eagle"} < 0.1
+        for: 10m
+        labels:
+          severity: warning
+          service: swatgpt
+        annotations:
+          summary: "eagle has less than 10% memory available"
+          description: "{{ $value | humanizePercentage }} of RAM is available on eagle. MongoDB, Meilisearch, or the app container is growing."

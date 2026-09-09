@@ -1,0 +1,51 @@
+# Alertmanager configuration for the gull `prometheus` stack.
+# Place at /srv/monitor/alertmanager/config/alertmanager.yml (see monitoring/README.md).
+# Fill in ONE delivery channel below and delete the others.
+global:
+  resolve_timeout: 5m
+
+route:
+  receiver: sccs-discord
+  group_by: ["alertname", "service"]
+  group_wait: 30s
+  group_interval: 5m
+  repeat_interval: 4h
+  routes:
+    - matchers:
+        - severity = critical
+      receiver: sccs-discord
+      repeat_interval: 1h
+
+inhibit_rules:
+  # A dead vLLM already explains slow TTFT, queueing, and app 5xx.
+  - source_matchers: ["alertname = SwatGPTVllmDown"]
+    target_matchers: ["alertname =~ SwatGPTVllm(Queueing|TtftHigh|KvCacheHigh)|SwatGPTApp5xxRateHigh"]
+    equal: ["service"]
+  # Dead TEI already explains the retrieval ratio.
+  - source_matchers: ["alertname = SwatGPTTeiDown"]
+    target_matchers: ["alertname = SwatGPTRetrievalNonHitRatioHigh"]
+    equal: ["service"]
+
+receivers:
+  - name: sccs-discord
+    discord_configs:
+      - webhook_url: "https://discord.com/api/webhooks/REPLACE_ME"
+        title: '{{ .CommonAnnotations.summary }}'
+        message: >-
+          {{ range .Alerts }}[{{ .Status | toUpper }}] {{ .Labels.alertname }} ({{ .Labels.severity }}):
+          {{ .Annotations.description }}
+          {{ end }}
+
+  # - name: sccs-slack
+  #   slack_configs:
+  #     - api_url: "https://hooks.slack.com/services/REPLACE_ME"
+  #       channel: "#swatgpt-alerts"
+  #       title: '{{ .CommonAnnotations.summary }}'
+  #       text: '{{ range .Alerts }}{{ .Annotations.description }}{{ "\n" }}{{ end }}'
+
+  # - name: sccs-email
+  #   email_configs:
+  #     - to: "staff@sccs.swarthmore.edu"
+  #       from: "alertmanager@sccs.swarthmore.edu"
+  #       smarthost: "smtp.swarthmore.edu:587"
+  #       require_tls: true

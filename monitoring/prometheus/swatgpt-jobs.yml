@@ -1,0 +1,47 @@
+# SwatGPT scrape jobs for the SCCS Prometheus on gull.
+# Append the entries below to the `scrape_configs:` list in
+# /srv/monitor/prometheus/config/prometheus.yml, then run
+# `docker service update --force prometheus_prometheus`.
+#
+# The swatgpt_app job needs /etc/prometheus/swatgpt_metrics_token to contain the
+# value of METRICS_SECRET from eagle's /home/aidahxr/SwatGPT/.env (no trailing newline).
+
+  # vLLM (Qwen3.6-35B-A3B-FP8) on loon; 5s so TTFT/queue spikes are visible.
+  - job_name: vllm
+    scrape_interval: 5s
+    static_configs:
+      - targets: ["loon.sccs.swarthmore.edu:8000"]
+
+  # Text Embeddings Inference: 8001 = embeddings, 8002 = reranker.
+  - job_name: tei
+    static_configs:
+      - targets: ["loon.sccs.swarthmore.edu:8001", "loon.sccs.swarthmore.edu:8002"]
+
+  # eagle host (node_exporter :9100) and its containers (cadvisor :8080).
+  - job_name: eagle
+    static_configs:
+      - targets: ["eagle.sccs.swarthmore.edu:9100", "eagle.sccs.swarthmore.edu:8080"]
+
+  # LibreChat exporter (packages/api/src/app/metrics.ts), bearer-token protected.
+  - job_name: swatgpt_app
+    authorization:
+      type: Bearer
+      credentials_file: /etc/prometheus/swatgpt_metrics_token
+    static_configs:
+      - targets: ["eagle.sccs.swarthmore.edu:3080"]
+
+  # Optional: /readyz probing through a blackbox exporter. Only add this if the
+  # gull stack runs one (the SwatGPTReadyzFailing alert stays silent otherwise).
+  # - job_name: swatgpt_readyz
+  #   metrics_path: /probe
+  #   params:
+  #     module: [http_2xx]
+  #   static_configs:
+  #     - targets: ["http://eagle.sccs.swarthmore.edu:3080/readyz"]
+  #   relabel_configs:
+  #     - source_labels: [__address__]
+  #       target_label: __param_target
+  #     - source_labels: [__param_target]
+  #       target_label: instance
+  #     - target_label: __address__
+  #       replacement: blackbox-exporter:9115
