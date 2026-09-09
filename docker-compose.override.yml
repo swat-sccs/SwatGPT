@@ -13,6 +13,18 @@ services:
       - type: bind
         source: ./librechat.yaml
         target: /app/librechat.yaml
+    healthcheck:
+      test:
+        [
+          'CMD',
+          'node',
+          '-e',
+          "fetch('http://localhost:${PORT:-3080}/readyz').then((res) => process.exit(res.ok ? 0 : 1)).catch(() => process.exit(1))",
+        ]
+      interval: 30s
+      timeout: 5s
+      start_period: 60s
+      retries: 3
 
   swatgpt-postgres:
     image: postgres:17-alpine
@@ -61,6 +73,43 @@ services:
       LOG_LEVEL: ${SWATGPT_LOG_LEVEL:-info}
     expose:
       - '3000'
+
+  node-exporter:
+    image: prom/node-exporter:v1.9.1
+    container_name: swatgpt-node-exporter
+    restart: unless-stopped
+    pid: host
+    ports:
+      - '${SWATGPT_METRICS_BIND:-130.58.218.151}:9100:9100'
+    volumes:
+      - /proc:/host/proc:ro
+      - /sys:/host/sys:ro
+      - /:/rootfs:ro
+    command:
+      - '--path.procfs=/host/proc'
+      - '--path.sysfs=/host/sys'
+      - '--path.rootfs=/rootfs'
+      - '--collector.filesystem.mount-points-exclude=^/(sys|proc|dev|host|etc|rootfs/var/lib/docker)($$|/)'
+
+  cadvisor:
+    image: gcr.io/cadvisor/cadvisor:v0.52.1
+    container_name: swatgpt-cadvisor
+    restart: unless-stopped
+    privileged: true
+    ports:
+      - '${SWATGPT_METRICS_BIND:-130.58.218.151}:8080:8080'
+    volumes:
+      - /:/rootfs:ro
+      - /var/run:/var/run:ro
+      - /sys:/sys:ro
+      - /var/lib/docker/:/var/lib/docker:ro
+      - /dev/disk/:/dev/disk:ro
+    devices:
+      - /dev/kmsg
+    command:
+      - '-docker_only=true'
+      - '-housekeeping_interval=15s'
+      - '-store_container_labels=false'
 
 volumes:
   swatgpt-postgres-data:
