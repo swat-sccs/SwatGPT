@@ -3,7 +3,7 @@ import type { Document, Types } from 'mongoose';
 export type GenerationStatus = 'ok' | 'error' | 'aborted';
 
 /** One record per assistant response: token counts, timing, tools, retrieval and outcome. */
-export interface IGeneration extends Document {
+export interface IGeneration extends Omit<Document, 'model'> {
   user: Types.ObjectId;
   conversationId: string;
   messageId: string;

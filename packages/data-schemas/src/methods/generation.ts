@@ -1,5 +1,5 @@
 import { Types } from 'mongoose';
-import type { Model, PipelineStage, FilterQuery } from 'mongoose';
+import type { Model, PipelineStage, FilterQuery, AccumulatorOperator } from 'mongoose';
 import type {
   IGeneration,
   UsageRange,
@@ -123,12 +123,23 @@ interface ConversationRow extends ConversationUsage {
   _id: string;
 }
 
-function countWhere(condition: Record<string, unknown>): Record<string, unknown> {
+function countWhere(condition: Record<string, unknown>): AccumulatorOperator {
   return { $sum: { $cond: [condition, 1, 0] } };
 }
 
-function percentileOf(field: string, p: number[]): Record<string, unknown> {
-  return { $percentile: { input: `$${field}`, p, method: 'approximate' } };
+interface PercentileAccumulator {
+  $percentile: { input: string; p: number[]; method: 'approximate' };
+}
+
+/**
+ * `$percentile` (MongoDB 7.0+) is missing from mongoose's `AccumulatorOperator`
+ * union, so the literal is widened through the documented shape.
+ */
+function percentileOf(field: string, p: number[]): AccumulatorOperator {
+  const accumulator: PercentileAccumulator = {
+    $percentile: { input: `$${field}`, p, method: 'approximate' },
+  };
+  return accumulator as unknown as AccumulatorOperator;
 }
 
 function readPercentile(values: PercentileArray, index: number): number | null {
