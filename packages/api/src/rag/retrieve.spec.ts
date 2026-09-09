@@ -1,8 +1,11 @@
+import express from 'express';
+import request from 'supertest';
 import { logger } from '@librechat/data-schemas';
 import type { RerankResult } from './rerank';
 import type { KbPayload } from './search';
+import { retrieveKbContext, retrieveKbContextDetailed } from './retrieve';
 import { buildSparseQuery } from './lexical';
-import { retrieveKbContext } from './retrieve';
+import { createMetrics } from '~/app/metrics';
 
 const EMBEDDINGS_URL = 'http://tei-embed.test';
 const RERANK_URL = 'http://tei-rerank.test';
@@ -300,5 +303,112 @@ describe('retrieveKbContext', () => {
         expect(fetchMock).not.toHaveBeenCalled();
       },
     );
+  });
+
+  describe('retrieveKbContextDetailed', () => {
+    const hits = [0, 1, 2, 3].map(kbHit);
+    const scores: RerankResult[] = [
+      { index: 0, score: 0.9 },
+      { index: 1, score: 0.8 },
+      { index: 2, score: 0.2 },
+      { index: 3, score: 0.7 },
+    ];
+
+    let metricsApp: express.Express;
+
+    async function scrapeMetrics(): Promise<string> {
+      const response = await request(metricsApp)
+        .get('/metrics')
+        .set('Authorization', 'Bearer test-secret')
+        .expect(200);
+      return response.text;
+    }
+
+    beforeEach(() => {
+      process.env.METRICS_SECRET = 'test-secret';
+      metricsApp = express();
+      metricsApp.use('/metrics', createMetrics().metricsRouter);
+    });
+
+    afterEach(() => {
+      delete process.env.METRICS_SECRET;
+      createMetrics();
+    });
+
+    it('reports a hit with the chunk count, elapsed time, and the same context as retrieveKbContext', async () => {
+      mockServices({ hits, scores });
+      const detailed = await retrieveKbContextDetailed(QUERY);
+      mockServices({ hits, scores });
+      const context = await retrieveKbContext(QUERY);
+
+      expect(detailed.result).toBe('hit');
+      expect(detailed.chunks).toBe(3);
+      expect(detailed.elapsedMs).toBeGreaterThanOrEqual(0);
+      expect(detailed.context).toBe(context);
+      expect(detailed.context).toContain('[1] Title 0');
+
+      const metrics = await scrapeMetrics();
+      expect(metrics).toMatch(/rag_retrieval_total\{result="hit"\} 2/);
+      expect(metrics).toMatch(/rag_retrieval_duration_seconds_count\{result="hit"\} 2/);
+      expect(metrics).toMatch(/rag_chunks_returned_sum 6/);
+    });
+
+    it('reports empty when Qdrant has no hits or nothing passes the score floor', async () => {
+      mockServices({ hits: [] });
+      const noHits = await retrieveKbContextDetailed(QUERY);
+      mockServices({ hits, scores: scores.map((score) => ({ ...score, score: 0.1 })) });
+      const belowFloor = await retrieveKbContextDetailed(QUERY);
+
+      expect(noHits).toMatchObject({ result: 'empty', chunks: 0, context: undefined });
+      expect(belowFloor).toMatchObject({ result: 'empty', chunks: 0, context: undefined });
+      expect(await scrapeMetrics()).toMatch(/rag_retrieval_total\{result="empty"\} 2/);
+    });
+
+    it('reports error when a service fails and still fails open', async () => {
+      mockServices({ searchResponse: errorResponse(500) });
+      const detailed = await retrieveKbContextDetailed(QUERY);
+
+      expect(detailed).toMatchObject({ result: 'error', chunks: 0, context: undefined });
+      expect(warnSpy).toHaveBeenCalledTimes(1);
+      expect(await scrapeMetrics()).toMatch(/rag_retrieval_total\{result="error"\} 1/);
+    });
+
+    it('reports timeout when the total budget elapses', async () => {
+      jest.useFakeTimers();
+      fetchMock.mockImplementation(
+        (_input: string | URL | Request, init?: RequestInit) =>
+          new Promise<Response>((_resolve, reject) => {
+            init?.signal?.addEventListener('abort', () =>
+              reject(new Error('This operation was aborted')),
+            );
+          }),
+      );
+      const pending = retrieveKbContextDetailed(QUERY);
+      await jest.advanceTimersByTimeAsync(1500);
+      const detailed = await pending;
+      jest.useRealTimers();
+
+      expect(detailed).toMatchObject({ result: 'timeout', chunks: 0, context: undefined });
+      expect(await scrapeMetrics()).toMatch(/rag_retrieval_total\{result="timeout"\} 1/);
+    });
+
+    it('reports disabled without fetching when the RAG services are not configured', async () => {
+      delete process.env.QDRANT_URL;
+      const detailed = await retrieveKbContextDetailed(QUERY);
+
+      expect(detailed).toEqual({ result: 'disabled', chunks: 0, elapsedMs: 0 });
+      expect(fetchMock).not.toHaveBeenCalled();
+      const metrics = await scrapeMetrics();
+      expect(metrics).toMatch(/rag_retrieval_total\{result="disabled"\} 1/);
+      expect(metrics).not.toMatch(/rag_chunks_returned_count [1-9]/);
+    });
+
+    it('treats a blank query as empty without recording an attempt', async () => {
+      const detailed = await retrieveKbContextDetailed('   ');
+
+      expect(detailed).toEqual({ result: 'empty', chunks: 0, elapsedMs: 0 });
+      expect(fetchMock).not.toHaveBeenCalled();
+      expect(await scrapeMetrics()).not.toMatch(/rag_retrieval_total\{/);
+    });
   });
 });

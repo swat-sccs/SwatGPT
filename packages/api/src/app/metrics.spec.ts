@@ -6,13 +6,16 @@ import type { Request, Response } from 'express';
 import {
   createMetrics,
   instrumentMongooseQueryMetrics,
+  measureMCPToolCall,
   normalizePath,
   recordAgentStartupMilestone,
   recordAgentStartupResult,
   recordGenerationJob,
   recordGenerationStreamResumePendingEvents,
   recordGenerationStreamSubscription,
+  recordMCPToolCall,
   recordOpenIDUserLookup,
+  recordRagRetrieval,
   recordRedisOperation,
   recordRumProxyRequest,
   setGenerationJobsInFlight,
@@ -468,5 +471,96 @@ describe('createMetrics', () => {
     );
     expect(response.text).toMatch(/agent_startups_total\{result="content_queued"\} 1/);
     expect(response.text).not.toContain('unbounded-user-value');
+  });
+
+  it('tracks KB retrieval outcomes, latency, and chunk counts', async () => {
+    const app = express();
+    process.env.METRICS_SECRET = 'test-secret';
+    const { metricsRouter } = createMetrics();
+    app.use('/metrics', metricsRouter);
+
+    recordRagRetrieval('hit', 0.4, 6);
+    recordRagRetrieval('empty', 0.2, 0);
+    recordRagRetrieval('timeout', 1.5, 0);
+    recordRagRetrieval('disabled', 0, 0);
+    recordRagRetrieval('hit', Number.NaN, 3);
+
+    const response = await request(app)
+      .get('/metrics')
+      .set('Authorization', 'Bearer test-secret')
+      .expect(200);
+
+    expect(response.text).toMatch(/rag_retrieval_total\{result="hit"\} 1/);
+    expect(response.text).toMatch(/rag_retrieval_total\{result="empty"\} 1/);
+    expect(response.text).toMatch(/rag_retrieval_total\{result="timeout"\} 1/);
+    expect(response.text).toMatch(/rag_retrieval_total\{result="disabled"\} 1/);
+    expect(response.text).toMatch(/rag_retrieval_duration_seconds_sum\{result="hit"\} 0.4/);
+    expect(response.text).toMatch(/rag_retrieval_duration_seconds_count\{result="timeout"\} 1/);
+    expect(response.text).toMatch(/rag_chunks_returned_count 3/);
+    expect(response.text).toMatch(/rag_chunks_returned_sum 6/);
+    expect(response.text).toMatch(/rag_chunks_returned_bucket\{le="0"\} 2/);
+    expect(response.text).toMatch(/rag_chunks_returned_bucket\{le="6"\} 3/);
+  });
+
+  it('tracks MCP tool call outcomes and latency with sanitized labels', async () => {
+    const app = express();
+    process.env.METRICS_SECRET = 'test-secret';
+    const { metricsRouter } = createMetrics();
+    app.use('/metrics', metricsRouter);
+
+    const succeeded = await measureMCPToolCall('swatgpt', 'get_weather', async () => ({
+      content: [],
+    }));
+    const flagged = await measureMCPToolCall('swatgpt', 'get weather!', async () => ({
+      isError: true,
+    }));
+    await expect(
+      measureMCPToolCall('swatgpt', 'get_weather', async () => {
+        throw new Error('boom');
+      }),
+    ).rejects.toThrow('boom');
+    recordMCPToolCall('', 'x'.repeat(80), 'success', 0.25);
+
+    const response = await request(app)
+      .get('/metrics')
+      .set('Authorization', 'Bearer test-secret')
+      .expect(200);
+
+    expect(succeeded).toEqual({ content: [] });
+    expect(flagged).toEqual({ isError: true });
+    expect(response.text).toMatch(
+      /mcp_tool_calls_total\{server="swatgpt",tool="get_weather",result="success"\} 1/,
+    );
+    expect(response.text).toMatch(
+      /mcp_tool_calls_total\{server="swatgpt",tool="get_weather_",result="tool_error"\} 1/,
+    );
+    expect(response.text).toMatch(
+      /mcp_tool_calls_total\{server="swatgpt",tool="get_weather",result="error"\} 1/,
+    );
+    expect(response.text).toMatch(
+      new RegExp(
+        `mcp_tool_calls_total\\{server="unknown",tool="${'x'.repeat(64)}",result="success"\\} 1`,
+      ),
+    );
+    expect(response.text).toMatch(
+      /mcp_tool_call_duration_seconds_count\{server="swatgpt",tool="get_weather",result="success"\} 1/,
+    );
+    expect(response.text).toMatch(
+      /mcp_tool_call_duration_seconds_sum\{server="unknown",tool="x+",result="success"\} 0.25/,
+    );
+  });
+
+  it('passes MCP tool call results through untouched when metrics are not configured', async () => {
+    createMetrics();
+
+    await expect(
+      measureMCPToolCall('swatgpt', 'get_weather', async () => ({ isError: true })),
+    ).resolves.toEqual({ isError: true });
+    await expect(
+      measureMCPToolCall('swatgpt', 'get_weather', async () => {
+        throw new Error('boom');
+      }),
+    ).rejects.toThrow('boom');
+    expect(() => recordRagRetrieval('hit', 0.1, 4)).not.toThrow();
   });
 });

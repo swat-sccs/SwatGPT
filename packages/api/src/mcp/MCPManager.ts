@@ -31,6 +31,7 @@ import { MCPConnectionFactory } from './MCPConnectionFactory';
 import { processMCPEnv, isPluginSourced } from '~/utils/env';
 import { OAuthLifecycleRelay } from './oauth/pending';
 import { preProcessGraphTokens } from '~/utils/graph';
+import { measureMCPToolCall } from '~/app/metrics';
 import { formatToolContent } from './parsers';
 import { MCPConnection } from './connection';
 import { mcpConfig } from './mcpConfig';
@@ -1073,20 +1074,22 @@ Please follow these instructions when using tools from the respective MCP server
         }
 
         const requestTool = () =>
-          connection!.client.request(
-            {
-              method: 'tools/call',
-              params: {
-                name: toolName,
-                arguments: toolArguments,
+          measureMCPToolCall(serverName, toolName, () =>
+            connection!.client.request(
+              {
+                method: 'tools/call',
+                params: {
+                  name: toolName,
+                  arguments: toolArguments,
+                },
               },
-            },
-            CallToolResultSchema,
-            {
-              timeout: connection!.timeout,
-              resetTimeoutOnProgress: true,
-              ...options,
-            },
+              CallToolResultSchema,
+              {
+                timeout: connection!.timeout,
+                resetTimeoutOnProgress: true,
+                ...options,
+              },
+            ),
           );
 
         let result: Awaited<ReturnType<typeof requestTool>>;

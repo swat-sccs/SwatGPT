@@ -1,6 +1,8 @@
 import { logger } from '@librechat/data-schemas';
+import type { KbRetrievalResult } from '~/app/metrics';
 import type { KbCandidate, KbPayload } from './search';
 import type { RerankResult } from './rerank';
+import { recordRagRetrieval } from '~/app/metrics';
 import { buildSparseQuery } from './lexical';
 import { formatContext } from './format';
 import { rerankChunks } from './rerank';
@@ -56,50 +58,88 @@ function selectTopChunks(candidates: KbCandidate[], scores: RerankResult[]): KbP
   return top.map((result) => candidates[result.index].payload);
 }
 
+export interface KbRetrieval {
+  /** Formatted context block for the system prompt; `undefined` when nothing usable was found. */
+  context?: string;
+  /** Number of KB chunks included in `context`. */
+  chunks: number;
+  /** Wall-clock time spent in retrieval, including the fail-open path. */
+  elapsedMs: number;
+  result: KbRetrievalResult;
+}
+
+const NO_RETRIEVAL: KbRetrieval = { chunks: 0, elapsedMs: 0, result: 'disabled' };
+
+const elapsedSince = (startedAt: bigint): number =>
+  Number(process.hrtime.bigint() - startedAt) / 1_000_000;
+
+async function runPipeline(
+  config: RagConfig,
+  query: string,
+  signal: AbortSignal,
+): Promise<KbPayload[]> {
+  const vector = await embedQuery(config.embeddingsUrl, query, signal);
+  const candidates = await searchKb(config.qdrantUrl, vector, buildSparseQuery(query), signal);
+  if (!candidates.length) {
+    return [];
+  }
+  const scores = await rerankChunks(
+    config.rerankUrl,
+    query,
+    candidates.map((candidate) => candidate.payload.text),
+    signal,
+  );
+  return selectTopChunks(candidates, scores);
+}
+
 /**
- * Retrieves Swarthmore KB context for a user query:
+ * Retrieves Swarthmore KB context for a user query and reports what happened:
  * embed → Qdrant hybrid (dense + lexical, RRF) → rerank → top chunks.
- * Fail-open by design — any error, timeout, or missing configuration yields `undefined`
- * so a RAG failure never fails the chat message.
+ * Fail-open by design — any error, timeout, or missing configuration yields no
+ * `context` (with `result` explaining why) so a RAG failure never fails the chat message.
+ * Every attempt is recorded in the Prometheus RAG metrics.
  */
-export async function retrieveKbContext(query: string): Promise<string | undefined> {
+export async function retrieveKbContextDetailed(query: string): Promise<KbRetrieval> {
   const trimmed = query.trim();
   if (!trimmed) {
-    return undefined;
+    return { ...NO_RETRIEVAL, result: 'empty' };
   }
   const config = readConfig();
   if (!config) {
-    return undefined;
+    recordRagRetrieval('disabled', 0, 0);
+    return NO_RETRIEVAL;
   }
+  const startedAt = process.hrtime.bigint();
   const controller = new AbortController();
   const timer = setTimeout(() => controller.abort(), TOTAL_BUDGET_MS);
+  const finish = (result: KbRetrievalResult, top: KbPayload[] = []): KbRetrieval => {
+    const elapsedMs = elapsedSince(startedAt);
+    recordRagRetrieval(result, elapsedMs / 1000, top.length);
+    return {
+      context: top.length ? formatContext(top) : undefined,
+      chunks: top.length,
+      elapsedMs,
+      result,
+    };
+  };
   try {
-    const vector = await embedQuery(config.embeddingsUrl, trimmed, controller.signal);
-    const candidates = await searchKb(
-      config.qdrantUrl,
-      vector,
-      buildSparseQuery(trimmed),
-      controller.signal,
-    );
-    if (!candidates.length) {
-      return undefined;
-    }
-    const scores = await rerankChunks(
-      config.rerankUrl,
-      trimmed,
-      candidates.map((candidate) => candidate.payload.text),
-      controller.signal,
-    );
-    const top = selectTopChunks(candidates, scores);
-    if (!top.length) {
-      return undefined;
-    }
-    return formatContext(top);
+    const top = await runPipeline(config, trimmed, controller.signal);
+    return finish(top.length ? 'hit' : 'empty', top);
   } catch (error) {
     const message = error instanceof Error ? error.message : String(error);
     logger.warn(`[retrieveKbContext] KB retrieval failed; continuing without context: ${message}`);
-    return undefined;
+    return finish(controller.signal.aborted ? 'timeout' : 'error');
   } finally {
     clearTimeout(timer);
   }
+}
+
+/**
+ * Retrieves Swarthmore KB context for a user query. Fail-open: any error, timeout,
+ * or missing configuration yields `undefined`. See {@link retrieveKbContextDetailed}
+ * for the structured variant.
+ */
+export async function retrieveKbContext(query: string): Promise<string | undefined> {
+  const { context } = await retrieveKbContextDetailed(query);
+  return context;
 }

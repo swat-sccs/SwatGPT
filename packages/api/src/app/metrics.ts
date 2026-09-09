@@ -152,6 +152,8 @@ export type RumProxyResult =
   | 'collector_timeout';
 export type RedisClient = 'ioredis' | 'keyv';
 export type RedisOperationStatus = 'success' | 'error';
+export type KbRetrievalResult = 'hit' | 'empty' | 'timeout' | 'error' | 'disabled';
+export type MCPToolCallResult = 'success' | 'tool_error' | 'error';
 
 type OpenIDUserLookupMetrics = {
   recordLookup: (result: OpenIDUserLookupResult, durationSeconds: number) => void;
@@ -231,6 +233,27 @@ let redisOperationMetrics: RedisOperationMetrics = {
   recordOperation: () => undefined,
 };
 
+type RagRetrievalMetrics = {
+  recordRetrieval: (result: KbRetrievalResult, durationSeconds: number, chunks: number) => void;
+};
+
+let ragRetrievalMetrics: RagRetrievalMetrics = {
+  recordRetrieval: () => undefined,
+};
+
+type MCPToolCallMetrics = {
+  recordCall: (
+    server: string,
+    tool: string,
+    result: MCPToolCallResult,
+    durationSeconds: number,
+  ) => void;
+};
+
+let mcpToolCallMetrics: MCPToolCallMetrics = {
+  recordCall: () => undefined,
+};
+
 const resetMetricRecorders = (): void => {
   openIDUserLookupMetrics = {
     recordLookup: () => undefined,
@@ -254,6 +277,12 @@ const resetMetricRecorders = (): void => {
   };
   redisOperationMetrics = {
     recordOperation: () => undefined,
+  };
+  ragRetrievalMetrics = {
+    recordRetrieval: () => undefined,
+  };
+  mcpToolCallMetrics = {
+    recordCall: () => undefined,
   };
 };
 
@@ -319,8 +348,72 @@ export function recordRedisOperation(
   redisOperationMetrics.recordOperation(client, useCase, operation, status, durationSeconds);
 }
 
+const normalizeLabel = (value: unknown): string => {
+  if (typeof value !== 'string' || !value) return 'unknown';
+  return value.replace(/[^a-zA-Z0-9_:-]/g, '_').slice(0, 64) || 'unknown';
+};
+
+/** Records one KB retrieval attempt; `chunks` is the number of context chunks handed to the model. */
+export function recordRagRetrieval(
+  result: KbRetrievalResult,
+  durationSeconds: number,
+  chunks: number,
+): void {
+  if (!Number.isFinite(durationSeconds) || durationSeconds < 0) {
+    return;
+  }
+  ragRetrievalMetrics.recordRetrieval(result, durationSeconds, chunks);
+}
+
+/** Records one MCP `tools/call` round trip; server and tool names are sanitized into bounded labels. */
+export function recordMCPToolCall(
+  server: string,
+  tool: string,
+  result: MCPToolCallResult,
+  durationSeconds: number,
+): void {
+  mcpToolCallMetrics.recordCall(
+    normalizeLabel(server),
+    normalizeLabel(tool),
+    result,
+    durationSeconds,
+  );
+}
+
 const getElapsedSeconds = (startedAt: bigint): number =>
   Number(process.hrtime.bigint() - startedAt) / 1_000_000_000;
+
+const isErrorToolResult = (result: unknown): boolean =>
+  typeof result === 'object' &&
+  result !== null &&
+  (result as { isError?: unknown }).isError === true;
+
+/**
+ * Times an MCP tool request and records its outcome. A response flagged `isError`
+ * counts as `tool_error`; a rejected request counts as `error` and is rethrown.
+ */
+export function measureMCPToolCall<T>(
+  server: string,
+  tool: string,
+  request: () => Promise<T>,
+): Promise<T> {
+  const startedAt = process.hrtime.bigint();
+  return request().then(
+    (result) => {
+      recordMCPToolCall(
+        server,
+        tool,
+        isErrorToolResult(result) ? 'tool_error' : 'success',
+        getElapsedSeconds(startedAt),
+      );
+      return result;
+    },
+    (error: unknown) => {
+      recordMCPToolCall(server, tool, 'error', getElapsedSeconds(startedAt));
+      throw error;
+    },
+  );
+}
 
 export const isMetricsConfigured = (): boolean => Boolean(process.env.METRICS_SECRET);
 
@@ -330,11 +423,6 @@ const createUnauthorizedMetricsRouter = (): Router => {
     res.status(401).end();
   });
   return metricsRouter;
-};
-
-const normalizeMongooseLabel = (value: unknown): string => {
-  if (typeof value !== 'string' || !value) return 'unknown';
-  return value.replace(/[^a-zA-Z0-9_:-]/g, '_').slice(0, 64) || 'unknown';
 };
 
 const getHeader = (headers: Record<string, unknown>, name: string): unknown => {
@@ -378,9 +466,9 @@ export function recordMongooseQuery(
   durationSeconds: number,
 ): void {
   mongooseQueryMetrics.recordQuery(
-    normalizeMongooseLabel(model),
-    normalizeMongooseLabel(operation),
-    normalizeMongooseLabel(status),
+    normalizeLabel(model),
+    normalizeLabel(operation),
+    normalizeLabel(status),
     durationSeconds,
   );
 }
@@ -404,8 +492,8 @@ export function instrumentMongooseQueryMetrics(mongoose: Mongoose): void {
     ...args: Parameters<typeof originalExec>
   ) {
     const startedAt = process.hrtime.bigint();
-    const model = normalizeMongooseLabel(this.model?.modelName);
-    const operation = normalizeMongooseLabel(this.op);
+    const model = normalizeLabel(this.model?.modelName);
+    const operation = normalizeLabel(this.op);
 
     let result: ReturnType<typeof originalExec>;
     try {
@@ -664,6 +752,61 @@ export function createMetrics(): PrometheusMetrics {
       const labels = { client, use_case: useCase, operation, status };
       redisOperations.inc(labels);
       redisOperationDuration.observe(labels, durationSeconds);
+    },
+  };
+
+  const ragRetrievals = new Counter({
+    name: 'rag_retrieval_total',
+    help: 'Swarthmore KB retrieval attempts by result',
+    labelNames: ['result'] as const,
+    registers: [registry],
+  });
+
+  const ragRetrievalDuration = new Histogram({
+    name: 'rag_retrieval_duration_seconds',
+    help: 'Swarthmore KB retrieval latency in seconds (embed, search, rerank)',
+    labelNames: ['result'] as const,
+    buckets: [0.05, 0.1, 0.2, 0.3, 0.5, 0.75, 1, 1.5, 2],
+    registers: [registry],
+  });
+
+  const ragChunksReturned = new Histogram({
+    name: 'rag_chunks_returned',
+    help: 'Swarthmore KB context chunks returned per retrieval attempt',
+    buckets: [0, 1, 2, 3, 4, 5, 6, 7, 8],
+    registers: [registry],
+  });
+
+  ragRetrievalMetrics = {
+    recordRetrieval: (result, durationSeconds, chunks) => {
+      ragRetrievals.inc({ result });
+      ragRetrievalDuration.observe({ result }, durationSeconds);
+      if (result !== 'disabled') {
+        ragChunksReturned.observe(chunks);
+      }
+    },
+  };
+
+  const mcpToolCalls = new Counter({
+    name: 'mcp_tool_calls_total',
+    help: 'MCP tool calls by server, tool, and result',
+    labelNames: ['server', 'tool', 'result'] as const,
+    registers: [registry],
+  });
+
+  const mcpToolCallDuration = new Histogram({
+    name: 'mcp_tool_call_duration_seconds',
+    help: 'MCP tool call round-trip latency in seconds',
+    labelNames: ['server', 'tool', 'result'] as const,
+    buckets: [0.05, 0.1, 0.25, 0.5, 1, 2.5, 5, 10, 30, 60],
+    registers: [registry],
+  });
+
+  mcpToolCallMetrics = {
+    recordCall: (server, tool, result, durationSeconds) => {
+      const labels = { server, tool, result };
+      mcpToolCalls.inc(labels);
+      mcpToolCallDuration.observe(labels, durationSeconds);
     },
   };
 
