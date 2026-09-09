@@ -34,3 +34,4 @@ export { default as auditLogSchema } from './auditLog';
 export { default as generationSchema } from './generation';
 export { default as flagSchema } from './flag';
 export { default as configSchema } from './config';
+export { default as directorySchema } from './directory';

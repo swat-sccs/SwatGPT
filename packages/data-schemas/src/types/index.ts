@@ -37,6 +37,7 @@ export * from './auditLog';
 export * from './generation';
 export * from './flag';
 export * from './group';
+export * from './directory';
 /* Config */
 export * from './config';
 /* Admin */
