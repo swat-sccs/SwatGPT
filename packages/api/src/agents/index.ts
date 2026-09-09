@@ -24,6 +24,7 @@ export * from './prewarm';
 export * from './openai';
 export * from './transactions';
 export * from './usage';
+export * from './generation';
 export * from './resources';
 export * from './responses';
 export * from './skills';

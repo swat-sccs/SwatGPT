@@ -110,6 +110,10 @@ class ModelEndHandler {
       if (modelName) {
         usage.model = modelName;
       }
+      const finishReason = data?.output?.response_metadata?.finish_reason;
+      if (typeof finishReason === 'string') {
+        usage.finish_reason = finishReason;
+      }
       if (agentContext.provider) {
         usage.provider = agentContext.provider;
       }

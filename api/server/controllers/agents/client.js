@@ -94,7 +94,11 @@ const {
   resolveYouTubeInjectionConfig,
   decrementPendingRequest,
   maybePrewarmCodeSandbox,
-  retrieveKbContext,
+  retrieveKbContextDetailed,
+  recordGeneration,
+  findKeywordFlags,
+  createGenerationTiming,
+  createFirstTokenTimingHandlers,
 } = require('@librechat/api');
 const {
   Run,
@@ -1240,9 +1244,11 @@ class AgentClient extends BaseClient {
     });
 
     /** KB retrieval overlaps the rest of message building; fails open to `undefined`. */
-    const kbContextPromise = retrieveKbContext(
-      orderedMessages[orderedMessages.length - 1]?.text ?? '',
-    );
+    this.kbQueryText = orderedMessages[orderedMessages.length - 1]?.text ?? '';
+    const kbContextPromise = retrieveKbContextDetailed(this.kbQueryText).then((retrieval) => {
+      this.kbRetrieval = retrieval;
+      return retrieval.context;
+    });
 
     let payload;
     /** @type {number | undefined} */
@@ -2578,6 +2584,9 @@ class AgentClient extends BaseClient {
     const appConfig = this.options.req.config;
     const balanceConfig = getBalanceConfig(appConfig);
     const transactionsConfig = getTransactionsConfig(appConfig);
+    const generationTiming = createGenerationTiming();
+    /** @type {unknown} */
+    let runError;
     try {
       if (!abortController) {
         abortController = new AbortController();
@@ -2879,9 +2888,9 @@ class AgentClient extends BaseClient {
 
         const activityLabel = this.buildActivityLabelWiring(streamId, abortController.signal);
         const activityPhase = this.buildActivityPhaseWiring(streamId, abortController.signal);
-        const offsetHandlers = createSteerIndexOffsetHandlers(
-          this.options.eventHandlers,
-          this.steerOffsetState,
+        const offsetHandlers = createFirstTokenTimingHandlers(
+          createSteerIndexOffsetHandlers(this.options.eventHandlers, this.steerOffsetState),
+          generationTiming,
         );
         const createRunPromise = createRun({
           agents,
@@ -2971,6 +2980,7 @@ class AgentClient extends BaseClient {
         if (this.activityLabelsMarkedPromise != null) {
           await this.activityLabelsMarkedPromise;
         }
+        generationTiming.startedAt = Date.now();
         await run.processStream({ messages }, config, {
           callbacks: {
             [Callback.TOOL_ERROR]: logToolError,
@@ -3042,6 +3052,7 @@ class AgentClient extends BaseClient {
       this.applyHideSequentialOutputsFilter();
       this.rebaseActivityPhaseBounds(contentBeforeReshape);
     } catch (err) {
+      runError = err;
       if (abortController.signal.aborted) {
         logger.debug(
           '[api/server/controllers/agents/client.js #sendCompletion] Operation aborted by user',
@@ -3114,6 +3125,25 @@ class AgentClient extends BaseClient {
           err,
         );
       }
+      await recordGeneration(
+        { createGeneration: db.createGeneration, createFlag: db.createFlag, findKeywordFlags },
+        {
+          user: this.user ?? this.options.req.user?.id,
+          conversationId: this.conversationId,
+          messageId: this.responseMessageId,
+          model: this.model ?? this.options.agent.model_parameters.model,
+          collectedUsage: this.collectedUsage,
+          usage: this.usage,
+          contentParts: this.contentParts,
+          userText: this.kbQueryText ?? '',
+          ragChunks: this.kbRetrieval?.chunks,
+          ragMs: this.kbRetrieval?.elapsedMs,
+          timing: generationTiming,
+          aborted: abortController?.signal?.aborted === true,
+          error: runError,
+          tenantId: this.options.req.user?.tenantId,
+        },
+      );
       if (this._resolveRun) {
         this._resolveRun(this.run ?? null);
         this._resolveRun = null;
