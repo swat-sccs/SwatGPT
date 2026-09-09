@@ -95,6 +95,7 @@ const {
   decrementPendingRequest,
   maybePrewarmCodeSandbox,
   retrieveKbContextDetailed,
+  resolveDirectoryContext,
   recordGeneration,
   findKeywordFlags,
   createGenerationTiming,
@@ -1249,6 +1250,8 @@ class AgentClient extends BaseClient {
       this.kbRetrieval = retrieval;
       return retrieval.context;
     });
+    /** Student directory lookup ("where does X live"); in-memory, fails open to `undefined`. */
+    const directoryContextPromise = resolveDirectoryContext(this.kbQueryText, db.listDirectory);
 
     let payload;
     /** @type {number | undefined} */
@@ -1534,13 +1537,19 @@ class AgentClient extends BaseClient {
      * Memory context is handled separately and applied per-agent based on config.
      */
     const sharedRunContextParts = [];
-    const [augmentedPrompt, [memories, configServers], agentScopedContext, kbContext] =
-      await Promise.all([
-        this.contextHandlers?.createContext(),
-        earlySharedContextPromise,
-        agentScopedContextPromise,
-        kbContextPromise,
-      ]);
+    const [
+      augmentedPrompt,
+      [memories, configServers],
+      agentScopedContext,
+      kbContext,
+      directoryContext,
+    ] = await Promise.all([
+      this.contextHandlers?.createContext(),
+      earlySharedContextPromise,
+      agentScopedContextPromise,
+      kbContextPromise,
+      directoryContextPromise,
+    ]);
 
     /** Augmented prompt from RAG/context handlers */
     this.augmentedPrompt = augmentedPrompt;
@@ -1550,6 +1559,10 @@ class AgentClient extends BaseClient {
 
     if (kbContext) {
       sharedRunContextParts.push(kbContext);
+    }
+
+    if (directoryContext) {
+      sharedRunContextParts.push(directoryContext);
     }
 
     /** Memory context (user preferences/memories). Keyed context (with memory
