@@ -1,0 +1,13 @@
+{
+  "name": "swatgpt-directory-sync",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "description": "Exports the ITS student directory plus the Cygnet privacy overlay as a SwatGPT directory snapshot",
+  "scripts": {
+    "export": "node export.mjs"
+  },
+  "dependencies": {
+    "mysql2": "^3.11.0"
+  }
+}
