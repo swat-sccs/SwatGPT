@@ -76,7 +76,7 @@ PY
 fi
 
 echo "--- promtool check config"
-docker run --rm -v "$C:/cfg:ro" --entrypoint promtool prom/prometheus:latest check config /cfg/prometheus.yml
+docker run --rm -v "$C:/etc/prometheus:ro" --entrypoint promtool prom/prometheus:latest check config /etc/prometheus/prometheus.yml
 echo "--- amtool check-config"
 docker run --rm -v "$AM:/cfg:ro" --entrypoint amtool prom/alertmanager:v0.28.1 check-config /cfg/alertmanager.yml
 echo "--- docker stack deploy (adds alertmanager; unchanged services are left alone)"
