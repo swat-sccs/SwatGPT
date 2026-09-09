@@ -446,6 +446,49 @@ export const adminLangfuseConnectionTest = () => `${adminLangfuseConnection()}/t
 export const adminLangfuseSessionLink = (conversationId: string) =>
   `${adminLangfuseConnection()}/session/${encodeURIComponent(conversationId)}`;
 
+/* Admin observability (usage, conversations, controls) */
+const adminQuery = (params: Record<string, string | number | boolean | undefined>) => {
+  const search = new URLSearchParams();
+  for (const [key, value] of Object.entries(params)) {
+    if (value !== undefined && value !== '') {
+      search.set(key, String(value));
+    }
+  }
+  const qs = search.toString();
+  return qs ? `?${qs}` : '';
+};
+export type AdminQueryParams = Parameters<typeof adminQuery>[0];
+export const adminCapabilities = () => `${BASE_URL}/api/admin/capabilities`;
+export const adminUsage = () => `${BASE_URL}/api/admin/usage`;
+export const adminUsageSummary = (params: AdminQueryParams = {}) =>
+  `${adminUsage()}/summary${adminQuery(params)}`;
+export const adminUsageTimeseries = (params: AdminQueryParams = {}) =>
+  `${adminUsage()}/timeseries${adminQuery(params)}`;
+export const adminUsageUsers = (params: AdminQueryParams = {}) =>
+  `${adminUsage()}/users${adminQuery(params)}`;
+export const adminUsageUser = (userId: string, params: AdminQueryParams = {}) =>
+  `${adminUsage()}/users/${encodeURIComponent(userId)}${adminQuery(params)}`;
+export const adminUsageModels = (params: AdminQueryParams = {}) =>
+  `${adminUsage()}/models${adminQuery(params)}`;
+export const adminConversations = (params: AdminQueryParams = {}) =>
+  `${BASE_URL}/api/admin/conversations${adminQuery(params)}`;
+export const adminConversation = (conversationId: string) =>
+  `${BASE_URL}/api/admin/conversations/${encodeURIComponent(conversationId)}`;
+export const adminConversationExport = (conversationId: string) =>
+  `${adminConversation(conversationId)}/export`;
+export const adminConversationFlag = (conversationId: string) =>
+  `${adminConversation(conversationId)}/flag`;
+export const adminFlags = (params: AdminQueryParams = {}) =>
+  `${BASE_URL}/api/admin/flags${adminQuery(params)}`;
+export const adminFlagResolve = (flagId: string) =>
+  `${BASE_URL}/api/admin/flags/${encodeURIComponent(flagId)}/resolve`;
+export const adminControls = () => `${BASE_URL}/api/admin/controls`;
+export const adminControlsPause = () => `${adminControls()}/pause`;
+export const adminControlsUser = (userId: string) =>
+  `${adminControls()}/users/${encodeURIComponent(userId)}`;
+export const adminControlsUserBan = (userId: string) => `${adminControlsUser(userId)}/ban`;
+export const adminControlsUserBalance = (userId: string) => `${adminControlsUser(userId)}/balance`;
+
 /* Tool favorites (starred marketplace items) */
 export const toolFavorites = () => `${BASE_URL}/api/user/settings/favorites/tools`;
 export const toolFavorite = (itemType: string, itemId: string) =>

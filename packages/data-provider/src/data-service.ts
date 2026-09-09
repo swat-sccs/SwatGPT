@@ -10,6 +10,7 @@ import * as m from './types/mutations';
 import * as ag from './types/agents';
 import * as q from './types/queries';
 import * as sk from './types/skills';
+import * as adm from './types/admin';
 import * as f from './types/files';
 import * as config from './config';
 import request from './request';
@@ -30,6 +31,98 @@ export function testLangfuseConnection(
   payload: t.TLangfuseConnectionTestRequest,
 ): Promise<t.TLangfuseConnectionTestResponse> {
   return request.post(endpoints.adminLangfuseConnectionTest(), payload);
+}
+
+export function getAdminCapabilities(): Promise<adm.TAdminCapabilitiesResponse> {
+  return request.get(endpoints.adminCapabilities());
+}
+
+export function getAdminUsageSummary(
+  params: adm.TAdminUsageRange = {},
+): Promise<adm.TAdminUsageSummary> {
+  return request.get(endpoints.adminUsageSummary(params));
+}
+
+export function getAdminUsageTimeseries(
+  params: adm.TAdminUsageTimeseriesQuery = {},
+): Promise<adm.TAdminUsageTimeseries> {
+  return request.get(endpoints.adminUsageTimeseries(params));
+}
+
+export function getAdminUsageUsers(
+  params: adm.TAdminUsageUsersQuery = {},
+): Promise<adm.TAdminUsageUsersResponse> {
+  return request.get(endpoints.adminUsageUsers(params));
+}
+
+export function getAdminUsageUser(
+  userId: string,
+  params: adm.TAdminUsageRange = {},
+): Promise<adm.TAdminUsageUserDetail> {
+  return request.get(endpoints.adminUsageUser(userId, params));
+}
+
+export function getAdminUsageModels(
+  params: adm.TAdminUsageRange = {},
+): Promise<adm.TAdminUsageModelsResponse> {
+  return request.get(endpoints.adminUsageModels(params));
+}
+
+export function getAdminConversations(
+  params: adm.TAdminConversationsQuery = {},
+): Promise<adm.TAdminConversationsResponse> {
+  return request.get(endpoints.adminConversations(params));
+}
+
+export function getAdminConversation(
+  conversationId: string,
+): Promise<adm.TAdminConversationDetail> {
+  return request.get(endpoints.adminConversation(conversationId));
+}
+
+export function flagAdminConversation(
+  conversationId: string,
+  payload: adm.TAdminFlagRequest,
+): Promise<adm.TAdminFlag> {
+  return request.post(endpoints.adminConversationFlag(conversationId), payload);
+}
+
+export function getAdminFlags(params: adm.TAdminFlagsQuery = {}): Promise<adm.TAdminFlagsResponse> {
+  return request.get(endpoints.adminFlags(params));
+}
+
+export function resolveAdminFlag(flagId: string): Promise<adm.TAdminFlag> {
+  return request.post(endpoints.adminFlagResolve(flagId), {});
+}
+
+export function getAdminPause(): Promise<adm.TAdminPauseState> {
+  return request.get(endpoints.adminControlsPause());
+}
+
+export function setAdminPause(payload: adm.TAdminPauseRequest): Promise<adm.TAdminPauseState> {
+  return request.put(endpoints.adminControlsPause(), payload);
+}
+
+export function getAdminUserControls(userId: string): Promise<adm.TAdminUserControls> {
+  return request.get(endpoints.adminControlsUser(userId));
+}
+
+export function banAdminUser(
+  userId: string,
+  payload: adm.TAdminBanRequest,
+): Promise<adm.TAdminUserControls> {
+  return request.post(endpoints.adminControlsUserBan(userId), payload);
+}
+
+export function unbanAdminUser(userId: string): Promise<adm.TAdminUserControls> {
+  return request.delete(endpoints.adminControlsUserBan(userId));
+}
+
+export function setAdminUserBalance(
+  userId: string,
+  payload: adm.TAdminBalanceRequest,
+): Promise<adm.TAdminUserControls> {
+  return request.put(endpoints.adminControlsUserBalance(userId), payload);
 }
 
 export function getLangfuseSessionLink(

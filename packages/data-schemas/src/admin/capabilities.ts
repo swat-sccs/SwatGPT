@@ -43,6 +43,14 @@ export const SystemCapabilities = {
    * would defeat the forensic guarantee.
    */
   READ_AUDIT_LOG: 'read:audit_log',
+  /**
+   * Oversight: read any user's conversations and messages, export them, and
+   * manage flags. Every read is written to the audit log.
+   */
+  READ_CONVERSATIONS: 'read:conversations',
+  EXPORT_CONVERSATIONS: 'export:conversations',
+  /** Operational levers: bans, balances, and the global pause switch. */
+  MANAGE_CONTROLS: 'manage:controls',
 } as const;
 
 /** Base capabilities derived from the SystemCapabilities constant. */
@@ -93,6 +101,7 @@ export const CapabilityImplications: Partial<Record<BaseSystemCapability, BaseSy
     [SystemCapabilities.MANAGE_SKILLS]: [SystemCapabilities.READ_SKILLS],
     [SystemCapabilities.MANAGE_SHARED_LINKS]: [SystemCapabilities.READ_SHARED_LINKS],
     [SystemCapabilities.MANAGE_ASSISTANTS]: [SystemCapabilities.READ_ASSISTANTS],
+    [SystemCapabilities.EXPORT_CONVERSATIONS]: [SystemCapabilities.READ_CONVERSATIONS],
   };
 
 // ---------------------------------------------------------------------------
@@ -262,6 +271,15 @@ export const CAPABILITY_CATEGORIES: CapabilityCategory[] = [
       SystemCapabilities.ACCESS_ADMIN,
       SystemCapabilities.READ_USAGE,
       SystemCapabilities.READ_AUDIT_LOG,
+    ],
+  },
+  {
+    key: 'oversight',
+    labelKey: 'com_cap_cat_oversight',
+    capabilities: [
+      SystemCapabilities.READ_CONVERSATIONS,
+      SystemCapabilities.EXPORT_CONVERSATIONS,
+      SystemCapabilities.MANAGE_CONTROLS,
     ],
   },
 ];

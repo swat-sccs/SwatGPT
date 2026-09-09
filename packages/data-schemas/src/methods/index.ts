@@ -35,6 +35,9 @@ import {
   type AuditLogMethods,
 } from './auditLog';
 import { createShareMethods, type ShareMethods } from './share';
+import { createGenerationMethods, type GenerationMethods } from './generation';
+import { createOversightMethods, type OversightMethods } from './oversight';
+import { createFlagMethods, type FlagMethods } from './flag';
 /* Tier 1 — Simple CRUD */
 import { createActionMethods, type ActionMethods } from './action';
 import { createAssistantMethods, type AssistantMethods } from './assistant';
@@ -162,6 +165,9 @@ export type AllMethods = UserMethods &
   AclEntryMethods &
   SystemGrantMethods &
   AuditLogMethods &
+  GenerationMethods &
+  FlagMethods &
+  OversightMethods &
   ShareMethods &
   AccessRoleMethods &
   PluginAuthMethods &
@@ -296,6 +302,9 @@ export function createMethods(
     ...aclEntryMethods,
     ...systemGrantMethods,
     ...createAuditLogMethods(mongoose),
+    ...createGenerationMethods(mongoose),
+    ...createFlagMethods(mongoose),
+    ...createOversightMethods(mongoose),
     ...createShareMethods(mongoose),
     ...createPluginAuthMethods(mongoose),
     /* Tier 1 */
@@ -343,6 +352,9 @@ export type {
   AclEntryMethods,
   SystemGrantMethods,
   AuditLogMethods,
+  GenerationMethods,
+  FlagMethods,
+  OversightMethods,
   ShareMethods,
   AccessRoleMethods,
   PluginAuthMethods,

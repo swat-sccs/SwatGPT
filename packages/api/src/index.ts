@@ -4,6 +4,8 @@ export * from './credentials';
 export * from './artifacts';
 /* Admin */
 export * from './admin';
+/* Oversight */
+export * from './oversight';
 export * from './cdn';
 /* Auth */
 export * from './auth';
