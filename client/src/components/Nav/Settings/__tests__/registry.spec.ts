@@ -26,6 +26,7 @@ const settingsContext: SettingsContextValue = {
   engineTTS: 'browser',
   langfuseConnectionAccess: false,
   adminPanelURL: '',
+  adminDashboardAccess: false,
 };
 
 describe('settings registry', () => {

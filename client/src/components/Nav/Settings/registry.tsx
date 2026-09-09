@@ -42,6 +42,7 @@ import Avatar from '../SettingsTabs/Account/Avatar';
 import About from '../SettingsTabs/About/About';
 import ApiKeys from '../SettingsTabs/ApiKeys';
 import MemoryToggle from './MemoryToggle';
+import Admin from './Admin';
 import { TTSEndpoints } from '~/common';
 import store from '~/store';
 
@@ -136,6 +137,15 @@ export const registry: SettingEntry[] = [
     keywords: ['admin', 'panel', 'dashboard'],
     Component: AdminPanel,
     show: (ctx) => ctx.adminPanelURL !== '',
+  },
+  {
+    id: 'adminDashboard',
+    tab: GENERAL,
+    section: 'admin',
+    labelKey: 'com_admin_settings_entry',
+    keywords: ['admin', 'dashboard', 'usage', 'conversations', 'flags'],
+    Component: Admin,
+    show: (ctx) => ctx.adminDashboardAccess,
   },
 
   // Chat · Sending

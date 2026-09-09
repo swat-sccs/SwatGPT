@@ -5,12 +5,13 @@ import type { SettingsContextValue } from './types';
 import useProviderKeys from '../SettingsTabs/ProviderKeys/useProviderKeys';
 import usePersonalizationAccess from '~/hooks/usePersonalizationAccess';
 import { useHasAccess, useAuthContext } from '~/hooks';
-import { useGetStartupConfig } from '~/data-provider';
+import { useGetStartupConfig, useAdminCapabilities } from '~/data-provider';
 import store from '~/store';
 
 export function useSettingsContext(): SettingsContextValue {
   const { user } = useAuthContext();
   const { data: startupConfig } = useGetStartupConfig();
+  const { data: adminCapabilities } = useAdminCapabilities();
   const { hasAnyPersonalizationFeature, hasMemoryOptOut } = usePersonalizationAccess();
 
   const hasRemoteAgents = useHasAccess({
@@ -53,6 +54,7 @@ export function useSettingsContext(): SettingsContextValue {
   const balanceEnabled = startupConfig?.balance?.enabled === true;
   const langfuseConnectionAccess = startupConfig?.langfuseConnectionAccess === true;
   const adminPanelURL = startupConfig?.adminPanelURL ?? '';
+  const adminDashboardAccess = adminCapabilities?.capabilities.includes('access:admin') === true;
   const isLocalProvider = user?.provider === 'local';
   const twoFactorEnabled = user?.twoFactorEnabled === true;
   const allowAccountDeletion = startupConfig?.allowAccountDeletion !== false;
@@ -92,6 +94,7 @@ export function useSettingsContext(): SettingsContextValue {
       engineTTS,
       langfuseConnectionAccess,
       adminPanelURL,
+      adminDashboardAccess,
     }),
     [
       balanceEnabled,
@@ -112,6 +115,7 @@ export function useSettingsContext(): SettingsContextValue {
       engineTTS,
       langfuseConnectionAccess,
       adminPanelURL,
+      adminDashboardAccess,
     ],
   );
 }
