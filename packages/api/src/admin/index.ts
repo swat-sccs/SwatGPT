@@ -7,7 +7,12 @@ export { createAdminSkillsSyncAccess, createAdminSkillsSyncHandlers } from './sk
 export { createAdminUsersHandlers } from './users';
 export { createAdminAuditLogHandlers } from './auditLog';
 export { resolveConfigSecret } from './secrets';
-export { createAdminUsageHandlers } from './usage';
+export {
+  createAdminUsageHandlers,
+  createUsageConversationReaders,
+  createUsageFlagReaders,
+  USAGE_USER_FIELDS,
+} from './usage';
 export { createAdminCapabilitiesHandlers } from './capabilities';
 export { createAdminConversationsHandlers } from './conversations';
 export { createAdminFlagsHandlers } from './flags';
