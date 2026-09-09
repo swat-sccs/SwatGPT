@@ -1,20 +1,23 @@
 import { loadConfig } from './config.js';
 import { SwatHttpServer } from './http.js';
+import { metrics } from './metrics.js';
 import { PollScheduler } from './scheduler.js';
 import { SwatService } from './service.js';
 import { PgStore } from './storage/store.js';
 import { DashClient } from './upstream/client.js';
 import { RegistryDiscovery } from './upstream/discovery.js';
-import { log } from './util.js';
+import { log, setLogLevel } from './util.js';
 
 async function main() {
   const config = loadConfig();
+  setLogLevel(config.logLevel);
   const store = new PgStore(config.databaseUrl);
   const client = new DashClient(config);
   const discovery = new RegistryDiscovery(client);
   const service = new SwatService(config, client, discovery, store);
   const scheduler = new PollScheduler(config, service);
   const http = new SwatHttpServer(config, service);
+  metrics.observeSnapshots((domain) => service.snapshotObservedAt(domain));
 
   await service.initialize();
   await http.listen();

@@ -137,7 +137,22 @@ export function toPublicRecord(record: NormalizedRecord): JsonObject {
   }).filter(([, value]) => value !== undefined));
 }
 
-export function log(level: 'debug' | 'info' | 'warn' | 'error', message: string, details?: unknown) {
+export type LogLevel = 'debug' | 'info' | 'warn' | 'error';
+
+const LOG_LEVEL_RANK: Record<LogLevel, number> = { debug: 0, info: 1, warn: 2, error: 3 };
+let logThreshold: LogLevel = 'info';
+
+/** Sets the minimum level that `log` writes; lower levels are dropped. */
+export function setLogLevel(level: LogLevel): void {
+  logThreshold = level;
+}
+
+export function currentLogLevel(): LogLevel {
+  return logThreshold;
+}
+
+export function log(level: LogLevel, message: string, details?: unknown) {
+  if (LOG_LEVEL_RANK[level] < LOG_LEVEL_RANK[logThreshold]) return;
   const entry = { level, time: new Date().toISOString(), message, ...(details === undefined ? {} : { details }) };
   process.stderr.write(`${JSON.stringify(entry)}\n`);
 }

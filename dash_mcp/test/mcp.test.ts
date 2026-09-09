@@ -1,6 +1,7 @@
 import { Client, InMemoryTransport } from '@modelcontextprotocol/client';
 import { describe, expect, it, vi } from 'vitest';
 import { createMcpServer } from '../src/mcp/tools.js';
+import { metrics } from '../src/metrics.js';
 import type { SwatService } from '../src/service.js';
 
 describe('MCP protocol surface', () => {
@@ -50,6 +51,7 @@ describe('MCP protocol surface', () => {
     expect(result.content).toEqual(expect.arrayContaining([
       expect.objectContaining({ text: 'MCP tool timed out after 20ms' }),
     ]));
+    expect(await metrics.render()).toMatch(/swatgpt_mcp_tool_calls_total\{tool="get_mind_candy",result="timeout"\} [1-9]/);
 
     await client.close();
     await server.close();

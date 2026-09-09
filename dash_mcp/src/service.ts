@@ -380,6 +380,14 @@ export class SwatService {
     })), fetchedAt, ['SwatGPT PostgreSQL archive'], query.limit, query.observedTo);
   }
 
+  /** When the newest stored snapshot for a domain was observed, whichever table backs it. */
+  async snapshotObservedAt(domain: Domain): Promise<string | undefined> {
+    if (domain === 'weather' || domain === 'transit') {
+      return (await this.store.latestObservation(domain))?.observed_at;
+    }
+    return this.store.latestRecordObservedAt(domain);
+  }
+
   async getDataStatus(): Promise<FeedResult<JsonObject>> {
     const fetchedAt = new Date();
     const items = await this.store.status();

@@ -1,5 +1,6 @@
 import type { Config } from './config.js';
 import type { SwatService } from './service.js';
+import { metrics } from './metrics.js';
 import { log } from './util.js';
 
 export class PollScheduler {
@@ -34,8 +35,10 @@ export class PollScheduler {
       if (this.stopped) return;
       try {
         const acquired = await this.service.store.withJobLock(name, async () => task());
+        metrics.recordPoll(name, acquired ? 'success' : 'skipped');
         if (!acquired) log('debug', 'Skipped poll because another instance owns the lock', { job: name });
       } catch (error) {
+        metrics.recordPoll(name, 'error');
         log('error', 'Polling job failed', { job: name, error: error instanceof Error ? error.message : String(error) });
       } finally {
         if (!this.stopped) {

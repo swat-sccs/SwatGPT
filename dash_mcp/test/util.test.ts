@@ -1,5 +1,5 @@
-import { describe, expect, it } from 'vitest';
-import { campusDayRange, cleanText, contentHash, normalizeRawRecord } from '../src/util.js';
+import { afterEach, describe, expect, it, vi } from 'vitest';
+import { campusDayRange, cleanText, contentHash, currentLogLevel, log, normalizeRawRecord, setLogLevel } from '../src/util.js';
 
 describe('utility normalization', () => {
   it('normalizes HTML and strips subscription/edit-only fields', () => {
@@ -24,5 +24,33 @@ describe('utility normalization', () => {
 
   it('bounds normalized text', () => {
     expect(cleanText('abcdef', 4)).toBe('abc…');
+  });
+
+  describe('log level filtering', () => {
+    afterEach(() => {
+      setLogLevel('info');
+      vi.restoreAllMocks();
+    });
+
+    it('drops entries below the configured level and keeps the rest', () => {
+      const stderr = vi.spyOn(process.stderr, 'write').mockReturnValue(true);
+      setLogLevel('warn');
+      log('debug', 'hidden');
+      log('info', 'hidden');
+      log('warn', 'shown', { job: 'content' });
+      log('error', 'shown');
+
+      expect(currentLogLevel()).toBe('warn');
+      expect(stderr).toHaveBeenCalledTimes(2);
+      const first = JSON.parse(String(stderr.mock.calls[0]?.[0]));
+      expect(first).toMatchObject({ level: 'warn', message: 'shown', details: { job: 'content' } });
+    });
+
+    it('defaults to info so debug entries stay quiet', () => {
+      const stderr = vi.spyOn(process.stderr, 'write').mockReturnValue(true);
+      log('debug', 'hidden');
+      log('info', 'shown');
+      expect(stderr).toHaveBeenCalledTimes(1);
+    });
   });
 });

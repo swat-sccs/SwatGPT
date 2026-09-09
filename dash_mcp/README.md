@@ -8,6 +8,10 @@ The server discovers current Dash configuration and exposes alerts, weather, cam
 
 Chat-facing tools normally read the latest PostgreSQL snapshot, which acts as a shared, persistent cache across MCP instances. Background polling refreshes that snapshot. Dining lookups additionally use a bounded read-through path: when the requested date, meal, or location is absent or stale, the MCP fetches the public Dash GraphQL feed and writes the result back to PostgreSQL. A short deadline keeps an upstream outage from holding a LibreChat response open, and stale cached data remains available as fallback. Each response includes source, retrieval time, data time, truncation, and stale-data metadata. Historical entity versions are retained indefinitely; high-frequency weather and transit observations default to 30 days.
 
+`GET /healthz` reports liveness, `GET /readyz` reports PostgreSQL and registry readiness, and `GET /metrics` exposes Prometheus text-format metrics: `swatgpt_mcp_tool_calls_total{tool,result}` (result is `success`, `error`, or `timeout`), `swatgpt_mcp_upstream_polls_total{kind,result}` (one series per background job: `alerts`, `realtime`, `content`, `configuration`, `retention`; result is `success`, `error`, or `skipped` when another instance holds the job lock), `swatgpt_mcp_snapshot_age_seconds{domain}` (seconds since the newest stored snapshot for each domain), and the standard `swatgpt_mcp_process_*` / `swatgpt_mcp_nodejs_*` runtime metrics. None of these endpoints require authentication, so publish port 3000 only to networks you trust.
+
+`LOG_LEVEL` (`debug`, `info`, `warn`, or `error`; default `info`) sets the minimum severity written to stderr as NDJSON.
+
 The container probes its HTTP health endpoint every 30 seconds. After three consecutive failed or timed-out probes, its watchdog force-terminates the unresponsive server process; Compose's `restart: unless-stopped` policy then restarts it. `HEALTHCHECK_PROBE_TIMEOUT_MS` and `HEALTHCHECK_FAILURE_THRESHOLD` can tune the 4-second probe timeout and three-failure threshold.
 
 ## Quick start

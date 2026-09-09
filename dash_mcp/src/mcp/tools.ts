@@ -1,5 +1,6 @@
 import { McpServer } from '@modelcontextprotocol/server';
 import { z } from 'zod';
+import { metrics } from '../metrics.js';
 import { domains } from '../types.js';
 import type { SwatService } from '../service.js';
 
@@ -120,21 +121,30 @@ function register<Schema extends z.ZodType>(
         handler(inputSchema.parse(input) as z.infer<Schema>),
         timeoutMs,
       );
+      metrics.recordToolCall(name, 'success');
       return {
         content: [{ type: 'text' as const, text: JSON.stringify(result) }],
         structuredContent: result as Record<string, unknown>,
       };
     } catch (error) {
+      metrics.recordToolCall(name, error instanceof ToolTimeoutError ? 'timeout' : 'error');
       const message = error instanceof Error ? error.message : String(error);
       return { isError: true, content: [{ type: 'text' as const, text: message }] };
     }
   });
 }
 
+class ToolTimeoutError extends Error {
+  constructor(timeoutMs: number) {
+    super(`MCP tool timed out after ${timeoutMs}ms`);
+    this.name = 'ToolTimeoutError';
+  }
+}
+
 async function withTimeout<T>(promise: Promise<T>, timeoutMs: number): Promise<T> {
   let timer: NodeJS.Timeout | undefined;
   const timeout = new Promise<never>((_resolve, reject) => {
-    timer = setTimeout(() => reject(new Error(`MCP tool timed out after ${timeoutMs}ms`)), timeoutMs);
+    timer = setTimeout(() => reject(new ToolTimeoutError(timeoutMs)), timeoutMs);
   });
   try {
     return await Promise.race([promise, timeout]);

@@ -5,6 +5,7 @@ import { NodeStreamableHTTPServerTransport } from '@modelcontextprotocol/node';
 import { isInitializeRequest, type McpServer } from '@modelcontextprotocol/server';
 import type { Config } from './config.js';
 import { createMcpServer } from './mcp/tools.js';
+import { metrics } from './metrics.js';
 import type { SwatService } from './service.js';
 import { log } from './util.js';
 
@@ -32,6 +33,15 @@ export class SwatHttpServer {
       let registry = false;
       try { registry = this.service.registry().hashes.length > 0; } catch { registry = false; }
       res.status(database ? 200 : 503).json({ status: database ? 'ready' : 'not-ready', database, registry });
+    });
+
+    app.get('/metrics', async (_req, res) => {
+      try {
+        res.type(metrics.registry.contentType).send(await metrics.render());
+      } catch (error) {
+        log('error', 'Metrics collection failed', { error: error instanceof Error ? error.message : String(error) });
+        if (!res.headersSent) res.status(500).type('text/plain').send('metrics unavailable');
+      }
     });
 
     app.all('/mcp', async (req, res) => {

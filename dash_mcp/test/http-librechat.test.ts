@@ -42,6 +42,24 @@ describe('LibreChat streamable-http handshake', () => {
     await client.close();
   });
 
+  it('serves Prometheus metrics that reflect tool calls', async () => {
+    const { port } = await listen();
+    const client = new Client({ name: 'librechat', version: '1.30.0' });
+    await client.connect(new StreamableHTTPClientTransport(new URL(`http://127.0.0.1:${port}/mcp`)));
+    await client.callTool({ name: 'get_campus_hours', arguments: { place: 'Sharples' } });
+    await client.close();
+
+    const response = await fetch(`http://127.0.0.1:${port}/metrics`);
+    const body = await response.text();
+    expect(response.status).toBe(200);
+    expect(response.headers.get('content-type')).toContain('text/plain');
+    expect(body).toMatch(/swatgpt_mcp_tool_calls_total\{tool="get_campus_hours",result="success"\} [1-9]/);
+    expect(body).toMatch(/# TYPE swatgpt_mcp_snapshot_age_seconds gauge/);
+
+    const health = await fetch(`http://127.0.0.1:${port}/healthz`);
+    expect(await health.json()).toEqual({ status: 'ok' });
+  });
+
   it('accepts a 2025-03-26 initialize POST and serves tools/list on the new session immediately', async () => {
     const { port } = await listen();
     const started = performance.now();
