@@ -13,6 +13,7 @@ export { createAdminConversationsHandlers } from './conversations';
 export { createAdminFlagsHandlers } from './flags';
 export { createAdminControlsHandlers } from './controls';
 export * from './bans';
+export * from './pause';
 export type { AdminConfigDeps } from './config';
 export type { AdminLangfuseDeps } from './langfuse';
 export type { AdminGrantsDeps, GrantPrincipalType } from './grants';

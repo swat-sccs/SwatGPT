@@ -14,6 +14,7 @@ const {
   validateConvoAccess,
   buildEndpointOption,
   canAccessAgentFromBody,
+  checkPaused,
 } = require('~/server/middleware');
 const { initializeClient } = require('~/server/services/Endpoints/agents');
 const AgentController = require('~/server/controllers/agents/request');
@@ -96,7 +97,7 @@ const resumeController = async (req, res, next) => {
  * @access Private
  * @returns {void}
  */
-router.post('/resume', resumeController);
+router.post('/resume', checkPaused, resumeController);
 
 /**
  * @route POST / (regular endpoint)
@@ -106,7 +107,7 @@ router.post('/resume', resumeController);
  * @param {express.Response} res - The response object, used to send back a response.
  * @returns {void}
  */
-router.post('/', controller);
+router.post('/', checkPaused, controller);
 
 /**
  * @route POST /:endpoint (ephemeral agents)
@@ -116,6 +117,6 @@ router.post('/', controller);
  * @param {express.Response} res - The response object, used to send back a response.
  * @returns {void}
  */
-router.post('/:endpoint', controller);
+router.post('/:endpoint', checkPaused, controller);
 
 module.exports = router;
