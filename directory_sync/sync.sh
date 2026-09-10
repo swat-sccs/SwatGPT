@@ -12,6 +12,8 @@ EAGLE_REPO=${EAGLE_REPO:-SwatGPT}
 REMOTE_FILE=${REMOTE_FILE:-.cache/swatgpt-directory.json}
 CONTAINER_FILE=/tmp/directory.json
 
+snapshot=
+trap '[[ -n $snapshot ]] && rm -f "$snapshot"' EXIT
 snapshot=$(OUT_DIR="${OUT_DIR:-$HERE/out}" "$HERE/export.sh")
 echo "[sync] $(date -Is) exported $snapshot"
 
@@ -20,12 +22,10 @@ scp -q "$snapshot" "$EAGLE:$REMOTE_FILE"
 
 ssh -o BatchMode=yes "$EAGLE" bash -s <<REMOTE
 set -euo pipefail
+trap 'rm -f "\$HOME/$REMOTE_FILE"; docker compose exec -T api rm -f "$CONTAINER_FILE" >/dev/null 2>&1 || true' EXIT
 cd "$EAGLE_REPO"
 docker compose cp "\$HOME/$REMOTE_FILE" "api:$CONTAINER_FILE"
 docker compose exec -T api npm run import-directory -- "$CONTAINER_FILE"
-docker compose exec -T api rm -f "$CONTAINER_FILE"
-rm -f "\$HOME/$REMOTE_FILE"
 REMOTE
 
-rm -f "$snapshot"
 echo "[sync] $(date -Is) published"
