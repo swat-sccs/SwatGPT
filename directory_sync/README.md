@@ -33,12 +33,14 @@ ITS currently stores dorms as display names (`Willets`, `Mertz`); legacy codes s
 no student has a dorm (ITS blanks the column while reloading housing) and the importer refuses
 an empty snapshot, so a bad run never empties the live directory.
 
-## One-time setup on gull
+## Running it on gull
+
+`/home/29/aidahxr` is the same NFS home on loon and gull, so the dev checkout at
+`~/SwatGPT` is already present on gull; there is nothing to clone. Confirm the app host is
+reachable without a prompt:
 
 ```sh
-git clone --filter=blob:none --sparse git@github.com:swat-sccs/SwatGPT.git ~/SwatGPT
-git -C ~/SwatGPT sparse-checkout set directory_sync
-ssh -o BatchMode=yes aidahxr@130.58.218.151 hostname   # must print "eagle" without a prompt
+ssh -o BatchMode=yes aidahxr@130.58.218.151 hostname   # must print "eagle"
 ```
 
 Manual run, which is also the first-time publish after sign-off:
@@ -47,8 +49,11 @@ Manual run, which is also the first-time publish after sign-off:
 ~/SwatGPT/directory_sync/sync.sh
 ```
 
+Do not run it while a deploy is in progress on eagle (a push to `main` rebuilds and restarts
+the app container for about five minutes); the import would land in the old container.
+
 Export only, leaving `out/directory.json` behind for inspection (delete it afterwards, it
-contains every student's room):
+contains every student's room and the home directory is shared):
 
 ```sh
 ~/SwatGPT/directory_sync/export.sh
@@ -59,12 +64,13 @@ contains every student's room):
 User crontab on gull (`crontab -e`), daily at 06:10:
 
 ```cron
-10 6 * * * git -C $HOME/SwatGPT pull -q && $HOME/SwatGPT/directory_sync/sync.sh >> $HOME/.local/state/swatgpt-directory-sync.log 2>&1
+10 6 * * * $HOME/SwatGPT/directory_sync/sync.sh >> $HOME/.local/state/swatgpt-directory-sync.log 2>&1
 ```
 
-Create the log directory once with `mkdir -p ~/.local/state`. The app refreshes its in-memory
-index within a minute when the directory was empty and within 15 minutes otherwise, so no
-restart follows a publish.
+Create the log directory once with `mkdir -p ~/.local/state`. The scripts run from whatever
+is checked out in `~/SwatGPT`, so keep that checkout on `main`. The app refreshes its
+in-memory index within a minute when the directory was empty and within 15 minutes
+otherwise, so no restart follows a publish.
 
 ## Checking it worked
 
