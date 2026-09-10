@@ -193,3 +193,7 @@ scripts/activity-labels/results/
 __pycache__/
 /context/
 /qdrant_data/
+
+# Student directory sync (exported snapshots contain personal data)
+/directory_sync/node_modules/
+/directory_sync/*.json
