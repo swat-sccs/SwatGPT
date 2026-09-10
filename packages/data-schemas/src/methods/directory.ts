@@ -35,8 +35,13 @@ export function createDirectoryMethods(mongoose: typeof import('mongoose')): {
   listDirectory: () => Promise<DirectoryEntry[]>;
   replaceDirectory: (entries: DirectoryEntry[]) => Promise<DirectoryReplaceResult>;
 } {
-  const getModel = (): Model<IDirectoryEntry> =>
-    mongoose.models.DirectoryEntry as Model<IDirectoryEntry>;
+  const getModel = (): Model<IDirectoryEntry> => {
+    const model = mongoose.models.DirectoryEntry as Model<IDirectoryEntry> | undefined;
+    if (!model) {
+      throw new Error('[directory] DirectoryEntry model is not registered; call createModels first');
+    }
+    return model;
+  };
 
   async function listDirectory(): Promise<DirectoryEntry[]> {
     const rows = (await getModel().find({}, ENTRY_PROJECTION).lean()) as StoredEntry[];
