@@ -197,3 +197,4 @@ __pycache__/
 # Student directory sync (exported snapshots contain personal data)
 /directory_sync/node_modules/
 /directory_sync/*.json
+/directory_sync/out/
