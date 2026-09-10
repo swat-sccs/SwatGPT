@@ -44,6 +44,7 @@ const {
   configureMessageFilterRegexValidator,
   configureFileConfigRegexEngine,
   waitForKeyvRedisClient,
+  warmDirectoryStore,
 } = require('@librechat/api');
 const { connectDb, indexSync } = require('~/db');
 const {
@@ -51,6 +52,7 @@ const {
   sweepOrphanedPreviews,
   getRoleByName,
   seedDatabase,
+  listDirectory,
 } = require('~/models');
 const initializeOAuthReconnectManager = require('./services/initializeOAuthReconnectManager');
 const { capabilityContextMiddleware } = require('./middleware/roles/capabilities');
@@ -137,6 +139,7 @@ const startServer = async () => {
   indexSync().catch((err) => {
     logger.error('[indexSync] Background sync failed:', err);
   });
+  warmDirectoryStore(listDirectory);
 
   app.disable('x-powered-by');
   app.set('trust proxy', trusted_proxy);

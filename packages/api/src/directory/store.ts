@@ -24,7 +24,7 @@ function refresh(load: DirectoryLoader): Promise<DirectoryIndex | undefined> {
   state.loading = load()
     .then((entries) => {
       state.index = entries.length > 0 ? buildIndex(entries) : undefined;
-      state.loadedAt = Date.now();
+      state.loadedAt = entries.length > 0 ? Date.now() : Date.now() - REFRESH_MS + RETRY_MS;
       logger.info(`[directory] loaded ${entries.length} directory entries`);
       return state.index;
     })
@@ -66,6 +66,17 @@ export async function getDirectoryIndex(
     return state.index;
   }
   return withinBudget(refresh(load), FIRST_LOAD_BUDGET_MS);
+}
+
+/**
+ * Loads the directory in the background at server start so the first housing
+ * question is served from memory instead of racing the first-load budget.
+ */
+export function warmDirectoryStore(load: DirectoryLoader): void {
+  if (state.loadedAt > 0 || state.loading) {
+    return;
+  }
+  void refresh(load);
 }
 
 export function resetDirectoryStore(): void {
