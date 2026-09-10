@@ -2,7 +2,7 @@ const fs = require('fs');
 const path = require('path');
 const mongoose = require('mongoose');
 const { dormLabel } = require('@librechat/api');
-const { createMethods } = require('@librechat/data-schemas');
+const { createModels, createMethods } = require('@librechat/data-schemas');
 const { silentExit } = require('./helpers');
 const connect = require('./connect');
 
@@ -67,6 +67,7 @@ const toEntry = (row) => {
   console.purple(`Read ${rows.length} rows, ${entries.length} publishable entries`);
 
   await connect();
+  createModels(mongoose);
   const { replaceDirectory } = createMethods(mongoose);
   const result = await replaceDirectory(entries);
   console.green(
