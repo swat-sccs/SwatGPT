@@ -50,9 +50,10 @@ function withinBudget<T>(promise: Promise<T>, ms: number): Promise<T | undefined
 
 /**
  * Returns the in-memory directory index, loading it on first use and
- * refreshing it in the background once it is older than `REFRESH_MS`. The
- * first load is bounded so a slow database never delays a chat message; the
- * load keeps running and serves the next request.
+ * refreshing it in the background once it is older than `REFRESH_MS`. Loads
+ * that have no index to fall back on (the first one, or a retry after an
+ * empty snapshot) are awaited within a budget so a slow database never delays
+ * a chat message; the load keeps running and serves the next request.
  */
 export async function getDirectoryIndex(
   load: DirectoryLoader,
@@ -61,7 +62,7 @@ export async function getDirectoryIndex(
   if (state.loadedAt > 0 && age < REFRESH_MS) {
     return state.index;
   }
-  if (state.loadedAt > 0) {
+  if (state.loadedAt > 0 && state.index) {
     void refresh(load);
     return state.index;
   }

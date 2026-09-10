@@ -48,10 +48,8 @@ describe('getDirectoryIndex', () => {
 
     load.mockResolvedValueOnce([jane]);
     jest.advanceTimersByTime(31 * 1000);
-    await getDirectoryIndex(load);
-    await flush();
-    expect(load).toHaveBeenCalledTimes(2);
     expect(await getDirectoryIndex(load)).toBeDefined();
+    expect(load).toHaveBeenCalledTimes(2);
   });
 
   it('serves the first question without a directory when the first load is slow', async () => {
