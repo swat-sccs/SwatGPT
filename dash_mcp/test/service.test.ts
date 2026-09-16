@@ -120,6 +120,82 @@ describe('PostgreSQL-first service reads', () => {
     expect(result.items).toEqual([]);
     expect(result.meta.warning).toContain('live Dash lookup failed: Dash offline');
   });
+
+  it('resolves dining hall aliases and refreshes live when cached hours do not match', async () => {
+    const client = {
+      query: vi.fn().mockResolvedValue({
+        data: [{
+          id: 'dcc-hours', title: 'Dining Center Hours',
+          startdate: '2026-09-16T07:30:00-04:00', enddate: '2026-09-16T20:00:00-04:00',
+        }],
+      }),
+    } as unknown as DashClient;
+    const store = {
+      currentRecords: vi.fn().mockResolvedValue([]),
+      latestRecordObservedAt: vi.fn().mockResolvedValue(new Date().toISOString()),
+      replaceSourceRecords: vi.fn().mockResolvedValue(undefined),
+    } as unknown as PgStore;
+    const discovery = {
+      current: vi.fn().mockReturnValue({
+        hours: [{ place: 'Dining Center', category: 'Dining', kind: 'google', sourceId: 'dcc-hours' }],
+      }),
+    } as unknown as RegistryDiscovery;
+    const service = new SwatService(config(), client, discovery, store);
+
+    const result = await service.getHours({ place: 'dining hall', date: '2026-09-16' });
+
+    expect(client.query).toHaveBeenCalledWith('Calendar', expect.any(String), expect.objectContaining({
+      calendarId: 'dcc-hours',
+    }));
+    expect(result.items).toEqual([expect.objectContaining({
+      source: 'Dining Center',
+      details: expect.objectContaining({
+        campus_aliases: expect.arrayContaining(['Sharples', 'DCC', 'dining hall']),
+      }),
+    })]);
+    expect(result.meta.resolved_date).toBe('2026-09-16');
+    expect(result.meta.warning).toBeUndefined();
+  });
+
+  it('resolves Sharples against cached Dining Center hours without a live request', async () => {
+    const client = { query: vi.fn() } as unknown as DashClient;
+    const store = {
+      currentRecords: vi.fn().mockResolvedValue([{
+        id: 'dcc-hours', title: 'Dining Center Hours', source: 'Dining Center',
+        start: '2026-09-16T07:30:00-04:00', end: '2026-09-16T20:00:00-04:00',
+      }]),
+      latestRecordObservedAt: vi.fn().mockResolvedValue(new Date().toISOString()),
+    } as unknown as PgStore;
+    const service = new SwatService(config(), client, {} as RegistryDiscovery, store);
+
+    const result = await service.getHours({ place: 'Sharples', date: '2026-09-16' });
+
+    expect(result.items).toHaveLength(1);
+    expect(result.meta.resolved_date).toBe('2026-09-16');
+    expect(client.query).not.toHaveBeenCalled();
+  });
+
+  it('returns the resolved campus date and a truthful warning for a confirmed empty hours result', async () => {
+    const client = { query: vi.fn().mockResolvedValue({ data: [] }) } as unknown as DashClient;
+    const store = {
+      currentRecords: vi.fn().mockResolvedValue([]),
+      latestRecordObservedAt: vi.fn().mockResolvedValue(new Date().toISOString()),
+      replaceSourceRecords: vi.fn().mockResolvedValue(undefined),
+    } as unknown as PgStore;
+    const discovery = {
+      current: vi.fn().mockReturnValue({
+        hours: [{ place: 'Dining Center', category: 'Dining', kind: 'google', sourceId: 'dcc-hours' }],
+      }),
+    } as unknown as RegistryDiscovery;
+    const service = new SwatService(config(), client, discovery, store);
+
+    const result = await service.getHours({ place: 'Sharples', date: '2026-09-16' });
+
+    expect(result.items).toEqual([]);
+    expect(result.meta.resolved_date).toBe('2026-09-16');
+    expect(result.meta.stale).toBe(false);
+    expect(result.meta.warning).toContain('do not infer that the venue is closed');
+  });
 });
 
 function config() {

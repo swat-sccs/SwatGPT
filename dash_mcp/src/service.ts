@@ -5,6 +5,7 @@ import {
   asObject, asObjects, campusDayRange, cleanText, currentCampusDate, fuzzyMatch,
   log, normalizeRawRecord, toPublicRecord, withoutTypename,
 } from './util.js';
+import { campusHoursAliasesFor, campusHoursPlaceMatches } from './hoursAliases.js';
 import { DashClient, resultData } from './upstream/client.js';
 import { RegistryDiscovery } from './upstream/discovery.js';
 import { queries } from './upstream/queries.js';
@@ -104,18 +105,52 @@ export class SwatService {
   async getHours(input: { place?: string; category?: string; date?: string; limit?: number }, refresh = false): Promise<FeedResult<JsonObject>> {
     const fetchedAt = new Date();
     const limit = input.limit ?? 30;
+    const resolvedDate = input.date ?? currentCampusDate();
     if (!refresh) {
-      const range = campusDayRange(input.date ?? currentCampusDate());
-      return this.cachedRecords('hours', limit, fetchedAt, (item) =>
-        fuzzyMatch(JSON.stringify(item), input.place) &&
+      const range = campusDayRange(resolvedDate);
+      const cached = await this.cachedRecords('hours', limit, fetchedAt, (item) =>
+        campusHoursPlaceMatches(JSON.stringify(item), input.place) &&
         fuzzyMatch(JSON.stringify(item), input.category) &&
         recordOverlapsRange(item, new Date(range.start), new Date(range.end)),
       this.config.contentPollMs);
+
+      if (cached.items.length && !cached.meta.stale) {
+        return withHoursQueryMeta(cached, resolvedDate, input);
+      }
+      try {
+        const elapsedMs = Date.now() - fetchedAt.getTime();
+        const liveBudgetMs = Math.max(250, this.config.mcpToolTimeoutMs - elapsedMs - 500);
+        const live = await withDeadline(
+          this.getHours({ ...input, date: resolvedDate }, true),
+          liveBudgetMs,
+          `Live Dash campus-hours lookup exceeded ${liveBudgetMs}ms`,
+        );
+        return withHoursQueryMeta(live, resolvedDate, input);
+      } catch (error) {
+        if (cached.items.length) {
+          return withHoursQueryMeta(
+            makeStaleResult(cached.items, fetchedAt, cached.meta.source, cached.meta.data_as_of, error),
+            resolvedDate,
+            input,
+          );
+        }
+        return withHoursQueryMeta(makeUnavailableResult(
+          fetchedAt,
+          'hours',
+          `No matching cached campus-hours data is available and the live Dash lookup failed: ${error instanceof Error ? error.message : String(error)}`,
+        ), resolvedDate, input);
+      }
     }
     try {
-      const range = campusDayRange(input.date ?? currentCampusDate());
-      const sources = this.registry().hours.filter((source) =>
-        fuzzyMatch(source.place, input.place) && fuzzyMatch(source.category ?? '', input.category),
+      const range = campusDayRange(resolvedDate);
+      let registry: DashboardRegistry;
+      try {
+        registry = this.registry();
+      } catch {
+        registry = await this.discovery.load();
+      }
+      const sources = registry.hours.filter((source) =>
+        campusHoursPlaceMatches(source.place, input.place) && fuzzyMatch(source.category ?? '', input.category),
       );
       const records = (await Promise.all(sources.map(async (source) => {
         const query = source.kind === 'libcal' ? queries.libcal : source.kind === 'cbord' ? queries.cbord : queries.calendar;
@@ -125,19 +160,25 @@ export class SwatService {
         });
         const events = resultData(raw).map((item) => normalizeRawRecord('hours', source.place, {
           ...item, campus_place: source.place, campus_category: source.category,
+          campus_aliases: campusHoursAliasesFor(source.place),
           additional_info_url: source.additionalInfoUrl, location_text: source.locationText,
           location_url: source.locationUrl, hours_announcement: source.announcement, hours_override: source.override,
         }, { category: source.category, location: source.locationText }));
         if (!events.length && (source.announcement || source.override)) {
           events.push(normalizeRawRecord('hours', source.place, {
             id: `configuration-${source.sourceId}`, title: source.place, description: source.announcement,
-            campus_category: source.category, hours_override: source.override,
+            campus_category: source.category, campus_aliases: campusHoursAliasesFor(source.place),
+            hours_override: source.override,
           }, { category: source.category, location: source.locationText }));
         }
         return events;
       }))).flat();
       await this.persist(records, sources.map((source) => ({ domain: 'hours', source: source.place })));
-      return makeResult(records.map(toPublicRecord), fetchedAt, sources.map((source) => source.place), limit);
+      return withHoursQueryMeta(
+        makeResult(records.map(toPublicRecord), fetchedAt, sources.map((source) => source.place), limit),
+        resolvedDate,
+        input,
+      );
     } catch (error) {
       if (refresh) throw error;
       return this.recordsFallback('hours', limit, fetchedAt, error, input.place ?? input.category);
@@ -483,12 +524,18 @@ function recordOverlapsRange(item: JsonObject, start: Date, end: Date): boolean 
 }
 
 function diningLocationMatches(value: string, query?: string): boolean {
-  if (!query || fuzzyMatch(value, query)) return true;
-  const normalizedQuery = query.toLocaleLowerCase();
-  const asksForDiningCenter = /\b(sharples|dcc)\b/.test(normalizedQuery) || normalizedQuery.includes('dining hall');
-  if (!asksForDiningCenter) return false;
-  const normalizedValue = value.toLocaleLowerCase();
-  return normalizedValue.includes('dining center') || /\bdcc\b/.test(normalizedValue);
+  return campusHoursPlaceMatches(value, query);
+}
+
+function withHoursQueryMeta(
+  result: FeedResult<JsonObject>,
+  resolvedDate: string,
+  input: { place?: string; category?: string },
+): FeedResult<JsonObject> {
+  const warning = result.meta.warning ?? (result.items.length === 0
+    ? `The Dash returned no campus-hours entries matching${input.place ? ` place "${input.place}"` : ''}${input.category ? ` category "${input.category}"` : ''} for ${resolvedDate}; do not infer that the venue is closed.`
+    : undefined);
+  return { ...result, meta: { ...result.meta, resolved_date: resolvedDate, ...(warning ? { warning } : {}) } };
 }
 
 function normalizeDiningFilters(meal?: string, query?: string): { meal?: string; query?: string } {

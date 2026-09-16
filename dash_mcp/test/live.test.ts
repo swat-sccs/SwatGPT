@@ -4,6 +4,7 @@ import { DashClient } from '../src/upstream/client.js';
 import { RegistryDiscovery } from '../src/upstream/discovery.js';
 import { queries } from '../src/upstream/queries.js';
 import { campusDayRange, currentCampusDate } from '../src/util.js';
+import { campusHoursAliasesFor } from '../src/hoursAliases.js';
 
 describe.skipIf(process.env.RUN_LIVE_TESTS !== 'true')('live Dash contract', () => {
   it('discovers current Gatsby configuration and reads the weather feed', async () => {
@@ -26,6 +27,7 @@ describe.skipIf(process.env.RUN_LIVE_TESTS !== 'true')('live Dash contract', () 
     });
 
     expect(registry.hours.length).toBeGreaterThan(20);
+    expect(registry.hours.every((source) => campusHoursAliasesFor(source.place).length >= 3)).toBe(true);
     expect(registry.dining.length).toBeGreaterThan(3);
     expect(registry.news.length).toBeGreaterThan(5);
     expect(weather.data).toBeTypeOf('object');

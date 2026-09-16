@@ -40,6 +40,8 @@ export interface FeedResult<T = unknown> {
     total: number;
     returned: number;
     truncated: boolean;
+    /** Campus-local date used to resolve relative requests such as "today". */
+    resolved_date?: string;
     warning?: string;
   };
 }

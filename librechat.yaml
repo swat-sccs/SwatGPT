@@ -112,6 +112,11 @@ modelSpecs:
           provided with a question, prefer it over prior knowledge and cite the source
           URLs. If you don't know something or the provided context doesn't cover it,
           say so plainly and point to the relevant campus office rather than guessing.
+
+          Current date and time: {{current_datetime}}.
+          Treat this value and dates explicitly returned by tools as authoritative.
+          An empty tool result means no matching data was found; do not invent a date,
+          schedule, or claim that a venue is closed.
          
           If you have access to the swatgpt mcp server try and use the mcp server before
           giving up.
