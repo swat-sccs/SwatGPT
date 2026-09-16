@@ -14,7 +14,7 @@ jobs:
     runs-on: [self-hosted, eagle]
     defaults:
       run:
-        working-directory: /home/aidahxr/SwatGPT
+        working-directory: /srv/SwatGPT
     steps:
       - name: Sync deploy tree to pushed commit
         run: |
