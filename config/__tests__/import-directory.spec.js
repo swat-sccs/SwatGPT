@@ -105,12 +105,30 @@ describe('import-directory CLI', () => {
     expect(uids).toEqual(['jdoe1']);
   });
 
+  it('keeps the first row when a uid repeats instead of failing the snapshot', async () => {
+    const file = path.join(workdir, 'duplicates.json');
+    const repeated = { ...snapshot[0], uid: 'jdoe1', dorm: 'Mertz', room: '999' };
+    fs.writeFileSync(file, JSON.stringify([snapshot[0], snapshot[1], repeated]));
+
+    const output = runImport(file, mongoServer.getUri());
+    expect(output).toContain('Read 3 rows, 2 publishable entries');
+    expect(output).toContain('Dropped repeated rows for 1 uid(s), kept the first: jdoe1');
+    expect(output).toMatch(/inserted 2, removed 1 old rows/);
+
+    const rows = await mongoose.connection.db
+      .collection('directoryentries')
+      .find({}, { projection: { _id: 0, uid: 1, dorm: 1, room: 1 } })
+      .sort({ uid: 1 })
+      .toArray();
+    expect(rows).toEqual([{ uid: 'jdoe1', dorm: 'Willets', room: '214' }, { uid: 'jroe1' }]);
+  });
+
   it('refuses an empty snapshot and leaves the directory untouched', async () => {
     const file = path.join(workdir, 'empty.json');
     fs.writeFileSync(file, '[]');
 
     expect(() => runImport(file, mongoServer.getUri())).toThrow(/refusing to publish/);
     const count = await mongoose.connection.db.collection('directoryentries').countDocuments();
-    expect(count).toBe(1);
+    expect(count).toBe(2);
   });
 });

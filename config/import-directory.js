@@ -52,6 +52,20 @@ const toEntry = (row) => {
   };
 };
 
+/** Keeps the first entry per uid so one repeated ITS row cannot fail the whole snapshot. */
+const dedupeByUid = (entries) => {
+  const byUid = new Map();
+  const duplicates = new Set();
+  for (const entry of entries) {
+    if (byUid.has(entry.uid)) {
+      duplicates.add(entry.uid);
+      continue;
+    }
+    byUid.set(entry.uid, entry);
+  }
+  return { entries: Array.from(byUid.values()), duplicates: Array.from(duplicates) };
+};
+
 (async () => {
   const file = process.argv[2];
   if (!file) {
@@ -63,8 +77,13 @@ const toEntry = (row) => {
     console.red('Snapshot must be a JSON array');
     silentExit(1);
   }
-  const entries = rows.map(toEntry).filter(Boolean);
+  const { entries, duplicates } = dedupeByUid(rows.map(toEntry).filter(Boolean));
   console.purple(`Read ${rows.length} rows, ${entries.length} publishable entries`);
+  if (duplicates.length > 0) {
+    console.orange(
+      `Dropped repeated rows for ${duplicates.length} uid(s), kept the first: ${duplicates.join(', ')}`,
+    );
+  }
 
   await connect();
   createModels(mongoose);
