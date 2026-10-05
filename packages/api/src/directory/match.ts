@@ -5,7 +5,7 @@ import { normalizeKey, normalizeRoom, tokenize } from './normalize';
 import { nameVariants } from './nicknames';
 
 export const MAX_PERSON_MATCHES = 5;
-export const MAX_RESIDENTS = 40;
+export const MAX_RESIDENTS = 8;
 
 export interface DirectoryIndex {
   entries: ReadonlyArray<DirectoryEntry>;
@@ -23,6 +23,7 @@ export type DirectoryLookup =
       matches: DirectoryEntry[];
       total: number;
       roommates?: DirectoryEntry[];
+      roommateTotal?: number;
     }
   | {
       kind: 'place';
@@ -184,16 +185,17 @@ function lookupPerson(
   if (hits.length === 0 && !looksLikeName(tokens)) {
     return undefined;
   }
-  const roommates = intent.roommates;
   const matches = hits.slice(0, MAX_PERSON_MATCHES).map((hit) => index.entries[hit]);
   const result: DirectoryLookup = { kind: 'person', query, matches, total: hits.length };
-  if (!roommates || matches.length !== 1) {
+  if (!intent.roommates || matches.length !== 1) {
     return result;
   }
   const person = matches[0];
+  const roommates = index.entries.filter((entry) => sameRoom(person, entry));
   return {
     ...result,
-    roommates: index.entries.filter((entry) => sameRoom(person, entry)),
+    roommates: roommates.slice(0, MAX_RESIDENTS),
+    roommateTotal: roommates.length,
   };
 }
 
@@ -246,7 +248,7 @@ function lookupPlace(span: string, index: DirectoryIndex): DirectoryLookup | und
       kind: 'place',
       dorm,
       room: roomToken.toUpperCase(),
-      residents,
+      residents: residents.slice(0, MAX_RESIDENTS),
       total: residents.length,
     };
   }

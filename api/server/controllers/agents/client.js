@@ -1251,7 +1251,9 @@ class AgentClient extends BaseClient {
       return retrieval.context;
     });
     /** Student directory lookup ("where does X live"); in-memory, fails open to `undefined`. */
-    const directoryContextPromise = resolveDirectoryContext(this.kbQueryText, db.listDirectory);
+    const directoryContextPromise = resolveDirectoryContext(this.kbQueryText, db.listDirectory, {
+      userId: this.options.req?.user?.id,
+    });
 
     let payload;
     /** @type {number | undefined} */

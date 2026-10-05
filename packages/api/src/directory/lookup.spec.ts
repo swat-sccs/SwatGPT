@@ -1,6 +1,8 @@
+import { logger } from '@librechat/data-schemas';
 import type { DirectoryEntry } from '@librechat/data-schemas';
 import { resolveDirectoryContext } from './lookup';
 import { resetDirectoryStore } from './store';
+import { MAX_RESIDENTS } from './match';
 
 jest.mock('@librechat/data-schemas', () => ({
   logger: { info: jest.fn(), warn: jest.fn(), error: jest.fn(), debug: jest.fn() },
@@ -57,9 +59,34 @@ const entries: DirectoryEntry[] = [
 
 const load = jest.fn(async () => entries);
 
+function resident(n: number, room: string): DirectoryEntry {
+  return {
+    uid: `dana${n}`,
+    firstName: `Resident${n}`,
+    lastName: `Dana${n}`,
+    gradYear: 2027,
+    dorm: 'Dana',
+    room,
+    dormHidden: false,
+  };
+}
+
+const crowded: DirectoryEntry[] = [
+  ...Array.from({ length: MAX_RESIDENTS + 4 }, (_, i) => resident(i, '101')),
+  ...Array.from({ length: MAX_RESIDENTS + 6 }, (_, i) => resident(100 + i, `1${10 + i}`)),
+];
+const loadCrowded = jest.fn(async () => crowded);
+
+function listed(context: string | undefined): number {
+  return (context ?? '').split('\n').filter((line) => line.startsWith('- ')).length;
+}
+
+const info = logger.info as jest.Mock;
+
 beforeEach(() => {
   resetDirectoryStore();
   load.mockClear();
+  info.mockClear();
   delete process.env.DIRECTORY_LOOKUP_ENABLED;
 });
 
@@ -155,5 +182,56 @@ describe('resolveDirectoryContext', () => {
     process.env.DIRECTORY_LOOKUP_ENABLED = 'false';
     expect(await resolveDirectoryContext('Where does Jane Doe live?', load)).toBeUndefined();
     expect(load).not.toHaveBeenCalled();
+  });
+
+  it('keeps the resident cap small', () => {
+    expect(MAX_RESIDENTS).toBeLessThanOrEqual(10);
+  });
+
+  it('caps room, floor, and roommate listings and says how many were withheld', async () => {
+    const room = await resolveDirectoryContext('who lives in Dana 101', loadCrowded);
+    expect(listed(room)).toBe(MAX_RESIDENTS);
+    expect(room).toContain(`showing ${MAX_RESIDENTS} of ${MAX_RESIDENTS + 4}`);
+
+    const floor = await resolveDirectoryContext('who lives on the 1st floor of Dana', loadCrowded);
+    expect(listed(floor)).toBe(MAX_RESIDENTS);
+    expect(floor).toContain(`showing ${MAX_RESIDENTS} of ${2 * MAX_RESIDENTS + 10}`);
+
+    const roommates = await resolveDirectoryContext("who are dana0's roommates", loadCrowded);
+    expect(listed(roommates)).toBe(1 + MAX_RESIDENTS);
+    expect(roommates).toContain(`Roommates (showing ${MAX_RESIDENTS} of ${MAX_RESIDENTS + 3}`);
+  });
+
+  it('audits each reverse lookup with the requester and counts but no student data', async () => {
+    const requester = { userId: 'user-123' };
+    await resolveDirectoryContext('who lives in Dana 101', loadCrowded, requester);
+    await resolveDirectoryContext('who lives on the 1st floor of Dana', loadCrowded, requester);
+    await resolveDirectoryContext('who lives in Dana', loadCrowded, requester);
+    await resolveDirectoryContext("who are dana0's roommates", loadCrowded, requester);
+    await resolveDirectoryContext('where does dana0 live', loadCrowded, requester);
+
+    const audits = info.mock.calls.filter(([message]) => message === '[directory] reverse lookup');
+    expect(audits.map(([, meta]) => meta)).toEqual([
+      { userId: 'user-123', kind: 'room', total: MAX_RESIDENTS + 4, returned: MAX_RESIDENTS },
+      {
+        userId: 'user-123',
+        kind: 'floor',
+        total: 2 * MAX_RESIDENTS + 10,
+        returned: MAX_RESIDENTS,
+      },
+      { userId: 'user-123', kind: 'dorm', total: 2 * MAX_RESIDENTS + 10, returned: 0 },
+      { userId: 'user-123', kind: 'roommates', total: MAX_RESIDENTS + 3, returned: MAX_RESIDENTS },
+    ]);
+    expect(JSON.stringify(audits)).not.toMatch(/dana\d|Resident|Dana 1/);
+  });
+
+  it('audits reverse lookups without a requester as unknown', async () => {
+    await resolveDirectoryContext('Who lives in Willets 214?', load);
+    expect(info).toHaveBeenCalledWith('[directory] reverse lookup', {
+      userId: 'unknown',
+      kind: 'room',
+      total: 2,
+      returned: 2,
+    });
   });
 });

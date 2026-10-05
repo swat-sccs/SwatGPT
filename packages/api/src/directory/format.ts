@@ -1,6 +1,6 @@
 import type { DirectoryEntry } from '@librechat/data-schemas';
 import type { DirectoryLookup } from './match';
-import { MAX_PERSON_MATCHES, MAX_RESIDENTS } from './match';
+import { MAX_PERSON_MATCHES } from './match';
 
 const HEADING = '# Swarthmore student directory lookup';
 const INSTRUCTION =
@@ -32,6 +32,12 @@ function describeEntry(entry: DirectoryEntry): string {
   return `- ${describeName(entry)}: ${describeHousing(entry)}`;
 }
 
+function truncation(shown: number, total: number): string {
+  return total > shown
+    ? ` (showing ${shown} of ${total}; ask the user for a specific room or name to see others)`
+    : '';
+}
+
 function formatPerson(lookup: Extract<DirectoryLookup, { kind: 'person' }>): string[] {
   if (lookup.total === 0) {
     return [`No student directory entry matches "${lookup.query}".`];
@@ -51,22 +57,28 @@ function formatPerson(lookup: Extract<DirectoryLookup, { kind: 'person' }>): str
   if (lookup.roommates === undefined) {
     return lines;
   }
+  const shown = truncation(
+    lookup.roommates.length,
+    lookup.roommateTotal ?? lookup.roommates.length,
+  );
   const roommates =
     lookup.roommates.length === 0
       ? ['No other student is listed in that room.']
-      : ['Roommates:', ...lookup.roommates.map(describeEntry)];
+      : [`Roommates${shown}:`, ...lookup.roommates.map(describeEntry)];
   return [...lines, ...roommates];
 }
 
 function formatPlace(lookup: Extract<DirectoryLookup, { kind: 'place' }>): string[] {
+  const shown = truncation(lookup.residents.length, lookup.total);
   if (lookup.room !== undefined) {
     return lookup.total === 0
       ? [`No student is listed in ${lookup.dorm} ${lookup.room}.`]
-      : [`Residents of ${lookup.dorm} ${lookup.room}:`, ...lookup.residents.map(describeEntry)];
+      : [
+          `Residents of ${lookup.dorm} ${lookup.room}${shown}:`,
+          ...lookup.residents.map(describeEntry),
+        ];
   }
   if (lookup.floor !== undefined) {
-    const shown =
-      lookup.total > MAX_RESIDENTS ? ` (showing ${MAX_RESIDENTS} of ${lookup.total})` : '';
     return lookup.total === 0
       ? [`No student is listed on floor ${lookup.floor} of ${lookup.dorm}.`]
       : [
