@@ -1,4 +1,6 @@
+import { ToastContext } from '@librechat/client';
 import { screen, fireEvent, waitFor } from '@testing-library/react';
+import type { TAdminConversationExport } from '~/data-provider';
 import { renderAdmin, mockCapabilities, pending, mocks } from '../testing/utils';
 import { conversationDetail, flag } from '../testing/fixtures';
 import Conversation from '../Conversation';
@@ -31,9 +33,6 @@ describe('admin conversation reader', () => {
     expect(screen.getByRole('img', { name: 'Thumbs up' })).toBeInTheDocument();
     expect(screen.getByText('Contains a phone number')).toBeInTheDocument();
 
-    const exportLink = screen.getByRole('link', { name: /Export JSONL/ });
-    expect(exportLink).toHaveAttribute('href', '/api/admin/conversations/convo-1/export');
-
     fireEvent.click(screen.getByRole('button', { name: 'Resolve' }));
     await waitFor(() => expect(mocks.resolveAdminFlag).toHaveBeenCalledWith('flag-1'));
 
@@ -53,7 +52,95 @@ describe('admin conversation reader', () => {
     mocks.getAdminConversation.mockResolvedValue(conversationDetail);
     renderAdmin(<Conversation />, routeOptions);
     await screen.findByText('When does Sharples open?');
-    expect(screen.queryByRole('link', { name: /Export JSONL/ })).not.toBeInTheDocument();
+    expect(screen.queryByRole('button', { name: /Export JSONL/ })).not.toBeInTheDocument();
+    expect(mocks.getAdminConversationExport).not.toHaveBeenCalled();
+  });
+
+  describe('export', () => {
+    const originalCreateObjectURL = URL.createObjectURL;
+    const originalRevokeObjectURL = URL.revokeObjectURL;
+    let downloads: Array<{ href: string; download: string | null }>;
+    let clickSpy: jest.SpyInstance;
+
+    beforeEach(() => {
+      downloads = [];
+      URL.createObjectURL = jest.fn(() => 'blob:export-1');
+      URL.revokeObjectURL = jest.fn();
+      clickSpy = jest.spyOn(HTMLAnchorElement.prototype, 'click').mockImplementation(function (
+        this: HTMLAnchorElement,
+      ) {
+        downloads.push({ href: this.href, download: this.getAttribute('download') });
+      });
+    });
+
+    afterEach(() => {
+      clickSpy.mockRestore();
+      URL.createObjectURL = originalCreateObjectURL;
+      URL.revokeObjectURL = originalRevokeObjectURL;
+    });
+
+    const exportResponse = (headers: Record<string, string>) =>
+      ({
+        data: new Blob(['{"type":"conversation"}\n']),
+        headers,
+      }) as unknown as TAdminConversationExport;
+
+    it('fetches through the authenticated client and downloads the blob', async () => {
+      mockCapabilities();
+      mocks.getAdminConversation.mockResolvedValue(conversationDetail);
+      mocks.getAdminConversationExport.mockResolvedValue(
+        exportResponse({
+          'content-disposition': 'attachment; filename="swatgpt-convo-1.jsonl"',
+        }),
+      );
+      renderAdmin(<Conversation />, routeOptions);
+
+      fireEvent.click(await screen.findByRole('button', { name: /Export JSONL/ }));
+
+      await waitFor(() => expect(downloads).toHaveLength(1));
+      expect(mocks.getAdminConversationExport).toHaveBeenCalledTimes(1);
+      expect(mocks.getAdminConversationExport.mock.calls[0][0]).toBe('convo-1');
+      expect(URL.createObjectURL).toHaveBeenCalledWith(expect.any(Blob));
+      expect(downloads[0]).toEqual({ href: 'blob:export-1', download: 'swatgpt-convo-1.jsonl' });
+    });
+
+    it('falls back to <conversationId>.jsonl without a content-disposition header', async () => {
+      mockCapabilities();
+      mocks.getAdminConversation.mockResolvedValue(conversationDetail);
+      mocks.getAdminConversationExport.mockResolvedValue(exportResponse({}));
+      renderAdmin(<Conversation />, routeOptions);
+
+      fireEvent.click(await screen.findByRole('button', { name: /Export JSONL/ }));
+
+      await waitFor(() => expect(downloads).toHaveLength(1));
+      expect(downloads[0].download).toBe('convo-1.jsonl');
+    });
+
+    it('shows an error toast and downloads nothing when the export fails', async () => {
+      mockCapabilities();
+      mocks.getAdminConversation.mockResolvedValue(conversationDetail);
+      mocks.getAdminConversationExport.mockRejectedValue(new Error('401'));
+      const showToast = jest.fn();
+      renderAdmin(
+        <ToastContext.Provider value={{ showToast }}>
+          <Conversation />
+        </ToastContext.Provider>,
+        routeOptions,
+      );
+
+      const button = await screen.findByRole('button', { name: /Export JSONL/ });
+      fireEvent.click(button);
+
+      await waitFor(() =>
+        expect(showToast).toHaveBeenCalledWith({
+          message: 'Could not export this conversation.',
+          status: 'error',
+        }),
+      );
+      expect(downloads).toHaveLength(0);
+      expect(URL.createObjectURL).not.toHaveBeenCalled();
+      expect(button).not.toBeDisabled();
+    });
   });
 
   it('shows an error state', async () => {

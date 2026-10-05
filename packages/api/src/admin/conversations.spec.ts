@@ -231,6 +231,110 @@ describe('createAdminConversationsHandlers', () => {
       expect(deps.listConversationsAdmin).not.toHaveBeenCalled();
     });
 
+    it('writes a conversation.searched audit entry with the query and surfaced owners', async () => {
+      const item = detail().conversation;
+      const deps = createDeps({
+        searchMessagesAdmin: jest.fn().mockResolvedValue(['c1', 'c2']),
+        listConversationsAdmin: jest.fn().mockResolvedValue({ items: [item], nextCursor: null }),
+      });
+      const handlers = createAdminConversationsHandlers(deps);
+      const { req, res, status, json } = createReqRes({
+        query: { search: 'pregnant', flagged: 'true', from: '2026-09-01T00:00:00Z' },
+      });
+
+      await handlers.listConversations(req, res);
+
+      expect(status).toHaveBeenCalledWith(200);
+      expect(json).toHaveBeenCalledWith({ conversations: [item], nextCursor: null });
+      expect(deps.recordAuditEntry).toHaveBeenCalledTimes(1);
+      expect(deps.recordAuditEntry).toHaveBeenCalledWith(
+        expect.objectContaining({
+          action: 'conversation.searched',
+          outcome: 'success',
+          actor: { type: 'user', id: adminId.toString(), name: 'Admin' },
+          target: { type: 'search', name: 'pregnant' },
+          metadata: {
+            query: 'pregnant',
+            scopeSize: 2,
+            returned: 1,
+            conversationIds: 'c1',
+            ownerIds: ownerId,
+            userId: null,
+            model: null,
+            from: '2026-09-01T00:00:00.000Z',
+            to: null,
+            flagged: true,
+            errors: null,
+            page: 'first',
+          },
+          context: expect.objectContaining({ requestId: 'req-1' }),
+        }),
+      );
+    });
+
+    it('audits a search that matches nothing', async () => {
+      const deps = createDeps({ searchMessagesAdmin: jest.fn().mockResolvedValue([]) });
+      const handlers = createAdminConversationsHandlers(deps);
+      const { req, res, status } = createReqRes({ query: { search: 'roommate name' } });
+
+      await handlers.listConversations(req, res);
+
+      expect(status).toHaveBeenCalledWith(200);
+      expect(deps.recordAuditEntry).toHaveBeenCalledWith(
+        expect.objectContaining({
+          action: 'conversation.searched',
+          target: { type: 'search', name: 'roommate name' },
+          metadata: expect.objectContaining({ scopeSize: 0, returned: 0, conversationIds: '' }),
+        }),
+      );
+    });
+
+    it('rejects an unauthenticated search before touching message text', async () => {
+      const deps = createDeps();
+      const handlers = createAdminConversationsHandlers(deps);
+      const { req, res, status } = createReqRes({ query: { search: 'sharples' }, user: null });
+
+      await handlers.listConversations(req, res);
+
+      expect(status).toHaveBeenCalledWith(401);
+      expect(deps.searchMessagesAdmin).not.toHaveBeenCalled();
+      expect(deps.recordAuditEntry).not.toHaveBeenCalled();
+    });
+
+    it('withholds search results when the audit write fails closed', async () => {
+      const item = detail().conversation;
+      const deps = createDeps({
+        searchMessagesAdmin: jest.fn().mockResolvedValue(['c1']),
+        listConversationsAdmin: jest.fn().mockResolvedValue({ items: [item], nextCursor: null }),
+        recordAuditEntry: jest.fn().mockRejectedValue(new Error('audit down')),
+        auditFailClosed: true,
+      });
+      const handlers = createAdminConversationsHandlers(deps);
+      const { req, res, status, json } = createReqRes({ query: { search: 'sharples' } });
+
+      await handlers.listConversations(req, res);
+
+      expect(status).toHaveBeenCalledWith(500);
+      expect(json).toHaveBeenCalledWith({ error: 'Failed to record audit entry' });
+      expect(deps.recordAuditEntry).toHaveBeenCalledWith(expect.anything(), { failClosed: true });
+    });
+
+    it('still returns search results when the audit write fails open', async () => {
+      const item = detail().conversation;
+      const deps = createDeps({
+        searchMessagesAdmin: jest.fn().mockResolvedValue(['c1']),
+        listConversationsAdmin: jest.fn().mockResolvedValue({ items: [item], nextCursor: null }),
+        recordAuditEntry: jest.fn().mockRejectedValue(new Error('audit down')),
+      });
+      const handlers = createAdminConversationsHandlers(deps);
+      const { req, res, status, json } = createReqRes({ query: { search: 'sharples' } });
+
+      await handlers.listConversations(req, res);
+
+      expect(status).toHaveBeenCalledWith(200);
+      expect(json).toHaveBeenCalledWith({ conversations: [item], nextCursor: null });
+    });
+
     it('returns 500 when the data layer throws', async () => {
       const deps = createDeps({
         listConversationsAdmin: jest.fn().mockRejectedValue(new Error('db down')),

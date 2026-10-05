@@ -1,6 +1,7 @@
 import { logger } from '@librechat/data-schemas';
 import type {
   AuditAction,
+  AuditTarget,
   AuditMetadata,
   RecordAuditEntryInput,
   RecordAuditEntryOptions,
@@ -27,13 +28,30 @@ export interface OversightAuditDeps {
   auditFailClosed?: boolean;
 }
 
-export interface OversightAuditEvent {
+interface OversightAuditBase {
   action: AuditAction;
   actor: OversightActor;
-  conversationId: string;
-  title: string;
   metadata: AuditMetadata;
   req: ServerRequest;
+}
+
+interface ConversationAuditEvent extends OversightAuditBase {
+  conversationId: string;
+  title: string;
+}
+
+/** An event about something other than one conversation (e.g. a cross-user search). */
+interface TargetedAuditEvent extends OversightAuditBase {
+  target: AuditTarget;
+}
+
+export type OversightAuditEvent = ConversationAuditEvent | TargetedAuditEvent;
+
+function auditTarget(event: OversightAuditEvent): AuditTarget {
+  if ('target' in event) {
+    return event.target;
+  }
+  return { type: 'conversation', id: event.conversationId, name: event.title };
 }
 
 /** Reads the acting admin from the JWT-loaded `req.user`; no database round-trip. */
@@ -69,7 +87,7 @@ export function createOversightAudit(
       action: event.action,
       outcome: 'success',
       actor: { type: 'user', id: event.actor.userId, name: event.actor.name },
-      target: { type: 'conversation', id: event.conversationId, name: event.title },
+      target: auditTarget(event),
       metadata: event.metadata,
       context: buildAuditContext(event.req),
       tenantId: event.actor.tenantId,

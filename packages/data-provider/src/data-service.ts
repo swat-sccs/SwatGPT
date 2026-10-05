@@ -80,6 +80,13 @@ export function getAdminConversation(
   return request.get(endpoints.adminConversation(conversationId));
 }
 
+/** Fetches the audited JSONL export through the authenticated client so the Bearer token is sent. */
+export function getAdminConversationExport(conversationId: string): Promise<AxiosResponse<Blob>> {
+  return request.getResponse(endpoints.adminConversationExport(conversationId), {
+    responseType: 'blob',
+  });
+}
+
 export function flagAdminConversation(
   conversationId: string,
   payload: adm.TAdminFlagRequest,

@@ -15,6 +15,10 @@ export type TFlagConversationVars = { conversationId: string; payload: TAdminFla
 export type TBanUserVars = { userId: string; payload: TAdminBanRequest };
 export type TSetBalanceVars = { userId: string; payload: TAdminBalanceRequest };
 
+export type TAdminConversationExport = Awaited<
+  ReturnType<typeof dataService.getAdminConversationExport>
+>;
+
 const flagRelatedKeys = [
   QueryKeys.adminConversation,
   QueryKeys.adminConversations,
@@ -43,6 +47,13 @@ export const useFlagConversation = (): UseMutationResult<
     },
   );
 };
+
+/** A mutation, not a query: the export is audited, so it must only run on an explicit click. */
+export const useExportConversation = (): UseMutationResult<
+  TAdminConversationExport,
+  unknown,
+  string
+> => useMutation((conversationId) => dataService.getAdminConversationExport(conversationId));
 
 export const useResolveFlag = (): UseMutationResult<TAdminFlag, unknown, string> => {
   const queryClient = useQueryClient();

@@ -1,10 +1,16 @@
 import { logger } from '@librechat/data-schemas';
 import type {
-  TAdminConversationsResponse,
-  TAdminConversationsSort,
   TAdminFlagRequest,
+  TAdminConversationsSort,
+  TAdminConversationListItem,
+  TAdminConversationsResponse,
 } from 'librechat-data-provider';
-import type { AuditLogMethods, FlagMethods, OversightMethods } from '@librechat/data-schemas';
+import type {
+  FlagMethods,
+  AuditMetadata,
+  AuditLogMethods,
+  OversightMethods,
+} from '@librechat/data-schemas';
 import type { Response } from 'express';
 import type { OversightAuditDeps } from '~/oversight/audit';
 import type { ServerRequest } from '~/types/http';
@@ -97,7 +103,10 @@ function badRequest(res: Response, error: unknown): Response | null {
   return null;
 }
 
-/** Creates the `/api/admin/conversations` handlers. Every detail read and export is audited. */
+/**
+ * Creates the `/api/admin/conversations` handlers. Every full-text search, detail read and
+ * export is audited.
+ */
 export function createAdminConversationsHandlers(deps: AdminConversationsDeps): {
   listConversations: Handler;
   getConversation: Handler;
@@ -120,15 +129,63 @@ export function createAdminConversationsHandlers(deps: AdminConversationsDeps): 
     return viaMeili ?? searchMessageTextAdmin(search, SEARCH_HIT_LIMIT);
   }
 
+  function searchAuditMetadata(
+    search: string,
+    options: ListOptions,
+    scopeSize: number,
+    items: TAdminConversationListItem[],
+  ): AuditMetadata {
+    return {
+      query: search,
+      scopeSize,
+      returned: items.length,
+      conversationIds: items.map((c) => c.conversationId).join(','),
+      ownerIds: [...new Set(items.map((c) => c.user.id))].join(','),
+      userId: options.userId ?? null,
+      model: options.model ?? null,
+      from: options.from?.toISOString() ?? null,
+      to: options.to?.toISOString() ?? null,
+      flagged: options.flagged ?? null,
+      errors: options.errors ?? null,
+      page: options.cursor ? 'next' : 'first',
+    };
+  }
+
   async function listConversationsHandler(req: ServerRequest, res: Response): Promise<Response> {
     try {
       const { search, ...options } = parseConversationsQuery(req.query as Record<string, unknown>);
-      const conversationIds = search ? await resolveSearchScope(search) : undefined;
-      if (conversationIds && conversationIds.length === 0) {
-        const empty: TAdminConversationsResponse = { conversations: [], nextCursor: null };
-        return res.status(200).json(empty);
+      if (!search) {
+        const page = await listConversationsAdmin(options);
+        const body: TAdminConversationsResponse = {
+          conversations: page.items,
+          nextCursor: page.nextCursor,
+        };
+        return res.status(200).json(body);
       }
-      const page = await listConversationsAdmin({ ...options, conversationIds });
+      const actor = resolveActor(req);
+      if (!actor) {
+        return res.status(401).json({ error: 'Authentication required' });
+      }
+      const conversationIds = await resolveSearchScope(search);
+      const page =
+        conversationIds.length === 0
+          ? { items: [], nextCursor: null }
+          : await listConversationsAdmin({ ...options, conversationIds });
+      try {
+        await emitAudit({
+          action: 'conversation.searched',
+          actor,
+          target: { type: 'search', name: search },
+          metadata: searchAuditMetadata(search, options, conversationIds.length, page.items),
+          req,
+        });
+      } catch (auditError) {
+        logger.error(
+          `[${SCOPE}] search audit failed (fail-closed); withholding results`,
+          auditError,
+        );
+        return res.status(500).json({ error: 'Failed to record audit entry' });
+      }
       const body: TAdminConversationsResponse = {
         conversations: page.items,
         nextCursor: page.nextCursor,

@@ -1,18 +1,50 @@
 import { useState } from 'react';
 import { Link, useParams } from 'react-router-dom';
 import { Flag, Download } from 'lucide-react';
-import { Button } from '@librechat/client';
-import { adminConversationExport } from 'librechat-data-provider';
+import { Button, useToastContext } from '@librechat/client';
 import type { TAdminFlag } from 'librechat-data-provider';
+import type { TAdminConversationExport } from '~/data-provider';
+import { useAdminConversation, useExportConversation, useResolveFlag } from '~/data-provider';
 import { AdminCapability, Require, useAdminAccess } from './access';
-import { useAdminConversation, useResolveFlag } from '~/data-provider';
 import { formatDate, formatInt } from './format';
 import { Loading, ErrorState } from './States';
+import { triggerDownload } from '~/utils';
 import { useLocalize } from '~/hooks';
 import FlagDialog from './Flag';
 import { userPath } from './Rows';
 import Message from './Message';
 import Pill from './Pill';
+
+const FILENAME_PATTERN = /filename="?([^";]+)"?/i;
+
+function exportFilename(response: TAdminConversationExport, conversationId: string): string {
+  const disposition = response.headers?.['content-disposition'];
+  const match = typeof disposition === 'string' ? FILENAME_PATTERN.exec(disposition) : null;
+  return match?.[1] ?? `${conversationId}.jsonl`;
+}
+
+function ExportButton({ conversationId }: { conversationId: string }) {
+  const localize = useLocalize();
+  const { showToast } = useToastContext();
+  const exportConversation = useExportConversation();
+
+  const onExport = () =>
+    exportConversation.mutate(conversationId, {
+      onSuccess: (response) =>
+        triggerDownload(
+          URL.createObjectURL(response.data),
+          exportFilename(response, conversationId),
+        ),
+      onError: () => showToast({ message: localize('com_admin_export_error'), status: 'error' }),
+    });
+
+  return (
+    <Button variant="outline" size="sm" disabled={exportConversation.isLoading} onClick={onExport}>
+      <Download className="size-4" aria-hidden="true" />
+      {localize('com_admin_export')}
+    </Button>
+  );
+}
 
 export function FlagList({ flags }: { flags: TAdminFlag[] }) {
   const localize = useLocalize();
@@ -81,14 +113,7 @@ function Content({ conversationId }: { conversationId: string }) {
             )}
           </h2>
           <div className="flex gap-2">
-            {has(AdminCapability.EXPORT) && (
-              <Button asChild variant="outline" size="sm">
-                <a href={adminConversationExport(conversationId)} download>
-                  <Download className="size-4" aria-hidden="true" />
-                  {localize('com_admin_export')}
-                </a>
-              </Button>
-            )}
+            {has(AdminCapability.EXPORT) && <ExportButton conversationId={conversationId} />}
             <Button variant="outline" size="sm" onClick={() => setFlagOpen(true)}>
               <Flag className="size-4" aria-hidden="true" />
               {localize('com_admin_flag')}

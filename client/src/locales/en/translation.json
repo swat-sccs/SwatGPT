@@ -49,6 +49,7 @@
   "com_admin_empty": "Nothing to show",
   "com_admin_error_loading": "Could not load this data.",
   "com_admin_export": "Export JSONL",
+  "com_admin_export_error": "Could not export this conversation.",
   "com_admin_feedback_down": "Thumbs down",
   "com_admin_feedback_up": "Thumbs up",
   "com_admin_filter_apply": "Apply filters",
