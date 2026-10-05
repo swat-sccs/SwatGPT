@@ -21,10 +21,12 @@ const PLACE_PATTERNS: ReadonlyArray<RegExp> = [
 
 /** Phrasings that unambiguously ask where a person lives; a miss is worth reporting. */
 const PERSON_PATTERNS: ReadonlyArray<RegExp> = [
-  /where (?:does|do|did|is|are|would|will|might) (.+?) (?:live|lives|living|stay|stays|staying|reside|resides|residing|dorm|dorms|dorming|room|rooming|located)\b/,
+  /where (?:does|do|did|would|will|might) (.+?) (?:live|lives|living|stay|stays|staying|reside|resides|residing|dorm|dorms|dorming|room|rooming)\b/,
+  /where (?:is|are) (.+?) (?:live|lives|living|stay|stays|staying|reside|resides|residing|dorming|rooming)\b/,
   /where (?:does|do|did|is|are) (.+?) (?:live|stay|reside) (?:on campus|this year|this semester|now)\b/,
-  /(?:what|which) (?:dorm|room|building|hall|residence hall|dorm room|house) (?:is|does|do|did|are|has|have) (.+?) (?:in|live in|living in|stay in|staying in|reside in|at|located in)\b/,
-  /(?:what|which) (?:dorm|room|building|hall|residence hall|dorm room|house) (?:is|does|do|are) (.+)$/,
+  /(?:what|which) (?:dorm|room|building|hall|residence hall|dorm room|house) (?:is|does|do|did|are|has|have) (.+?) (?:live in|living in|stay in|staying in|reside in|residing in)\b/,
+  /(?:what|which) (?:dorm|dorm room|residence hall|house) (?:is|are) (.+?) (?:in|at|located in)\b/,
+  /(?:what|which) (?:dorm|dorm room|residence hall|house) (?:is|does|do|are) (.+)$/,
   /([a-z0-9]+(?: [a-z0-9]+){0,4})['’]s? (?:dorm|room|dorm room|building|housing|residence|hall|room number|address)\b/,
   /(?:dorm|room|dorm room|housing|residence|room number|address) (?:of|for) (.+)$/,
   /(?:find|locate|look up|lookup) (.+?) (?:in the )?(?:dorm|room|directory|housing)\b/,
@@ -33,8 +35,14 @@ const PERSON_PATTERNS: ReadonlyArray<RegExp> = [
 /** Phrasings that may be about a person or a building; only a confident name hit counts. */
 const LOOSE_PERSON_PATTERNS: ReadonlyArray<RegExp> = [
   /where (?:can|could|do|would) (?:i|we|you|one) find (.+)$/,
+  /where (?:is|are) (.+?) located\b/,
+  /(?:what|which) (?:room|building|hall) (?:is|are) (.+?) (?:in|at|located in)\b/,
+  /(?:what|which) (?:room|building|hall) (?:is|are) (.+)$/,
   /where (?:is|are) (.+)$/,
 ];
+
+/** A capture opening with an article names a thing ("the registrar"), not a person. */
+const ARTICLE_LEAD = /^(?:the|a|an) /;
 
 /** Question lead-ins that precede a name in a span such as "what is jane doe". */
 const LEAD_STOPWORDS: ReadonlySet<string> = new Set([
@@ -178,7 +186,12 @@ export function detectIntent(text: string): DirectoryIntent | undefined {
   }
   const personSpan = firstCapture(question, PERSON_PATTERNS);
   if (personSpan) {
-    return { kind: 'person', span: nameSpan(personSpan), roommates: false, explicit: true };
+    return {
+      kind: 'person',
+      span: nameSpan(personSpan),
+      roommates: false,
+      explicit: !ARTICLE_LEAD.test(personSpan),
+    };
   }
   const looseSpan = firstCapture(question, LOOSE_PERSON_PATTERNS);
   if (looseSpan) {
