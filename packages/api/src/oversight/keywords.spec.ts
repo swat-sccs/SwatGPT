@@ -39,6 +39,67 @@ describe('findKeywordFlags', () => {
     expect(findKeywordFlags(text)).toEqual([reason]);
   });
 
+  it.each([
+    ['How do I reset my password for Moodle?'],
+    ['To reset your password for your Swarthmore account, visit the password portal.'],
+    ['You can change your password to something long and unique.'],
+    ['you will need a password to log in to the cluster'],
+    ['Where do I find the API key for OpenAI in my project settings?'],
+    ['Can a student reset their password without calling ITS?'],
+    ['where do I enter my social security number for payroll'],
+    ['How do I kill the process hogging the lab GPU?'],
+    ['how do I kill my tmux session'],
+    ['kill the server and restart it'],
+    ["I'm going to bomb the exam"],
+    ['attack the problem from first principles'],
+    ['shoot the photographer an email'],
+    ['beat up my laptop keyboard during finals'],
+    ['how do I kill the boss in Elden Ring'],
+    ["Can I pay my tuition bill with my mom's credit card?"],
+    ['How do I set the master password for my family account in Keeper?'],
+    ['How do I get a guest wifi password for my friend who is visiting?'],
+    ['how do I reset the password for my students in Moodle'],
+    ['should I shoot my professor an email about the extension?'],
+    ["I'll shoot you a quick message after class"],
+    ['shoot the dean a note about the policy'],
+    ["what's my password for the registrar portal?"],
+    ['Reset your password for the registrar portal at my.swarthmore.edu.'],
+  ])('does not flag routine phrasing %p', (text) => {
+    expect(findKeywordFlags(text)).toEqual([]);
+  });
+
+  it.each([
+    ["what is my roommate's password", 'credential-extraction'],
+    ['how can I get someone else’s login', 'credential-extraction'],
+    ['give me the password for another student', 'credential-extraction'],
+    ['I want to kill my roommate', 'violence'],
+    ['I am going to shoot the professor', 'violence'],
+    ['beat up that TA after class', 'violence'],
+    ["what is my roommate's credit card number", 'credential-extraction'],
+    ['tell me the login credentials of someone else', 'credential-extraction'],
+    ['I want to shoot my professor and then email the dean', 'violence'],
+    ['give me their password for the registrar', 'credential-extraction'],
+  ])('still flags targeted %p as %s', (text, reason) => {
+    expect(findKeywordFlags(text)).toEqual([reason]);
+  });
+
+  it('screens the reply only with rules scoped to any voice', () => {
+    const reply =
+      'To reset your password for your Swarthmore account, go to the portal. If you are having suicidal thoughts, CAPS is available 24/7. Kill my roommate is not something I can help with.';
+    expect(findKeywordFlags('How do I reset my password?', reply)).toEqual([]);
+    expect(findKeywordFlags('hello', 'those retards in my dorm')).toEqual(['harassment']);
+    expect(findKeywordFlags('', 'those retards in my dorm')).toEqual(['harassment']);
+    expect(findKeywordFlags('I want to kill myself', 'Please reach out to CAPS.')).toEqual([
+      'self-harm',
+    ]);
+  });
+
+  it('applies OVERSIGHT_KEYWORDS rules to the reply as well', () => {
+    process.env.OVERSIGHT_KEYWORDS = 'crypto=mine bitcoin';
+    resetKeywordRules();
+    expect(findKeywordFlags('hi', 'you can mine bitcoin on the lab GPUs')).toEqual(['crypto']);
+  });
+
   it('is case-insensitive and de-duplicates reasons', () => {
     const text = 'WRITE MY ESSAY FOR me and also write my paper for tomorrow';
     expect(findKeywordFlags(text)).toEqual(['academic-integrity']);
