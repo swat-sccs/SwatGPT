@@ -14,6 +14,15 @@ export const domains = [
 export type Domain = (typeof domains)[number];
 export type JsonObject = Record<string, unknown>;
 
+export const transitStations = ['swarthmore', '30th_street', 'media'] as const;
+export type TransitStation = (typeof transitStations)[number];
+
+/** An ISO-8601 half-open interval [start, end). */
+export interface TimeWindow {
+  start: string;
+  end: string;
+}
+
 export interface NormalizedRecord {
   domain: Domain;
   source: string;

@@ -1,5 +1,5 @@
 import pg from 'pg';
-import type { ArchiveQuery, Domain, JsonObject, NormalizedRecord } from '../types.js';
+import type { ArchiveQuery, Domain, JsonObject, NormalizedRecord, TimeWindow } from '../types.js';
 import { contentHash, log } from '../util.js';
 
 const { Pool } = pg;
@@ -108,15 +108,33 @@ export class PgStore {
     await this.pool.end();
   }
 
-  async replaceSourceRecords(domain: Domain, source: string, records: NormalizedRecord[], observedAt = new Date()): Promise<void> {
+  /**
+   * Upserts `records` as the active set for one source. With `window`, only rows whose
+   * event time overlaps it are retired, so a fetch of one day leaves other days cached.
+   */
+  async replaceSourceRecords(
+    domain: Domain,
+    source: string,
+    records: NormalizedRecord[],
+    observedAt = new Date(),
+    window?: TimeWindow,
+  ): Promise<void> {
     const client = await this.pool.connect();
     const timestamp = observedAt.toISOString();
     try {
       await client.query('BEGIN');
-      await client.query(
-        'UPDATE source_records SET active=false WHERE domain=$1 AND source=$2 AND active=true',
-        [domain, source],
-      );
+      if (window) {
+        await client.query(`
+          UPDATE source_records SET active=false
+          WHERE domain=$1 AND source=$2 AND active=true AND event_start IS NOT NULL
+            AND event_start < $4 AND (event_start >= $3 OR event_end > $3)
+        `, [domain, source, window.start, window.end]);
+      } else {
+        await client.query(
+          'UPDATE source_records SET active=false WHERE domain=$1 AND source=$2 AND active=true',
+          [domain, source],
+        );
+      }
       for (const record of records) {
         const hash = contentHash(record.payload);
         const previous = await client.query<{ id: string; payload_hash: string }>(

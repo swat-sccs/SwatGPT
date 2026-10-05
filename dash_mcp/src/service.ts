@@ -1,6 +1,9 @@
 import type { Config } from './config.js';
 import { PgStore } from './storage/store.js';
-import type { ArchiveQuery, DashboardRegistry, Domain, FeedResult, JsonObject, NormalizedRecord } from './types.js';
+import type {
+  ArchiveQuery, DashboardRegistry, Domain, FeedResult, JsonObject, NormalizedRecord, TimeWindow, TransitStation,
+} from './types.js';
+import { transitStations } from './types.js';
 import {
   asObject, asObjects, campusDayRange, cleanText, currentCampusDate, fuzzyMatch,
   log, normalizeRawRecord, toPublicRecord, withoutTypename,
@@ -9,6 +12,17 @@ import { campusHoursAliasesFor, campusHoursPlaceMatches } from './hoursAliases.j
 import { DashClient, resultData } from './upstream/client.js';
 import { RegistryDiscovery } from './upstream/discovery.js';
 import { queries } from './upstream/queries.js';
+
+/** Departures stored per poll, so cached reads can satisfy the tool's maximum `limit`. */
+export const TRANSIT_POLL_LIMIT = 10;
+
+/** Every directed origin/destination pair the transit tool accepts. */
+export const TRANSIT_PAIRS: ReadonlyArray<{ origin: TransitStation; destination: TransitStation }> = transitStations.flatMap(
+  (origin) => transitStations.filter((destination) => destination !== origin).map((destination) => ({ origin, destination })),
+);
+
+type DiningInput = { location?: string; date?: string; meal?: string; query?: string; limit?: number };
+type DiningFilters = { meal?: string; query?: string };
 
 export class SwatService {
   constructor(
@@ -185,12 +199,12 @@ export class SwatService {
     }
   }
 
-  async getDining(input: { location?: string; date?: string; meal?: string; query?: string; limit?: number }, refresh = false): Promise<FeedResult<JsonObject>> {
+  async getDining(input: DiningInput, refresh = false): Promise<FeedResult<JsonObject>> {
     const fetchedAt = new Date();
     const limit = input.limit ?? 30;
     const filters = normalizeDiningFilters(input.meal, input.query);
+    const range = campusDayRange(input.date ?? currentCampusDate());
     if (!refresh) {
-      const range = campusDayRange(input.date ?? currentCampusDate());
       const cached = await this.cachedRecords('dining', limit, fetchedAt, (item) => {
         const text = JSON.stringify(item);
         return diningLocationMatches(text, input.location) && fuzzyMatch(text, filters.meal) &&
@@ -201,12 +215,10 @@ export class SwatService {
       // specific lookup missed the snapshot or the snapshot is stale.
       if (cached.items.length && !cached.meta.stale) return cached;
       try {
-        const elapsedMs = Date.now() - fetchedAt.getTime();
-        const liveBudgetMs = Math.max(250, this.config.mcpToolTimeoutMs - elapsedMs - 500);
-        return await withDeadline(
-          this.getDining(input, true),
-          liveBudgetMs,
-          `Live Dash dining lookup exceeded ${liveBudgetMs}ms`,
+        return await this.withinToolBudget(
+          fetchedAt,
+          'dining',
+          this.fetchDining(input, filters, limit, new Date(), range, range),
         );
       } catch (error) {
         if (cached.items.length) {
@@ -219,35 +231,45 @@ export class SwatService {
         );
       }
     }
+    return this.fetchDining(input, filters, limit, fetchedAt, range);
+  }
+
+  /**
+   * Fetches one campus day of dining from The Dash and persists it. A `persistWindow` limits
+   * which cached rows are retired to that day; without it every row for the fetched sources
+   * is replaced, which is how the scheduled poll clears past days.
+   */
+  private async fetchDining(
+    input: DiningInput,
+    filters: DiningFilters,
+    limit: number,
+    fetchedAt: Date,
+    range: TimeWindow,
+    persistWindow?: TimeWindow,
+  ): Promise<FeedResult<JsonObject>> {
+    let registry: DashboardRegistry;
     try {
-      const range = campusDayRange(input.date ?? currentCampusDate());
-      let registry: DashboardRegistry;
-      try {
-        registry = this.registry();
-      } catch {
-        registry = await this.discovery.load();
-      }
-      const sources = registry.dining.filter((source) =>
-        diningLocationMatches(`${source.location} ${source.sourceId} ${source.labels.join(' ')}`, input.location),
-      );
-      let records = (await Promise.all(sources.map(async (source) => {
-        const query = source.kind === 'cbord' ? queries.cbord : queries.calendar;
-        const operation = source.kind === 'cbord' ? 'DiningMenu' : 'Calendar';
-        const raw = await this.client.query<unknown>(operation, query, {
-          calendarId: source.sourceId, order: 'ASC', timeMin: range.start, timeMax: range.end, maxResults: 100,
-        });
-        return resultData(raw).map((item) => normalizeRawRecord('dining', source.location, {
-          ...item, dining_location: source.location, dining_labels: source.labels,
-        }, { location: source.location }));
-      }))).flat();
-      await this.persist(records, sources.map((source) => ({ domain: 'dining', source: source.location })));
-      if (filters.meal) records = records.filter((record) => fuzzyMatch(`${record.title} ${record.description ?? ''}`, filters.meal));
-      if (filters.query) records = records.filter((record) => fuzzyMatch(record.searchText, filters.query));
-      return makeResult(records.map(toPublicRecord), fetchedAt, sources.map((source) => source.location), limit);
-    } catch (error) {
-      if (refresh) throw error;
-      return this.recordsFallback('dining', limit, fetchedAt, error, input.location ?? filters.meal ?? filters.query);
+      registry = this.registry();
+    } catch {
+      registry = await this.discovery.load();
     }
+    const sources = registry.dining.filter((source) =>
+      diningLocationMatches(`${source.location} ${source.sourceId} ${source.labels.join(' ')}`, input.location),
+    );
+    let records = (await Promise.all(sources.map(async (source) => {
+      const query = source.kind === 'cbord' ? queries.cbord : queries.calendar;
+      const operation = source.kind === 'cbord' ? 'DiningMenu' : 'Calendar';
+      const raw = await this.client.query<unknown>(operation, query, {
+        calendarId: source.sourceId, order: 'ASC', timeMin: range.start, timeMax: range.end, maxResults: 100,
+      });
+      return resultData(raw).map((item) => normalizeRawRecord('dining', source.location, {
+        ...item, dining_location: source.location, dining_labels: source.labels,
+      }, { location: source.location }));
+    }))).flat();
+    await this.persist(records, sources.map((source) => ({ domain: 'dining', source: source.location })), persistWindow);
+    if (filters.meal) records = records.filter((record) => fuzzyMatch(`${record.title} ${record.description ?? ''}`, filters.meal));
+    if (filters.query) records = records.filter((record) => fuzzyMatch(record.searchText, filters.query));
+    return makeResult(records.map(toPublicRecord), fetchedAt, sources.map((source) => source.location), limit);
   }
 
   async searchEvents(input: { query?: string; start?: string; end?: string; limit?: number }, refresh = false): Promise<FeedResult<JsonObject>> {
@@ -319,33 +341,37 @@ export class SwatService {
     }
   }
 
-  async getTransit(input: { origin: 'swarthmore' | '30th_street' | 'media'; destination: 'swarthmore' | '30th_street' | 'media'; limit?: number }, refresh = false): Promise<FeedResult<JsonObject>> {
+  async getTransit(input: { origin: TransitStation; destination: TransitStation; limit?: number }, refresh = false): Promise<FeedResult<JsonObject>> {
     const fetchedAt = new Date();
     const limit = input.limit ?? 4;
     const stations = { swarthmore: 'Swarthmore', '30th_street': '30th%20Street%20Station', media: 'Media' } as const;
     if (input.origin === input.destination) throw new Error('Origin and destination must be different');
     const source = `${input.origin}->${input.destination}`;
     if (!refresh) {
-      const fallback = await this.store.latestObservation('transit', source);
-      if (!fallback) return makeUnavailableResult(fetchedAt, 'transit');
-      const items = Array.isArray(fallback.payload.departures) ? fallback.payload.departures as JsonObject[] : [fallback.payload];
-      return makeCachedResult(items.slice(0, limit), fetchedAt, [source], fallback.observed_at, this.config.realtimePollMs);
+      const cached = await this.store.latestObservation('transit', source);
+      if (cached) {
+        const items = Array.isArray(cached.payload.departures) ? cached.payload.departures as JsonObject[] : [cached.payload];
+        return makeCachedResult(items, fetchedAt, [source], cached.observed_at, this.config.realtimePollMs, limit);
+      }
+      try {
+        return await this.withinToolBudget(fetchedAt, 'transit', this.getTransit(input, true));
+      } catch (error) {
+        return makeUnavailableResult(
+          fetchedAt,
+          'transit',
+          `No cached transit data is available for ${source} and the live Dash lookup failed: ${error instanceof Error ? error.message : String(error)}`,
+        );
+      }
     }
-    try {
-      const raw = await this.client.query<unknown>('Transit', queries.transit, {
-        departureStation: stations[input.origin], arrivalStation: stations[input.destination], maxResults: limit,
-      });
-      const items = resultData(raw).map((item) => withoutTypename(item) as JsonObject);
-      const observation = { origin: input.origin, destination: input.destination, departures: items };
-      await this.store.addObservation('transit', source, observation, fetchedAt);
-      return makeResult(items, fetchedAt, [source], limit);
-    } catch (error) {
-      if (refresh) throw error;
-      const fallback = await this.store.latestObservation('transit', source);
-      if (!fallback) throw error;
-      const items = Array.isArray(fallback.payload.departures) ? fallback.payload.departures as JsonObject[] : [fallback.payload];
-      return makeStaleResult(items.slice(0, limit), fetchedAt, [source], fallback.observed_at, error);
-    }
+    const raw = await this.client.query<unknown>('Transit', queries.transit, {
+      departureStation: stations[input.origin],
+      arrivalStation: stations[input.destination],
+      maxResults: Math.max(limit, TRANSIT_POLL_LIMIT),
+    });
+    const items = resultData(raw).map((item) => withoutTypename(item) as JsonObject);
+    const observation = { origin: input.origin, destination: input.destination, departures: items };
+    await this.store.addObservation('transit', source, observation, fetchedAt);
+    return makeResult(items, fetchedAt, [source], limit);
   }
 
   async getSports(input: { sport?: string; gender?: string; start?: string; end?: string; limit?: number }, refresh = false): Promise<FeedResult<JsonObject>> {
@@ -438,9 +464,7 @@ export class SwatService {
   async syncRealtime(): Promise<void> {
     assertPollResults(await Promise.allSettled([
       this.getWeather(7, true),
-      this.getTransit({ origin: 'swarthmore', destination: '30th_street', limit: 4 }, true),
-      this.getTransit({ origin: '30th_street', destination: 'swarthmore', limit: 4 }, true),
-      this.getTransit({ origin: 'swarthmore', destination: 'media', limit: 4 }, true),
+      ...TRANSIT_PAIRS.map((pair) => this.getTransit({ ...pair, limit: TRANSIT_POLL_LIMIT }, true)),
     ]));
   }
 
@@ -453,7 +477,18 @@ export class SwatService {
     ]));
   }
 
-  private async persist(records: NormalizedRecord[], expectedSources: Array<{ domain: Domain; source: string }> = []): Promise<void> {
+  /** Bounds a live read-through so it finishes inside the MCP tool timeout. */
+  private withinToolBudget<T>(startedAt: Date, domain: Domain, task: Promise<T>): Promise<T> {
+    const elapsedMs = Date.now() - startedAt.getTime();
+    const budgetMs = Math.max(250, this.config.mcpToolTimeoutMs - elapsedMs - 500);
+    return withDeadline(task, budgetMs, `Live Dash ${domain} lookup exceeded ${budgetMs}ms`);
+  }
+
+  private async persist(
+    records: NormalizedRecord[],
+    expectedSources: Array<{ domain: Domain; source: string }> = [],
+    window?: TimeWindow,
+  ): Promise<void> {
     const grouped = new Map<string, NormalizedRecord[]>();
     const sourceInfo = new Map<string, { domain: Domain; source: string }>();
     for (const expected of expectedSources) {
@@ -468,7 +503,7 @@ export class SwatService {
     }
     await Promise.all([...grouped.entries()].map(([key, items]) => {
       const source = sourceInfo.get(key)!;
-      return this.store.replaceSourceRecords(source.domain, source.source, items);
+      return this.store.replaceSourceRecords(source.domain, source.source, items, undefined, window);
     }));
   }
 

@@ -1,6 +1,7 @@
 import { describe, expect, it, vi } from 'vitest';
 import { loadConfig } from '../src/config.js';
-import { SwatService } from '../src/service.js';
+import { campusDayRange } from '../src/util.js';
+import { SwatService, TRANSIT_PAIRS, TRANSIT_POLL_LIMIT } from '../src/service.js';
 import type { PgStore } from '../src/storage/store.js';
 import type { DashClient } from '../src/upstream/client.js';
 import type { RegistryDiscovery } from '../src/upstream/discovery.js';
@@ -196,7 +197,115 @@ describe('PostgreSQL-first service reads', () => {
     expect(result.meta.stale).toBe(false);
     expect(result.meta.warning).toContain('do not infer that the venue is closed');
   });
+
+  it('scopes a dining read-through to the requested day so other cached days stay active', async () => {
+    const client = { query: vi.fn().mockResolvedValue({ data: [] }) } as unknown as DashClient;
+    const store = {
+      currentRecords: vi.fn().mockResolvedValue([]),
+      latestRecordObservedAt: vi.fn().mockResolvedValue(new Date().toISOString()),
+      replaceSourceRecords: vi.fn().mockResolvedValue(undefined),
+    } as unknown as PgStore;
+    const service = new SwatService(config(), client, diningDiscovery(), store);
+
+    await service.getDining({ location: 'Sharples', date: '2026-09-09' });
+
+    expect(store.replaceSourceRecords).toHaveBeenCalledWith(
+      'dining', 'Dining Center', [], undefined, campusDayRange('2026-09-09'),
+    );
+  });
+
+  it('keeps the scheduled dining poll as a full replacement so past days are retired', async () => {
+    const client = { query: vi.fn().mockResolvedValue({ data: [] }) } as unknown as DashClient;
+    const store = { replaceSourceRecords: vi.fn().mockResolvedValue(undefined) } as unknown as PgStore;
+    const service = new SwatService(config(), client, diningDiscovery(), store);
+
+    await service.getDining({ date: '2026-09-08', limit: 100 }, true);
+
+    expect(store.replaceSourceRecords).toHaveBeenCalledWith('dining', 'Dining Center', [], undefined, undefined);
+  });
 });
+
+describe('transit departures', () => {
+  it('polls every directed station pair with enough departures for the largest tool limit', async () => {
+    const client = { query: vi.fn().mockImplementation(transitResponse) } as unknown as DashClient;
+    const store = { addObservation: vi.fn().mockResolvedValue(undefined) } as unknown as PgStore;
+    const service = new SwatService(config(), client, {} as RegistryDiscovery, store);
+
+    await service.syncRealtime();
+
+    const polled = vi.mocked(store.addObservation).mock.calls
+      .filter(([domain]) => domain === 'transit')
+      .map(([, source]) => source);
+    expect(new Set(polled)).toEqual(new Set(TRANSIT_PAIRS.map(({ origin, destination }) => `${origin}->${destination}`)));
+    expect(polled).toHaveLength(6);
+    expect(polled).toContain('media->swarthmore');
+    expect(client.query).toHaveBeenCalledWith('Transit', expect.any(String), expect.objectContaining({
+      departureStation: 'Media', arrivalStation: 'Swarthmore', maxResults: TRANSIT_POLL_LIMIT,
+    }));
+  });
+
+  it('serves up to the requested limit from the cached observation and reports truncation', async () => {
+    const client = { query: vi.fn() } as unknown as DashClient;
+    const departures = Array.from({ length: TRANSIT_POLL_LIMIT }, (_, index) => ({ id: `train-${index}` }));
+    const store = {
+      latestObservation: vi.fn().mockResolvedValue({ payload: { departures }, observed_at: new Date().toISOString() }),
+    } as unknown as PgStore;
+    const service = new SwatService(config(), client, {} as RegistryDiscovery, store);
+
+    const result = await service.getTransit({ origin: 'media', destination: 'swarthmore', limit: 7 });
+
+    expect(result.items).toHaveLength(7);
+    expect(result.meta.total).toBe(TRANSIT_POLL_LIMIT);
+    expect(result.meta.truncated).toBe(true);
+    expect(client.query).not.toHaveBeenCalled();
+  });
+
+  it('reads through to The Dash when a pair has never been observed', async () => {
+    const client = { query: vi.fn().mockImplementation(transitResponse) } as unknown as DashClient;
+    const store = {
+      latestObservation: vi.fn().mockResolvedValue(undefined),
+      addObservation: vi.fn().mockResolvedValue(undefined),
+    } as unknown as PgStore;
+    const service = new SwatService(config(), client, {} as RegistryDiscovery, store);
+
+    const result = await service.getTransit({ origin: '30th_street', destination: 'media', limit: 2 });
+
+    expect(result.items).toHaveLength(2);
+    expect(result.meta.stale).toBe(false);
+    expect(store.addObservation).toHaveBeenCalledWith('transit', '30th_street->media', expect.objectContaining({
+      departures: expect.any(Array),
+    }), expect.any(Date));
+  });
+
+  it('returns a structured warning when a never-observed pair also fails live', async () => {
+    const client = { query: vi.fn().mockRejectedValue(new Error('SEPTA offline')) } as unknown as DashClient;
+    const store = { latestObservation: vi.fn().mockResolvedValue(undefined) } as unknown as PgStore;
+    const service = new SwatService(config(), client, {} as RegistryDiscovery, store);
+
+    const result = await service.getTransit({ origin: 'media', destination: '30th_street' });
+
+    expect(result.items).toEqual([]);
+    expect(result.meta.stale).toBe(true);
+    expect(result.meta.warning).toContain('media->30th_street');
+    expect(result.meta.warning).toContain('SEPTA offline');
+  });
+});
+
+function transitResponse(operation: string, _query: string, variables: { maxResults?: number } = {}) {
+  if (operation === 'Weather') return Promise.resolve({ data: { location: 'Swarthmore' } });
+  const count = variables.maxResults ?? 0;
+  return Promise.resolve({
+    data: Array.from({ length: count }, (_, index) => ({ id: `train-${index}`, data: { orig_train: `${index}` } })),
+  });
+}
+
+function diningDiscovery(): RegistryDiscovery {
+  return {
+    current: vi.fn().mockReturnValue({
+      dining: [{ location: 'Dining Center', kind: 'cbord', sourceId: 'DCC', labels: [], displayUpcoming: true }],
+    }),
+  } as unknown as RegistryDiscovery;
+}
 
 function config() {
   return loadConfig({
