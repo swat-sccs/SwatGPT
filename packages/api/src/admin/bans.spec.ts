@@ -28,6 +28,7 @@ describe('createBanService', () => {
       userId: 'user-1',
       reason: 'spam',
       expiresAt: new Date(START + HOUR).toISOString(),
+      ip: null,
     });
     await expect(store.get<BanEntry>('user-1')).resolves.toEqual({
       type: ADMIN_BAN_TYPE,
@@ -67,7 +68,7 @@ describe('createBanService', () => {
 
     const record = await service.ban('user-1', { reason: 'abuse' });
 
-    expect(record).toEqual({ userId: 'user-1', reason: 'abuse', expiresAt: null });
+    expect(record).toEqual({ userId: 'user-1', reason: 'abuse', expiresAt: null, ip: null });
     const entry = await store.get<BanEntry>('user-1');
     expect(entry).toEqual({ type: ADMIN_BAN_TYPE, reason: 'abuse', duration: 0 });
     expect(entry).not.toHaveProperty('expiresAt');
@@ -122,6 +123,7 @@ describe('createBanService', () => {
       userId: 'user-2',
       reason: null,
       expiresAt: new Date(START + HOUR).toISOString(),
+      ip: null,
     });
   });
 
@@ -151,5 +153,85 @@ describe('createBanService', () => {
     await expect(service.isBanned('user-1')).resolves.toBe(true);
     await service.unban('user-1');
     await expect(service.isBanned('user-1')).resolves.toBe(false);
+  });
+
+  describe('violation bans that also banned the source IP', () => {
+    const IP = '130.58.1.2';
+
+    async function seedViolationBan(userId: string, ip?: string): Promise<void> {
+      const base = { type: 'message_limit', violation_count: 20, duration: HOUR };
+      await store.set(userId, { ...base, expiresAt: START + HOUR, ...(ip ? { ip } : {}) });
+      await store.set(IP, { ...base, user_id: userId, expiresAt: START + HOUR });
+    }
+
+    it('reports the banned IP on the record', async () => {
+      const service = createBanService(store);
+      await seedViolationBan('user-2', IP);
+
+      await expect(service.getBan('user-2')).resolves.toMatchObject({ ip: IP });
+    });
+
+    it.each([
+      { useRedis: false, userKey: 'user-2', ipKey: IP },
+      { useRedis: true, userKey: 'ban_cache:user:user-2', ipKey: `ban_cache:ip:${IP}` },
+    ])(
+      'unban lifts the user and IP bans from both stores (useRedis=$useRedis)',
+      async ({ useRedis, userKey, ipKey }) => {
+        const service = createBanService(store, { enforcementCache, useRedis });
+        await seedViolationBan('user-2', IP);
+        const cached = { type: 'message_limit', user_id: 'user-2', expiresAt: START + HOUR };
+        await enforcementCache.set(userKey, cached);
+        await enforcementCache.set(ipKey, cached);
+
+        await service.unban('user-2');
+
+        await expect(store.get('user-2')).resolves.toBeUndefined();
+        await expect(store.get(IP)).resolves.toBeUndefined();
+        await expect(enforcementCache.get(userKey)).resolves.toBeUndefined();
+        await expect(enforcementCache.get(ipKey)).resolves.toBeUndefined();
+        await expect(service.isBanned('user-2')).resolves.toBe(false);
+      },
+    );
+
+    it("keeps another user's later ban on the same IP in the log", async () => {
+      const service = createBanService(store, { enforcementCache });
+      await seedViolationBan('user-2', IP);
+      await store.set(IP, {
+        type: 'message_limit',
+        user_id: 'user-3',
+        duration: HOUR,
+        expiresAt: START + HOUR,
+      });
+      await enforcementCache.set(IP, { type: 'message_limit', user_id: 'user-3' });
+
+      await service.unban('user-2');
+
+      await expect(store.get('user-2')).resolves.toBeUndefined();
+      await expect(store.get(IP)).resolves.toMatchObject({ user_id: 'user-3' });
+      await expect(enforcementCache.get(IP)).resolves.toBeUndefined();
+    });
+
+    it('keeps the banned IP when an admin re-bans so a later unban still lifts it', async () => {
+      const service = createBanService(store, { enforcementCache });
+      await seedViolationBan('user-2', IP);
+
+      const record = await service.ban('user-2', { durationMs: 2 * HOUR, reason: 'extend' });
+      expect(record).toMatchObject({ reason: 'extend', ip: IP });
+
+      await service.unban('user-2');
+
+      await expect(store.get('user-2')).resolves.toBeUndefined();
+      await expect(store.get(IP)).resolves.toBeUndefined();
+    });
+
+    it('leaves the IP log entry alone when the user entry does not name it', async () => {
+      const service = createBanService(store, { enforcementCache });
+      await seedViolationBan('user-2');
+
+      await service.unban('user-2');
+
+      await expect(store.get('user-2')).resolves.toBeUndefined();
+      await expect(store.get(IP)).resolves.toMatchObject({ user_id: 'user-2' });
+    });
   });
 });

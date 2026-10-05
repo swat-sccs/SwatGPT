@@ -286,6 +286,7 @@ describe('createAdminControlsHandlers', () => {
         userId: targetId.toString(),
         reason: 'spam',
         expiresAt: expect.any(String),
+        ip: null,
       });
       expect(json).toHaveBeenCalledWith({
         userId: targetId.toString(),
@@ -336,6 +337,30 @@ describe('createAdminControlsHandlers', () => {
         expect.objectContaining({
           action: 'user.unbanned',
           metadata: expect.objectContaining({ reason: 'spam' }),
+        }),
+      );
+    });
+
+    it('lifts the IP ban a violation ban wrote alongside the user ban', async () => {
+      const store = new Keyv({ ttl: 2 * HOUR });
+      const deps = createDeps({ banService: createBanService(store) });
+      const handlers = createAdminControlsHandlers(deps);
+      const userId = targetId.toString();
+      const expiresAt = Date.now() + HOUR;
+      const base = { type: 'message_limit', violation_count: 20, duration: HOUR, expiresAt };
+      await store.set(userId, { ...base, ip: '130.58.1.2' });
+      await store.set('130.58.1.2', { ...base, user_id: userId });
+      const { req, res, json } = createReqRes({ params: { id: userId } });
+
+      await handlers.unbanUser(req, res);
+
+      expect(json).toHaveBeenCalledWith(expect.objectContaining({ banned: false }));
+      await expect(store.get(userId)).resolves.toBeUndefined();
+      await expect(store.get('130.58.1.2')).resolves.toBeUndefined();
+      expect(deps.recordAuditEntry).toHaveBeenCalledWith(
+        expect.objectContaining({
+          action: 'user.unbanned',
+          metadata: expect.objectContaining({ ip: '130.58.1.2' }),
         }),
       );
     });

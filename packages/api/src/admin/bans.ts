@@ -16,6 +16,8 @@ export interface BanRecord {
   userId: string;
   reason: string | null;
   expiresAt: string | null;
+  /** Source IP `banViolation` also banned; `checkBan` blocks on it independently of the user key. */
+  ip: string | null;
 }
 
 export interface BanOptions {
@@ -60,15 +62,17 @@ export interface BanEntry {
   expiresAt?: number;
   user_id?: string;
   violation_count?: number;
+  /** Set by `banViolation` on the user entry: the IP it also banned under its own key. */
+  ip?: string;
 }
 
 function isBanEntry(value: unknown): value is BanEntry {
   return typeof value === 'object' && value !== null && 'type' in value;
 }
 
-/** `checkBan.getBanCacheKey('user', userId, useRedis)` */
-function enforcementKey(userId: string, useRedis: boolean): string {
-  return useRedis ? `ban_cache:user:${userId}` : userId;
+/** `checkBan.getBanCacheKey(prefix, value, useRedis)` */
+function enforcementKey(prefix: 'user' | 'ip', value: string, useRedis: boolean): string {
+  return useRedis ? `ban_cache:${prefix}:${value}` : value;
 }
 
 function remainingMs(entry: BanEntry): number | null {
@@ -85,6 +89,7 @@ function toRecord(userId: string, entry: BanEntry): BanRecord {
     userId,
     reason: entry.reason ?? null,
     expiresAt: remaining === null ? null : new Date(Number(entry.expiresAt)).toISOString(),
+    ip: entry.ip ?? null,
   };
 }
 
@@ -103,8 +108,29 @@ export function createBanService(store: BanStore, options: BanServiceOptions = {
   async function clear(userId: string): Promise<void> {
     await Promise.all([
       store.delete(userId),
-      enforcementCache?.delete(enforcementKey(userId, useRedis)),
+      enforcementCache?.delete(enforcementKey('user', userId, useRedis)),
     ]);
+  }
+
+  /**
+   * Lifts the IP ban `banViolation` wrote alongside the user ban. The log entry is
+   * removed only while it still belongs to this user so a later ban of another
+   * account behind the same address survives; the enforcement-cache key is always
+   * dropped because `checkBan` re-caches it from the log if a ban remains.
+   */
+  async function clearIp(ip: string, userId: string): Promise<void> {
+    const entry = await store.get(ip);
+    const ownsEntry = isBanEntry(entry) && String(entry.user_id) === userId;
+    await Promise.all([
+      ownsEntry ? store.delete(ip) : undefined,
+      enforcementCache?.delete(enforcementKey('ip', ip, useRedis)),
+    ]);
+  }
+
+  async function unban(userId: string): Promise<void> {
+    const entry = await store.get(userId);
+    const ip = isBanEntry(entry) ? entry.ip : undefined;
+    await Promise.all([clear(userId), ip ? clearIp(ip, userId) : undefined]);
   }
 
   async function readActive(userId: string): Promise<BanEntry | null> {
@@ -129,15 +155,17 @@ export function createBanService(store: BanStore, options: BanServiceOptions = {
     const duration = durationMs ?? defaultDurationMs;
     const permanent = !(duration > 0);
     const ttl = permanent ? 0 : duration;
+    const ip = (await readActive(userId))?.ip;
     const entry: BanEntry = {
       type: ADMIN_BAN_TYPE,
       duration: ttl,
       ...(reason ? { reason } : {}),
+      ...(ip ? { ip } : {}),
       ...(permanent ? {} : { expiresAt: Date.now() + duration }),
     };
     await Promise.all([
       store.set(userId, entry, ttl),
-      enforcementCache?.set(enforcementKey(userId, useRedis), entry, ttl),
+      enforcementCache?.set(enforcementKey('user', userId, useRedis), entry, ttl),
     ]);
     return toRecord(userId, entry);
   }
@@ -146,6 +174,6 @@ export function createBanService(store: BanStore, options: BanServiceOptions = {
     isBanned: async (userId) => (await readActive(userId)) !== null,
     getBan,
     ban,
-    unban: clear,
+    unban,
   };
 }

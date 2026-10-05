@@ -72,7 +72,13 @@ const banViolation = async (req, res, errorMessage) => {
   );
 
   const expiresAt = Date.now() + duration;
-  await banLogs.set(user_id, { type, violation_count, duration, expiresAt });
+  await banLogs.set(user_id, {
+    type,
+    violation_count,
+    duration,
+    expiresAt,
+    ...(req.ip ? { ip: req.ip } : {}),
+  });
   if (req.ip) {
     await banLogs.set(req.ip, { type, user_id, violation_count, duration, expiresAt });
   }

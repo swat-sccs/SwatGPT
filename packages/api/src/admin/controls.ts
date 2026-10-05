@@ -320,7 +320,11 @@ export function createAdminControlsHandlers(deps: AdminControlsDeps): AdminContr
           action: 'user.unbanned',
           caller,
           target: userTarget(user),
-          metadata: { reason: existing.reason, expiresAt: existing.expiresAt },
+          metadata: {
+            reason: existing.reason,
+            expiresAt: existing.expiresAt,
+            ip: existing.ip,
+          },
           context: buildAuditContext(req),
         });
       }
