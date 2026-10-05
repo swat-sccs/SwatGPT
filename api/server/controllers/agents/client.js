@@ -95,6 +95,7 @@ const {
   decrementPendingRequest,
   maybePrewarmCodeSandbox,
   retrieveKbContextDetailed,
+  buildKbQueries,
   resolveDirectoryContext,
   recordGeneration,
   findKeywordFlags,
@@ -1245,8 +1246,9 @@ class AgentClient extends BaseClient {
     });
 
     /** KB retrieval overlaps the rest of message building; fails open to `undefined`. */
-    this.kbQueryText = orderedMessages[orderedMessages.length - 1]?.text ?? '';
-    const kbContextPromise = retrieveKbContextDetailed(this.kbQueryText).then((retrieval) => {
+    const { userText, retrievalQuery } = buildKbQueries(orderedMessages);
+    this.kbQueryText = userText;
+    const kbContextPromise = retrieveKbContextDetailed(retrievalQuery).then((retrieval) => {
       this.kbRetrieval = retrieval;
       return retrieval.context;
     });

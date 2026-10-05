@@ -4,9 +4,14 @@ const CONTEXT_HEADING = '# Swarthmore College knowledge base context';
 const CONTEXT_INSTRUCTION =
   "Answer from this context when it is relevant to the user's question, and cite the source URLs of the entries you use.";
 
+const location = (chunk: KbPayload, separator: string): string =>
+  chunk.section ? `${chunk.title}${separator}${chunk.section}` : chunk.title;
+
+/** Rebuilds the exact text the ingest pipeline embedded (ingest.py `embed_text`). */
+export const embedText = (chunk: KbPayload): string => `${location(chunk, ' › ')}\n\n${chunk.text}`;
+
 function formatEntry(chunk: KbPayload, position: number): string {
-  const location = chunk.section ? `${chunk.title} — ${chunk.section}` : chunk.title;
-  return `[${position}] ${location} (${chunk.source})\n${chunk.text}`;
+  return `[${position}] ${location(chunk, ' — ')} (${chunk.source})\n${chunk.text}`;
 }
 
 export function formatContext(chunks: KbPayload[]): string {

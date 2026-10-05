@@ -6,6 +6,7 @@ import type { KbPayload } from './search';
 import { retrieveKbContext, retrieveKbContextDetailed } from './retrieve';
 import { buildSparseQuery } from './lexical';
 import { createMetrics } from '~/app/metrics';
+import { embedText } from './format';
 
 const EMBEDDINGS_URL = 'http://tei-embed.test';
 const RERANK_URL = 'http://tei-rerank.test';
@@ -155,7 +156,23 @@ describe('retrieveKbContext', () => {
       expect(String(fetchMock.mock.calls[3][0])).toBe(`${RERANK_URL}/rerank`);
       expect(requestBody(3)).toEqual({
         query: QUERY,
-        texts: hits.map((hit) => hit.payload.text),
+        texts: hits.map((_, index) => `Title ${index} › Section ${index}\n\nChunk text ${index}`),
+        truncate: true,
+      });
+    });
+
+    it('reranks section-less chunks against their title breadcrumb', async () => {
+      const untitled = hits.map((hit) => ({
+        ...hit,
+        payload: { ...hit.payload, section: undefined },
+      }));
+      mockServices({ hits: untitled, scores });
+      await retrieveKbContext(QUERY);
+
+      expect(requestBody(3)).toEqual({
+        query: QUERY,
+        texts: hits.map((_, index) => `Title ${index}\n\nChunk text ${index}`),
+        truncate: true,
       });
     });
 
@@ -165,7 +182,8 @@ describe('retrieveKbContext', () => {
 
       expect(requestBody(3)).toEqual({
         query: QUERY,
-        texts: hits.map((hit) => hit.payload.text),
+        texts: hits.map((hit) => embedText(hit.payload as KbPayload)),
+        truncate: true,
       });
     });
 

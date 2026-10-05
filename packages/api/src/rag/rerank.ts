@@ -13,5 +13,9 @@ export async function rerankChunks(
   texts: string[],
   signal: AbortSignal,
 ): Promise<RerankResult[]> {
-  return postJson<RerankResult[]>(resolveEndpoint(baseUrl, RERANK_PATH), { query, texts }, signal);
+  return postJson<RerankResult[]>(
+    resolveEndpoint(baseUrl, RERANK_PATH),
+    { query, texts, truncate: true },
+    signal,
+  );
 }

@@ -2,9 +2,9 @@ import { logger } from '@librechat/data-schemas';
 import type { KbRetrievalResult } from '~/app/metrics';
 import type { KbCandidate, KbPayload } from './search';
 import type { RerankResult } from './rerank';
+import { embedText, formatContext } from './format';
 import { recordRagRetrieval } from '~/app/metrics';
 import { buildSparseQuery } from './lexical';
-import { formatContext } from './format';
 import { rerankChunks } from './rerank';
 import { embedQuery } from './embed';
 import { searchKb } from './search';
@@ -86,7 +86,7 @@ async function runPipeline(
   const scores = await rerankChunks(
     config.rerankUrl,
     query,
-    candidates.map((candidate) => candidate.payload.text),
+    candidates.map((candidate) => embedText(candidate.payload)),
     signal,
   );
   return selectTopChunks(candidates, scores);
