@@ -33,6 +33,12 @@ ITS currently stores dorms as display names (`Willets`, `Mertz`); legacy codes s
 no student has a dorm (ITS blanks the column while reloading housing) and the importer refuses
 an empty snapshot, so a bad run never empties the live directory.
 
+The Cygnet overlay is required: it carries each student's `showProfile`/`showDorm` opt-outs.
+The exporter fails closed when any `OVERLAY_DB_*` variable is missing, when the overlay query
+errors, or when it returns zero rows, rather than exporting everyone as visible. Only an
+explicit `1` counts as visible in an overlay flag; students with no overlay row default to
+visible, matching Cygnet.
+
 ## Running it on gull
 
 `/home/29/aidahxr` is the same NFS home on loon and gull, so the dev checkout at
@@ -93,5 +99,13 @@ Then ask SwatGPT where a consenting student lives.
 | `OVERLAY_DB_USER`, `OVERLAY_DB_PASS`, `OVERLAY_DB_NAME` | Cygnet's `MYSQL_USER`, `MYSQL_PASSWORD`, `MYSQL_DATABASE` |
 | `OUTPUT` | Snapshot path, default `./directory.json` |
 
+All `ITS_DB_*` and `OVERLAY_DB_*` variables are required; there is no way to export without
+the overlay.
+
 Overrides for `export.sh` and `sync.sh`: `OUT_DIR`, `CYGNET_NETWORK`, `CYGNET_SERVICE`,
 `OVERLAY_HOST`, `IMAGE`, `TIMEOUT_S`, `EAGLE`, `EAGLE_REPO`, `REMOTE_FILE`.
+
+## Tests
+
+`export.test.mjs` covers the fail-closed checks and flag parsing with `node:test`. It imports
+`export.mjs`, so install dependencies first: `npm install && node --test export.test.mjs`.

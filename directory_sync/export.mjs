@@ -1,4 +1,5 @@
-import { writeFileSync } from 'node:fs';
+import { realpathSync, writeFileSync } from 'node:fs';
+import { pathToFileURL } from 'node:url';
 import mysql from 'mysql2/promise';
 
 /**
@@ -7,7 +8,8 @@ import mysql from 'mysql2/promise';
  *
  * Environment:
  *   ITS_DB_HOST, ITS_DB_USER, ITS_DB_PASS, ITS_DB_NAME — ITS `student_data` (same values Cygnet uses)
- *   OVERLAY_DB_HOST, OVERLAY_DB_USER, OVERLAY_DB_PASS, OVERLAY_DB_NAME — Cygnet's overlay DB (optional)
+ *   OVERLAY_DB_HOST, OVERLAY_DB_USER, OVERLAY_DB_PASS, OVERLAY_DB_NAME — Cygnet's overlay DB (required;
+ *     the export refuses to run without overlay rows, since they carry the privacy opt-outs)
  *   OUTPUT — path of the snapshot file (default ./directory.json)
  */
 
@@ -44,7 +46,7 @@ async function readRows(prefix, query) {
 }
 
 /** ITS blanks every dorm while reloading housing; publishing that would empty the directory. */
-function assertNotReloading(rows) {
+export function assertNotReloading(rows) {
   const housed = rows.filter((row) => row.DORM).length;
   if (housed === 0) {
     throw new Error(
@@ -53,11 +55,26 @@ function assertNotReloading(rows) {
   }
 }
 
-function overlayByUid(rows) {
-  return new Map(rows.map((row) => [String(row.uid).toLowerCase(), row]));
+/** Without overlay rows every opted-out student would be published as visible. */
+export function assertOverlayPresent(rows) {
+  if (!Array.isArray(rows) || rows.length === 0) {
+    throw new Error('Cygnet overlay returned no rows; refusing to export without privacy flags');
+  }
 }
 
-function toSnapshotRow(row, overlay) {
+/** Only an explicit 1 (number, boolean, BIT byte or "1") is a visible flag; anything else hides. */
+export function flag(value) {
+  if (Buffer.isBuffer(value)) {
+    return value.length > 0 && value[0] === 1;
+  }
+  return Number(value) === 1;
+}
+
+export function overlayByUid(rows) {
+  return new Map(rows.map((row) => [String(row.uid).trim().toLowerCase(), row]));
+}
+
+export function toSnapshotRow(row, overlay) {
   const uid = String(row.USER_ID).trim().toLowerCase();
   const custom = overlay.get(uid);
   return {
@@ -67,19 +84,34 @@ function toSnapshotRow(row, overlay) {
     gradYear: row.GRAD_YEAR,
     dorm: row.DORM,
     room: row.DORM_ROOM,
-    showProfile: custom ? Boolean(custom.showProfile) : true,
-    showDorm: custom ? Boolean(custom.showDorm) : true,
+    showProfile: custom ? flag(custom.showProfile) : true,
+    showDorm: custom ? flag(custom.showDorm) : true,
   };
 }
 
-const students = await readRows('ITS', ITS_QUERY);
-assertNotReloading(students);
-const overlay = process.env.OVERLAY_DB_HOST
-  ? overlayByUid(await readRows('OVERLAY', OVERLAY_QUERY))
-  : new Map();
-const snapshot = students.map((row) => toSnapshotRow(row, overlay));
-const output = process.env.OUTPUT ?? './directory.json';
-writeFileSync(output, JSON.stringify(snapshot));
-console.log(
-  `Wrote ${snapshot.length} students (${overlay.size} overlay rows applied) to ${output}`,
-);
+export function buildSnapshot(students, overlayRows) {
+  assertNotReloading(students);
+  assertOverlayPresent(overlayRows);
+  const overlay = overlayByUid(overlayRows);
+  return {
+    snapshot: students.map((row) => toSnapshotRow(row, overlay)),
+    overlaySize: overlay.size,
+  };
+}
+
+async function main() {
+  const [students, overlayRows] = await Promise.all([
+    readRows('ITS', ITS_QUERY),
+    readRows('OVERLAY', OVERLAY_QUERY),
+  ]);
+  const { snapshot, overlaySize } = buildSnapshot(students, overlayRows);
+  const output = process.env.OUTPUT ?? './directory.json';
+  writeFileSync(output, JSON.stringify(snapshot));
+  console.log(
+    `Wrote ${snapshot.length} students (${overlaySize} overlay rows applied) to ${output}`,
+  );
+}
+
+if (process.argv[1] && import.meta.url === pathToFileURL(realpathSync(process.argv[1])).href) {
+  await main();
+}
