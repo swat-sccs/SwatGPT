@@ -45,6 +45,7 @@ const {
   configureFileConfigRegexEngine,
   waitForKeyvRedisClient,
   warmDirectoryStore,
+  createImageCspMiddleware,
 } = require('@librechat/api');
 const { connectDb, indexSync } = require('~/db');
 const {
@@ -242,6 +243,7 @@ const startServer = async () => {
   app.use('/api/agents/chat', agentStartupIngressMiddleware);
   app.use(metricsMiddleware);
   app.use(noIndex);
+  app.use(createImageCspMiddleware(appConfig, process.env));
   app.use(express.json({ limit: '3mb' }));
   app.use(express.urlencoded({ extended: true, limit: '3mb' }));
   app.use(handleJsonParseError);
