@@ -1,4 +1,5 @@
 import { Types } from 'mongoose';
+import { SystemCapabilities } from '@librechat/data-schemas';
 import type { IUser, IConversation, UsageSummary } from '@librechat/data-schemas';
 import type { Response } from 'express';
 import type { ServerRequest } from '~/types/http';
@@ -58,6 +59,7 @@ function createDeps(overrides: Partial<AdminUsageDeps> = {}): AdminUsageDeps {
     countFlagsByUser: jest.fn().mockResolvedValue(new Map()),
     countFlagsByConversation: jest.fn().mockResolvedValue(new Map()),
     isUserBanned: jest.fn().mockResolvedValue(false),
+    hasCapability: jest.fn().mockResolvedValue(true),
     ...overrides,
   };
 }
@@ -368,6 +370,46 @@ describe('createAdminUsageHandlers', () => {
           updatedAt: '2026-09-01T09:30:00.000Z',
         },
       ]);
+      expect(body.conversationsHidden).toBe(false);
+      expect(deps.hasCapability).toHaveBeenCalledWith(
+        expect.objectContaining({ id: (req.user as { _id: Types.ObjectId })._id.toString() }),
+        SystemCapabilities.READ_CONVERSATIONS,
+      );
+    });
+
+    it('withholds conversation titles from callers without read:conversations', async () => {
+      const deps = createDeps({
+        findUser: jest.fn().mockResolvedValue(user),
+        findRecentConversations: jest.fn().mockResolvedValue([conversation]),
+        hasCapability: jest.fn().mockResolvedValue(false),
+      });
+      const { req, res, status, json } = createReqRes({ params: { id: userId.toString() } });
+      await createAdminUsageHandlers(deps).user(req, res);
+      expect(status).toHaveBeenCalledWith(200);
+      const body = json.mock.calls[0][0];
+      expect(body.recentConversations).toEqual([]);
+      expect(body.conversationsHidden).toBe(true);
+      expect(JSON.stringify(body)).not.toContain('Lunch');
+      expect(body.summary).toMatchObject({ requests: 10 });
+      expect(deps.findRecentConversations).not.toHaveBeenCalled();
+      expect(deps.getConversationUsage).not.toHaveBeenCalled();
+      expect(deps.getConversationStats).not.toHaveBeenCalled();
+      expect(deps.countFlagsByConversation).not.toHaveBeenCalled();
+    });
+
+    it('fails closed when the capability check errors', async () => {
+      const deps = createDeps({
+        findUser: jest.fn().mockResolvedValue(user),
+        findRecentConversations: jest.fn().mockResolvedValue([conversation]),
+        hasCapability: jest.fn().mockRejectedValue(new Error('db down')),
+      });
+      const { req, res, status, json } = createReqRes({ params: { id: userId.toString() } });
+      await createAdminUsageHandlers(deps).user(req, res);
+      expect(status).toHaveBeenCalledWith(200);
+      const body = json.mock.calls[0][0];
+      expect(body.recentConversations).toEqual([]);
+      expect(body.conversationsHidden).toBe(true);
+      expect(deps.findRecentConversations).not.toHaveBeenCalled();
     });
 
     it('returns 404 for a missing user and 400 for a malformed id', async () => {

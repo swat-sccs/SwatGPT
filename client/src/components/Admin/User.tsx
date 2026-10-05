@@ -45,28 +45,30 @@ function Content({ userId }: { userId: string }) {
         <div className="space-y-6" aria-busy={query.isFetching}>
           <Tiles summary={detail.summary} />
           <Chart points={detail.timeseries.points} bucket={bucket} />
-          <section aria-labelledby="admin-user-conversations">
-            <h3
-              id="admin-user-conversations"
-              className="mb-2 text-sm font-medium text-text-secondary"
-            >
-              {localize('com_admin_section_recent_conversations')}
-            </h3>
-            {detail.recentConversations.length === 0 ? (
-              <Empty />
-            ) : (
-              <Table>
-                <TableHeader>
-                  <ConversationHeadRow showOwner={false} />
-                </TableHeader>
-                <TableBody>
-                  {detail.recentConversations.map((item) => (
-                    <ConversationRow key={item.conversationId} item={item} showOwner={false} />
-                  ))}
-                </TableBody>
-              </Table>
-            )}
-          </section>
+          {!detail.conversationsHidden && (
+            <section aria-labelledby="admin-user-conversations">
+              <h3
+                id="admin-user-conversations"
+                className="mb-2 text-sm font-medium text-text-secondary"
+              >
+                {localize('com_admin_section_recent_conversations')}
+              </h3>
+              {detail.recentConversations.length === 0 ? (
+                <Empty />
+              ) : (
+                <Table>
+                  <TableHeader>
+                    <ConversationHeadRow showOwner={false} />
+                  </TableHeader>
+                  <TableBody>
+                    {detail.recentConversations.map((item) => (
+                      <ConversationRow key={item.conversationId} item={item} showOwner={false} />
+                    ))}
+                  </TableBody>
+                </Table>
+              )}
+            </section>
+          )}
         </div>
       )}
 

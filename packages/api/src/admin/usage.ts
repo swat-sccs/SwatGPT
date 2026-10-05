@@ -1,5 +1,5 @@
 import { Types } from 'mongoose';
-import { logger, isValidObjectIdString } from '@librechat/data-schemas';
+import { logger, SystemCapabilities, isValidObjectIdString } from '@librechat/data-schemas';
 import type {
   IUser,
   IFlag,
@@ -25,6 +25,7 @@ import type {
 } from 'librechat-data-provider';
 import type { Model } from 'mongoose';
 import type { Response } from 'express';
+import type { HasCapabilityFn } from '~/middleware/capabilities';
 import type { ServerRequest } from '~/types/http';
 import { parsePagination } from './pagination';
 
@@ -60,6 +61,8 @@ export interface AdminUsageDeps {
   countFlagsByUser: (range: UsageRange, userIds: string[]) => Promise<Map<string, number>>;
   countFlagsByConversation: (conversationIds: string[]) => Promise<Map<string, number>>;
   isUserBanned: (userId: string) => Promise<boolean>;
+  /** Gates conversation titles in the user detail view on `read:conversations`. */
+  hasCapability: HasCapabilityFn;
 }
 
 type Handler = (req: ServerRequest, res: Response) => Promise<Response>;
@@ -367,6 +370,38 @@ export function createAdminUsageHandlers(deps: AdminUsageDeps): AdminUsageHandle
     });
   }
 
+  async function canReadConversations(req: ServerRequest): Promise<boolean> {
+    const caller = req.user;
+    const id = caller?.id ?? caller?._id?.toString();
+    if (!caller || !id) {
+      return false;
+    }
+    try {
+      return await deps.hasCapability(
+        {
+          id,
+          role: caller.role ?? '',
+          tenantId: caller.tenantId,
+          idOnTheSource: caller.idOnTheSource ?? null,
+        },
+        SystemCapabilities.READ_CONVERSATIONS,
+      );
+    } catch (error) {
+      logger.warn('[adminUsage] read:conversations check failed; hiding titles', error);
+      return false;
+    }
+  }
+
+  async function visibleConversations(
+    req: ServerRequest,
+    userId: string,
+  ): Promise<Array<Omit<TAdminConversationListItem, 'user'>> | null> {
+    if (!(await canReadConversations(req))) {
+      return null;
+    }
+    return recentConversations(userId);
+  }
+
   async function user(req: ServerRequest, res: Response): Promise<Response> {
     const { id } = req.params as { id: string };
     if (!isValidObjectIdString(id)) {
@@ -388,7 +423,7 @@ export function createAdminUsageHandlers(deps: AdminUsageDeps): AdminUsageHandle
         deps.getUsageTimeseries({ ...scoped, bucket: bucket.value }),
         deps.countFlags(scoped),
         deps.isUserBanned(id),
-        recentConversations(id),
+        visibleConversations(req, id),
       ]);
       if (!found) {
         return res.status(404).json({ error: 'User not found' });
@@ -398,10 +433,11 @@ export function createAdminUsageHandlers(deps: AdminUsageDeps): AdminUsageHandle
         user: toUsageUser(userRow(found, usage), flagged, banned),
         summary: toSummary(parsed.value.range, usage, flagged),
         timeseries: toTimeseries(parsed.value, bucket.value, points),
-        recentConversations: conversations.map((conversation) => ({
+        recentConversations: (conversations ?? []).map((conversation) => ({
           ...conversation,
           user: owner,
         })),
+        conversationsHidden: conversations === null,
       };
       return res.status(200).json(detail);
     } catch (error) {

@@ -8,7 +8,7 @@ const {
   createAdminUsageHandlers,
   createUsageConversationReaders,
 } = require('@librechat/api');
-const { requireCapability } = require('~/server/middleware/roles/capabilities');
+const { hasCapability, requireCapability } = require('~/server/middleware/roles/capabilities');
 const { requireJwtAuth } = require('~/server/middleware');
 const { Conversation, Message, Flag } = require('~/db/models');
 const getLogStores = require('~/cache/getLogStores');
@@ -31,6 +31,7 @@ const handlers = createAdminUsageHandlers({
   ...createUsageConversationReaders({ Conversation, Message }),
   ...createUsageFlagReaders(Flag),
   isUserBanned: banService.isBanned,
+  hasCapability,
 });
 
 router.use(requireJwtAuth, requireAdminAccess, requireReadUsage);

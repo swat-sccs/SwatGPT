@@ -94,6 +94,8 @@ export type TAdminUsageUserDetail = {
   summary: TAdminUsageSummary;
   timeseries: TAdminUsageTimeseries;
   recentConversations: TAdminConversationListItem[];
+  /** True when the caller lacks `read:conversations`; `recentConversations` is then empty. */
+  conversationsHidden?: boolean;
 };
 
 export type TAdminUsageModel = {
