@@ -198,6 +198,13 @@ const messageSchema: Schema<IMessage> = new Schema(
 messageSchema.index({ expiredAt: 1 }, { expireAfterSeconds: 0 });
 messageSchema.index({ createdAt: 1 });
 messageSchema.index({ messageId: 1, user: 1, tenantId: 1 }, { unique: true });
+/**
+ * Serves the admin oversight `errors` filter (`distinct('conversationId', { error: true })`)
+ * as a covered DISTINCT_SCAN. `error` must lead: the planner only considers the partial
+ * index when the query bounds its first key, so a bare `{ conversationId: 1 }` partial
+ * index is never chosen over a collection scan.
+ */
+messageSchema.index({ error: 1, conversationId: 1 }, { partialFilterExpression: { error: true } });
 
 // index for MeiliSearch sync operations
 messageSchema.index({ _meiliIndex: 1, isTemporary: 1, expiredAt: 1 });

@@ -114,6 +114,7 @@
   "com_admin_range_24h": "24 h",
   "com_admin_range_30d": "30 d",
   "com_admin_range_7d": "7 d",
+  "com_admin_range_all": "All",
   "com_admin_range_label": "Time range",
   "com_admin_section_controls": "Moderation",
   "com_admin_section_kpis": "Key metrics",

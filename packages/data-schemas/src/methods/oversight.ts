@@ -27,6 +27,8 @@ export const MAX_CONVERSATION_PAGE = 100;
 export const MAX_TEXT_SEARCH_MESSAGES = 200;
 
 const MEILI_MESSAGES_INDEX = 'messages';
+/** Everything `toListItem` and the keyset cursor read from a conversation row. */
+const LIST_PROJECTION = '_id conversationId title user model createdAt updatedAt';
 
 export interface ListConversationsAdminOptions {
   cursor?: string;
@@ -435,7 +437,7 @@ export function createOversightMethods(mongoose: typeof import('mongoose')): Ove
       return { items: [], nextCursor: null };
     }
     const convos = await Conversation()
-      .find(buildFilter(options, sortField, scope, cursor))
+      .find(buildFilter(options, sortField, scope, cursor), LIST_PROJECTION)
       .sort({ [sortField]: -1, _id: -1 })
       .limit(limit + 1)
       .lean<IConversation[]>();

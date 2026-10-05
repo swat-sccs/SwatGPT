@@ -95,6 +95,26 @@ describe('createAdminUsageHandlers', () => {
       expect(inverted.status).toHaveBeenCalledWith(400);
     });
 
+    it('treats all=true as an unbounded lower edge', async () => {
+      const deps = createDeps();
+      const { req, res, status, json } = createReqRes({ query: { all: 'true', to: TO } });
+      await createAdminUsageHandlers(deps).summary(req, res);
+      expect(deps.getUsageSummary).toHaveBeenCalledWith({ from: new Date(0), to: new Date(TO) });
+      expect(deps.countFlags).toHaveBeenCalledWith({ from: new Date(0), to: new Date(TO) });
+      expect(status).toHaveBeenCalledWith(200);
+      expect(json.mock.calls[0][0]).toMatchObject({ from: new Date(0).toISOString(), to: TO });
+    });
+
+    it('rejects all combined with from, and non-boolean all', async () => {
+      const handlers = createAdminUsageHandlers(createDeps());
+      const combined = createReqRes({ query: { all: 'true', from: FROM } });
+      await handlers.summary(combined.req, combined.res);
+      expect(combined.status).toHaveBeenCalledWith(400);
+      const bogus = createReqRes({ query: { all: 'yes' } });
+      await handlers.summary(bogus.req, bogus.res);
+      expect(bogus.status).toHaveBeenCalledWith(400);
+    });
+
     it('returns 500 when the aggregation fails', async () => {
       const deps = createDeps({ getUsageSummary: jest.fn().mockRejectedValue(new Error('x')) });
       const { req, res, status } = createReqRes();
@@ -155,6 +175,55 @@ describe('createAdminUsageHandlers', () => {
       const bogus = createReqRes({ query: { bucket: 'week' } });
       await handlers.timeseries(bogus.req, bogus.res);
       expect(bogus.status).toHaveBeenCalledWith(400);
+    });
+
+    it('starts an all-time day series at the first recorded bucket', async () => {
+      const point = (t: string, requests: number) => ({
+        t: new Date(t),
+        requests,
+        errors: 0,
+        promptTokens: 0,
+        completionTokens: 0,
+        uniqueUsers: 1,
+        ttftP50Ms: null,
+        durationP95Ms: null,
+      });
+      const deps = createDeps({
+        getUsageTimeseries: jest
+          .fn()
+          .mockResolvedValue([
+            point('2026-08-30T00:00:00.000Z', 1),
+            point('2026-09-01T00:00:00.000Z', 2),
+          ]),
+      });
+      const to = '2026-09-02T12:00:00.000Z';
+      const { req, res, json } = createReqRes({ query: { all: 'true', to, bucket: 'day' } });
+      await createAdminUsageHandlers(deps).timeseries(req, res);
+      expect(deps.getUsageTimeseries).toHaveBeenCalledWith({
+        from: new Date(0),
+        to: new Date(to),
+        bucket: 'day',
+      });
+      const body = json.mock.calls[0][0];
+      expect(body).toMatchObject({ bucket: 'day', from: '2026-08-30T00:00:00.000Z', to });
+      expect(body.points.map((p: { t: string; requests: number }) => [p.t, p.requests])).toEqual([
+        ['2026-08-30T00:00:00.000Z', 1],
+        ['2026-08-31T00:00:00.000Z', 0],
+        ['2026-09-01T00:00:00.000Z', 2],
+        ['2026-09-02T00:00:00.000Z', 0],
+      ]);
+    });
+
+    it('returns no points for an all-time window with nothing recorded', async () => {
+      const { req, res, json } = createReqRes({ query: { all: 'true', to: TO, bucket: 'day' } });
+      await createAdminUsageHandlers(createDeps()).timeseries(req, res);
+      expect(json.mock.calls[0][0]).toEqual({ bucket: 'day', from: TO, to: TO, points: [] });
+    });
+
+    it('refuses hour buckets for all-time windows', async () => {
+      const { req, res, status } = createReqRes({ query: { all: 'true' } });
+      await createAdminUsageHandlers(createDeps()).timeseries(req, res);
+      expect(status).toHaveBeenCalledWith(400);
     });
   });
 

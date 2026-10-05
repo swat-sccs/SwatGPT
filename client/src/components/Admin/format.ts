@@ -39,14 +39,14 @@ export const formatTick = (iso: string, bucket: TAdminUsageBucket): string =>
 export const ratio = (numerator: number, denominator: number): number | null =>
   denominator > 0 ? numerator / denominator : null;
 
-export type TRangePreset = '24h' | '7d' | '30d';
+export type TRangePreset = '24h' | '7d' | '30d' | 'all';
 
-export const RANGE_PRESETS: readonly TRangePreset[] = ['24h', '7d', '30d'];
+export const RANGE_PRESETS: readonly TRangePreset[] = ['24h', '7d', '30d', 'all'];
 
 const HOUR_MS = 60 * 60 * 1000;
 const DAY_MS = 24 * HOUR_MS;
 
-const presetDurations: Record<TRangePreset, number> = {
+const presetDurations: Record<Exclude<TRangePreset, 'all'>, number> = {
   '24h': DAY_MS,
   '7d': 7 * DAY_MS,
   '30d': 30 * DAY_MS,
@@ -58,6 +58,9 @@ export const bucketFor = (preset: TRangePreset): TAdminUsageBucket =>
 /** Builds ISO bounds for a preset, aligned to the minute so query keys stay stable. */
 export const rangeFor = (preset: TRangePreset, now: number = Date.now()): TAdminUsageRange => {
   const to = Math.floor(now / 60000) * 60000;
+  if (preset === 'all') {
+    return { to: new Date(to).toISOString(), all: true };
+  }
   return {
     from: new Date(to - presetDurations[preset]).toISOString(),
     to: new Date(to).toISOString(),

@@ -189,6 +189,34 @@ beforeEach(async () => {
   await seed();
 });
 
+describe('schema indexes', () => {
+  const ERRORED_KEY = { error: 1, conversationId: 1 };
+
+  it('declares unscoped keyset indexes for both admin sort fields', () => {
+    const specs = models.Conversation.schema.indexes().map(([fields]) => fields);
+    expect(specs).toContainEqual({ updatedAt: -1, _id: -1 });
+    expect(specs).toContainEqual({ createdAt: -1, _id: -1 });
+  });
+
+  it('declares a partial index over errored messages keyed for a conversationId distinct', () => {
+    const errored = models.Message.schema
+      .indexes()
+      .find(([fields]) => JSON.stringify(fields) === JSON.stringify(ERRORED_KEY));
+    expect(errored?.[1]).toMatchObject({ partialFilterExpression: { error: true } });
+  });
+
+  it('builds the new indexes on the collections', async () => {
+    await Promise.all([models.Conversation.ensureIndexes(), models.Message.ensureIndexes()]);
+    const messageIndexes = await models.Message.collection.indexes();
+    expect(messageIndexes).toContainEqual(
+      expect.objectContaining({ key: ERRORED_KEY, partialFilterExpression: { error: true } }),
+    );
+    const convoKeys = (await models.Conversation.collection.indexes()).map((index) => index.key);
+    expect(convoKeys).toContainEqual({ updatedAt: -1, _id: -1 });
+    expect(convoKeys).toContainEqual({ createdAt: -1, _id: -1 });
+  });
+});
+
 describe('keyset cursor', () => {
   it('round-trips and rejects malformed input', () => {
     const id = new Types.ObjectId();

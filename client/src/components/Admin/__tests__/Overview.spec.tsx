@@ -1,4 +1,4 @@
-import { screen } from '@testing-library/react';
+import { screen, fireEvent, waitFor } from '@testing-library/react';
 import { renderAdmin, mockCapabilities, pending, mocks } from '../testing/utils';
 import { summary, timeseries, models } from '../testing/fixtures';
 import Overview from '../Overview';
@@ -28,6 +28,33 @@ describe('admin overview', () => {
     expect(mocks.getAdminUsageTimeseries).toHaveBeenCalledWith(
       expect.objectContaining({ bucket: 'hour' }),
     );
+  });
+
+  it('switches to an unbounded day series for all time', async () => {
+    mockCapabilities();
+    mocks.getAdminUsageSummary.mockResolvedValue(summary);
+    mocks.getAdminUsageTimeseries.mockResolvedValue(timeseries);
+    mocks.getAdminUsageModels.mockResolvedValue({ models });
+    renderAdmin(<Overview />);
+    const all = await screen.findByRole('button', { name: 'All' });
+    expect(all).toHaveAttribute('aria-pressed', 'false');
+    fireEvent.click(all);
+    await waitFor(() =>
+      expect(mocks.getAdminUsageTimeseries).toHaveBeenLastCalledWith({
+        all: true,
+        bucket: 'day',
+        to: expect.any(String),
+      }),
+    );
+    expect(mocks.getAdminUsageSummary).toHaveBeenLastCalledWith({
+      all: true,
+      to: expect.any(String),
+    });
+    expect(mocks.getAdminUsageModels).toHaveBeenLastCalledWith({
+      all: true,
+      to: expect.any(String),
+    });
+    expect(all).toHaveAttribute('aria-pressed', 'true');
   });
 
   it('renders an error state with retry', async () => {

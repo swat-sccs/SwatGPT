@@ -5,8 +5,11 @@ import type { TFeedback } from '../feedback';
 
 export type TAdminCapabilitiesResponse = { capabilities: string[] };
 
-/** ISO-8601 bounds; both optional, defaults to the trailing 24 h. */
-export type TAdminUsageRange = { from?: string; to?: string };
+/**
+ * ISO-8601 bounds; both optional, defaults to the trailing 24 h.
+ * `all: true` replaces `from` with an unbounded lower edge (everything up to `to`).
+ */
+export type TAdminUsageRange = { from?: string; to?: string; all?: boolean };
 
 export type TAdminUsageBucket = 'hour' | 'day';
 

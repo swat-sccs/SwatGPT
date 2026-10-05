@@ -61,6 +61,9 @@ convoSchema.index({ createdAt: 1, updatedAt: 1 });
 convoSchema.index({ conversationId: 1, user: 1, tenantId: 1 }, { unique: true });
 convoSchema.index({ user: 1, chatProjectId: 1, updatedAt: -1, _id: -1 });
 convoSchema.index({ user: 1, chatProjectId: 1, createdAt: -1, _id: -1 });
+/** Admin oversight list: unscoped keyset pagination on `{ sortField: -1, _id: -1 }`. */
+convoSchema.index({ updatedAt: -1, _id: -1 });
+convoSchema.index({ createdAt: -1, _id: -1 });
 
 convoSchema.index({ user: 1, isTemporary: 1, expiredAt: 1 });
 // index for MeiliSearch sync operations

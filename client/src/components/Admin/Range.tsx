@@ -23,6 +23,7 @@ const presetLabelKeys = {
   '24h': 'com_admin_range_24h',
   '7d': 'com_admin_range_7d',
   '30d': 'com_admin_range_30d',
+  all: 'com_admin_range_all',
 } as const;
 
 export function RangePicker({ preset, setPreset }: Pick<TRangeState, 'preset' | 'setPreset'>) {
