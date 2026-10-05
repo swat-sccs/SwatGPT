@@ -106,17 +106,92 @@ afterAll(async () => {
 });
 
 describe('createGeneration', () => {
-  it('inserts a document with defaults and rejects a duplicate messageId', async () => {
+  it('inserts a document with defaults', async () => {
     const input = generation({
       user: carol,
       createdAt: at(60),
       messageId: 'unique-1',
       conversationId: 'c-create',
     });
-    const created = await methods.createGeneration(input);
+    const { generation: created, continued } = await methods.createGeneration(input);
+    expect(continued).toBe(false);
     expect(created.status).toBe('ok');
     expect(created.toolCalls).toEqual([]);
-    await expect(methods.createGeneration(input)).rejects.toMatchObject({ code: 11000 });
+  });
+
+  it('folds a continued run with the same messageId into the existing row', async () => {
+    const first = generation({
+      user: carol,
+      createdAt: at(61),
+      messageId: 'continue-1',
+      conversationId: 'c-continue',
+      promptTokens: 100,
+      completionTokens: 50,
+      ttftMs: 120,
+      durationMs: 1000,
+      finishReason: 'length',
+      toolCalls: ['dash_menu'],
+      ragChunks: 3,
+      ragMs: 40,
+      status: 'error',
+      errorType: 'timeout',
+    });
+    await methods.createGeneration(first);
+    const { generation: merged, continued } = await methods.createGeneration({
+      ...first,
+      user: carol.toString(),
+      createdAt: at(62),
+      model: 'qwen-next',
+      promptTokens: 160,
+      completionTokens: 70,
+      ttftMs: 90,
+      durationMs: 1500,
+      finishReason: 'stop',
+      toolCalls: ['kb_search'],
+      ragChunks: 0,
+      ragMs: 10,
+      status: 'ok',
+      errorType: undefined,
+    });
+    expect(continued).toBe(true);
+    expect(await Generation.countDocuments({ messageId: 'continue-1' })).toBe(1);
+    expect(merged).toMatchObject({
+      model: 'qwen-next',
+      promptTokens: 260,
+      completionTokens: 120,
+      ttftMs: 120,
+      durationMs: 2500,
+      finishReason: 'stop',
+      toolCalls: ['dash_menu', 'kb_search'],
+      ragChunks: 3,
+      ragMs: 50,
+      status: 'ok',
+      createdAt: at(61),
+    });
+    expect(merged.errorType).toBeUndefined();
+
+    const usage = await methods.getConversationUsage(['c-continue']);
+    expect(usage.get('c-continue')).toEqual({
+      requests: 1,
+      promptTokens: 260,
+      completionTokens: 120,
+      errors: 0,
+    });
+  });
+
+  it('rejects a duplicate messageId owned by another user', async () => {
+    const input = generation({
+      user: carol,
+      createdAt: at(63),
+      messageId: 'owned-1',
+      conversationId: 'c-owned',
+    });
+    await methods.createGeneration(input);
+    await expect(methods.createGeneration({ ...input, user: bob })).rejects.toMatchObject({
+      code: 11000,
+    });
+    const row = await Generation.findOne({ messageId: 'owned-1' }).lean();
+    expect(row?.promptTokens).toBe(100);
   });
 });
 

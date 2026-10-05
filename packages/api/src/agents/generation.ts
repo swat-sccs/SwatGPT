@@ -55,8 +55,10 @@ export function countKbChunks(context: string | undefined): number {
 export interface RecordGenerationDeps {
   createGeneration: GenerationMethods['createGeneration'];
   createFlag: FlagMethods['createFlag'];
-  findKeywordFlags: (text: string) => string[];
+  findKeywordFlags: (prompt: string, reply?: string) => string[];
 }
+
+type GenerationRecord = Parameters<GenerationMethods['createGeneration']>[0];
 
 type CollectedUsage = UsageMetadata & { finish_reason?: string };
 
@@ -188,9 +190,10 @@ function elapsed(from: number | null, to: number | null | undefined): number | u
 async function screenForFlags(
   deps: RecordGenerationDeps,
   input: RecordGenerationInput & { user: string; conversationId: string; messageId: string },
-  responseText: string,
+  prompt: string,
+  reply: string,
 ): Promise<void> {
-  const reasons = deps.findKeywordFlags(`${input.userText}\n${responseText}`);
+  const reasons = deps.findKeywordFlags(prompt, reply);
   if (reasons.length === 0) {
     return;
   }
@@ -213,10 +216,28 @@ async function screenForFlags(
   }
 }
 
+async function writeLedger(
+  deps: RecordGenerationDeps,
+  input: GenerationRecord,
+): Promise<boolean | undefined> {
+  try {
+    const { continued } = await deps.createGeneration(input);
+    if (continued) {
+      logger.debug(`[recordGeneration] Folded continued run into message ${input.messageId}`);
+    }
+    return continued;
+  } catch (error) {
+    logger.error('[recordGeneration] Failed to record generation', error);
+    return undefined;
+  }
+}
+
 /**
  * Writes the Generation ledger row for one assistant response and runs keyword
- * screening over the exchange. Never throws: any failure is logged and swallowed
- * so the chat path is unaffected.
+ * screening over the exchange. Screening runs even when the ledger write fails;
+ * on a Continue run (same messageId) only the new response text is screened,
+ * since the user's turn was screened with the original run. Never throws: any
+ * failure is logged and swallowed so the chat path is unaffected.
  */
 export async function recordGeneration(
   deps: RecordGenerationDeps,
@@ -227,13 +248,16 @@ export async function recordGeneration(
     logger.debug('[recordGeneration] Skipping: missing user, conversation, or message id');
     return;
   }
+  let responseText = '';
+  let continued: boolean | undefined;
   try {
-    const { toolCalls, responseText, errorText } = digestContent(input.contentParts);
+    const digest = digestContent(input.contentParts);
+    responseText = digest.responseText;
     const tokens = input.usage ?? sumPrimaryUsage(input.collectedUsage);
     const lastUsage = lastPrimaryUsage(input.collectedUsage);
-    const errorType = resolveErrorType(input.error, errorText);
+    const errorType = resolveErrorType(input.error, digest.errorText);
     const endedAt = input.endedAt ?? Date.now();
-    await deps.createGeneration({
+    continued = await writeLedger(deps, {
       user,
       conversationId,
       messageId,
@@ -243,20 +267,20 @@ export async function recordGeneration(
       ttftMs: elapsed(input.timing.startedAt, input.timing.firstTokenAt),
       durationMs: elapsed(input.timing.startedAt, endedAt),
       finishReason: lastUsage?.finish_reason,
-      toolCalls,
+      toolCalls: digest.toolCalls,
       ragChunks: input.ragChunks ?? countKbChunks(input.kbContext),
       ragMs: input.ragMs == null ? undefined : Math.round(input.ragMs),
       status: resolveStatus(input.aborted, errorType != null),
       errorType,
       tenantId: input.tenantId,
     });
-    await screenForFlags(deps, { ...input, user, conversationId, messageId }, responseText);
   } catch (error) {
-    const isDuplicate = (error as { code?: unknown })?.code === 11000;
-    if (isDuplicate) {
-      logger.debug(`[recordGeneration] Generation already recorded for message ${messageId}`);
-      return;
-    }
-    logger.error('[recordGeneration] Failed to record generation', error);
+    logger.error('[recordGeneration] Failed to build generation record', error);
+  }
+  try {
+    const prompt = continued ? '' : input.userText;
+    await screenForFlags(deps, { ...input, user, conversationId, messageId }, prompt, responseText);
+  } catch (error) {
+    logger.error('[recordGeneration] Failed to screen generation', error);
   }
 }

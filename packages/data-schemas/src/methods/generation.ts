@@ -1,7 +1,8 @@
 import { Types } from 'mongoose';
-import type { Model, PipelineStage, FilterQuery, AccumulatorOperator } from 'mongoose';
+import type { Model, UpdateQuery, FilterQuery, PipelineStage, AccumulatorOperator } from 'mongoose';
 import type {
   IGeneration,
+  GenerationWrite,
   UsageRange,
   GenerationStatus,
   UsageBucket,
@@ -37,7 +38,13 @@ export interface CreateGenerationInput {
 }
 
 export interface GenerationMethods {
-  createGeneration: (input: CreateGenerationInput) => Promise<IGeneration>;
+  /**
+   * Inserts the ledger row for one assistant response. A Continue run reuses the
+   * response's messageId, so a duplicate from the same user is folded into the
+   * existing row instead (tokens, duration and retrieval time accumulate; the
+   * latest outcome wins; the first run's TTFT and createdAt stand).
+   */
+  createGeneration: (input: CreateGenerationInput) => Promise<GenerationWrite>;
   getUsageSummary: (range: UsageRange) => Promise<UsageSummary>;
   getUsageTimeseries: (
     params: UsageRange & { bucket: UsageBucket },
@@ -176,13 +183,59 @@ const TOKEN_SUMS = {
 
 const BOTH_PERCENTILES = [0.5, 0.95];
 
+const DUPLICATE_KEY = 11000;
+
+function isDuplicateKey(error: unknown): boolean {
+  return (error as { code?: unknown } | null)?.code === DUPLICATE_KEY;
+}
+
+function continuationUpdate(input: CreateGenerationInput): UpdateQuery<IGeneration> {
+  const update: UpdateQuery<IGeneration> = {
+    $inc: {
+      promptTokens: input.promptTokens,
+      completionTokens: input.completionTokens,
+      ...(input.durationMs != null ? { durationMs: input.durationMs } : {}),
+      ...(input.ragMs != null ? { ragMs: input.ragMs } : {}),
+    },
+    $set: {
+      model: input.model,
+      status: input.status ?? 'ok',
+      ...(input.finishReason != null ? { finishReason: input.finishReason } : {}),
+      ...(input.errorType != null ? { errorType: input.errorType } : {}),
+    },
+    $max: { ragChunks: input.ragChunks ?? 0 },
+  };
+  if (input.errorType == null) {
+    update.$unset = { errorType: 1 };
+  }
+  if (input.toolCalls?.length) {
+    update.$push = { toolCalls: { $each: input.toolCalls } };
+  }
+  return update;
+}
+
 export function createGenerationMethods(mongoose: typeof import('mongoose')): GenerationMethods {
   function model(): Model<IGeneration> {
     return mongoose.models.Generation as Model<IGeneration>;
   }
 
-  async function createGeneration(input: CreateGenerationInput): Promise<IGeneration> {
-    return model().create(input);
+  async function createGeneration(input: CreateGenerationInput): Promise<GenerationWrite> {
+    try {
+      return { generation: await model().create(input), continued: false };
+    } catch (error) {
+      if (!isDuplicateKey(error)) {
+        throw error;
+      }
+      const generation = await model().findOneAndUpdate(
+        { messageId: input.messageId, user: input.user },
+        continuationUpdate(input),
+        { new: true },
+      );
+      if (!generation) {
+        throw error;
+      }
+      return { generation, continued: true };
+    }
   }
 
   async function getUsageSummary(range: UsageRange): Promise<UsageSummary> {

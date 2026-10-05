@@ -23,6 +23,12 @@ export interface IGeneration extends Omit<Document, 'model'> {
   updatedAt?: Date;
 }
 
+/** Outcome of a ledger write; `continued` when a Continue run was folded into an existing row. */
+export interface GenerationWrite {
+  generation: IGeneration;
+  continued: boolean;
+}
+
 export type UsageBucket = 'hour' | 'day';
 
 export type UsageUserSort = 'tokens' | 'requests' | 'lastActive' | 'errors';

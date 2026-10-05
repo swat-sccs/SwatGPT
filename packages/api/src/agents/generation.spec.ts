@@ -16,7 +16,7 @@ jest.mock('@librechat/data-schemas', () => ({
 
 function createDeps(overrides: Partial<RecordGenerationDeps> = {}): RecordGenerationDeps {
   return {
-    createGeneration: jest.fn().mockResolvedValue({}),
+    createGeneration: jest.fn().mockResolvedValue({ generation: {}, continued: false }),
     createFlag: jest.fn().mockResolvedValue({}),
     findKeywordFlags: jest.fn().mockReturnValue([]),
     ...overrides,
@@ -121,7 +121,7 @@ describe('recordGeneration', () => {
       errorType: undefined,
       tenantId: 't1',
     });
-    expect(deps.findKeywordFlags).toHaveBeenCalledWith('What is for lunch?\nPizza');
+    expect(deps.findKeywordFlags).toHaveBeenCalledWith('What is for lunch?', 'Pizza');
     expect(deps.createFlag).not.toHaveBeenCalled();
   });
 
@@ -217,18 +217,53 @@ describe('recordGeneration', () => {
       expect.any(Error),
     );
 
-    const duplicate = createDeps({
-      createGeneration: jest
-        .fn()
-        .mockRejectedValue(Object.assign(new Error('dup'), { code: 11000 })),
-    });
-    await expect(recordGeneration(duplicate, createInput())).resolves.toBeUndefined();
-
     const flagFailure = createDeps({
       findKeywordFlags: jest.fn().mockReturnValue(['x']),
       createFlag: jest.fn().mockRejectedValue(new Error('flag down')),
     });
     await expect(recordGeneration(flagFailure, createInput())).resolves.toBeUndefined();
     expect(flagFailure.createGeneration).toHaveBeenCalledTimes(1);
+  });
+
+  it('still screens the exchange when the ledger write fails', async () => {
+    const deps = createDeps({
+      createGeneration: jest
+        .fn()
+        .mockRejectedValue(Object.assign(new Error('dup'), { code: 11000 })),
+      findKeywordFlags: jest.fn().mockReturnValue(['weapons']),
+    });
+    await expect(recordGeneration(deps, createInput())).resolves.toBeUndefined();
+    expect(logger.error).toHaveBeenCalledWith(
+      '[recordGeneration] Failed to record generation',
+      expect.objectContaining({ code: 11000 }),
+    );
+    expect(deps.findKeywordFlags).toHaveBeenCalledWith('What is for lunch?', 'Hello there');
+    expect(deps.createFlag).toHaveBeenCalledWith(
+      expect.objectContaining({ messageId: 'msg-1', reason: 'weapons', source: 'keyword' }),
+    );
+  });
+
+  it('screens only the new response text on a continued run', async () => {
+    const deps = createDeps({
+      createGeneration: jest.fn().mockResolvedValue({ generation: {}, continued: true }),
+      findKeywordFlags: jest.fn().mockReturnValue(['weapons']),
+    });
+    await recordGeneration(deps, createInput({ contentParts: [textPart('more text')] }));
+    expect(deps.findKeywordFlags).toHaveBeenCalledWith('', 'more text');
+    expect(deps.createFlag).toHaveBeenCalledTimes(1);
+  });
+
+  it('never throws when keyword screening itself fails', async () => {
+    const deps = createDeps({
+      findKeywordFlags: jest.fn().mockImplementation(() => {
+        throw new Error('bad pattern');
+      }),
+    });
+    await expect(recordGeneration(deps, createInput())).resolves.toBeUndefined();
+    expect(deps.createGeneration).toHaveBeenCalledTimes(1);
+    expect(logger.error).toHaveBeenCalledWith(
+      '[recordGeneration] Failed to screen generation',
+      expect.any(Error),
+    );
   });
 });
