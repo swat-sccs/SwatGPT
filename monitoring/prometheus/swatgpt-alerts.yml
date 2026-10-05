@@ -5,7 +5,12 @@
 #     - /etc/prometheus/swatgpt-alerts.yml
 #
 # Metric names: vLLM (vllm:*), the LibreChat exporter (http_requests_total,
-# rag_retrieval_total, ...), node_exporter on eagle (node_*), blackbox (probe_success).
+# rag_retrieval_total, mcp_tool_calls_total, ...), Dash MCP (swatgpt_mcp_*), node_exporter on
+# eagle (node_*), blackbox (probe_success).
+#
+# Dash MCP staleness thresholds are 3x the default poll intervals from docker-compose.override.yml
+# (alerts 60s, realtime 300s, content 900s, configuration 3600s). Scale them if
+# SWATGPT_*_POLL_INTERVAL_SECONDS is overridden.
 groups:
   - name: swatgpt-vllm
     rules:
@@ -124,6 +129,81 @@ groups:
         annotations:
           summary: "LibreChat 5xx ratio above 2%"
           description: "{{ $value | humanizePercentage }} of HTTP responses in the last 5 minutes were 5xx. Check the app logs on eagle and the vLLM/TEI alerts first."
+
+  - name: swatgpt-mcp
+    rules:
+      - alert: SwatGPTMcpDown
+        expr: up{job="swatgpt_mcp"} == 0
+        for: 5m
+        labels:
+          severity: warning
+          service: swatgpt
+        annotations:
+          summary: "Dash MCP exporter on eagle is not answering scrapes"
+          description: "Prometheus cannot scrape {{ $labels.instance }}/metrics. Either swatgpt-mcp is down or its 3001 publish/firewall rule is missing; campus data tools and their staleness alerts are blind."
+
+      - alert: SwatGPTMcpPollFailing
+        expr: |
+          (
+            sum by (kind) (increase(swatgpt_mcp_upstream_polls_total{job="swatgpt_mcp",kind=~"alerts|realtime|content",result="error"}[1h])) > 0
+            unless on (kind)
+            sum by (kind) (increase(swatgpt_mcp_upstream_polls_total{job="swatgpt_mcp",kind=~"alerts|realtime|content",result="success"}[1h])) > 0
+          )
+          or
+          (
+            sum by (kind) (increase(swatgpt_mcp_upstream_polls_total{job="swatgpt_mcp",kind="configuration",result="error"}[3h])) > 0
+            unless on (kind)
+            sum by (kind) (increase(swatgpt_mcp_upstream_polls_total{job="swatgpt_mcp",kind="configuration",result="success"}[3h])) > 0
+          )
+        for: 15m
+        labels:
+          severity: warning
+          service: swatgpt
+        annotations:
+          summary: "Dash MCP {{ $labels.kind }} polling keeps failing with no success"
+          description: "Every {{ $labels.kind }} poll in the last hour (3 hours for configuration, which polls hourly) failed. A Dash outage or schema change usually breaks the live fallback too, so tools return stale or unavailable data. Check `docker compose logs swatgpt-mcp` for 'Polling job failed'."
+
+      - alert: SwatGPTMcpPollStale
+        expr: |
+          (time() - max by (kind) (swatgpt_mcp_upstream_last_success_timestamp_seconds{job="swatgpt_mcp",kind="alerts"})) > 180
+          or (time() - max by (kind) (swatgpt_mcp_upstream_last_success_timestamp_seconds{job="swatgpt_mcp",kind="realtime"})) > 900
+          or (time() - max by (kind) (swatgpt_mcp_upstream_last_success_timestamp_seconds{job="swatgpt_mcp",kind="content"})) > 2700
+          or (time() - max by (kind) (swatgpt_mcp_upstream_last_success_timestamp_seconds{job="swatgpt_mcp",kind="configuration"})) > 10800
+        for: 10m
+        labels:
+          severity: warning
+          service: swatgpt
+        annotations:
+          summary: "Dash MCP {{ $labels.kind }} has not polled successfully for 3+ intervals"
+          description: "The last successful {{ $labels.kind }} poll was {{ $value | humanizeDuration }} ago. Polls are failing, hanging on the job lock, or the scheduler stopped."
+
+      - alert: SwatGPTMcpSnapshotStale
+        expr: |
+          swatgpt_mcp_snapshot_age_seconds{job="swatgpt_mcp",domain=~"weather|transit"} > 900
+          or swatgpt_mcp_snapshot_age_seconds{job="swatgpt_mcp",domain=~"hours|news|resources"} > 2700
+        for: 15m
+        labels:
+          severity: warning
+          service: swatgpt
+        annotations:
+          summary: "Dash MCP {{ $labels.domain }} snapshot is {{ $value | humanizeDuration }} old"
+          description: "No fresh {{ $labels.domain }} data has been stored for 3+ poll intervals even if polls report success (for hours, news and resources, an upstream schema change that parses to zero records looks like this; weather and transit store a row even when it is empty). Tools are serving stale data. Alerts, dining, events, sports and mind_candy are left out because they can be legitimately empty."
+
+      - alert: SwatGPTMcpToolErrorRatioHigh
+        expr: |
+          (
+            sum(rate(mcp_tool_calls_total{job="swatgpt_app",server="swatgpt",result!="success"}[15m]))
+            /
+            sum(rate(mcp_tool_calls_total{job="swatgpt_app",server="swatgpt"}[15m]))
+          ) > 0.2
+          and sum(increase(mcp_tool_calls_total{job="swatgpt_app",server="swatgpt"}[15m])) >= 10
+        for: 15m
+        labels:
+          severity: warning
+          service: swatgpt
+        annotations:
+          summary: "More than 20% of MCP tool calls are failing"
+          description: "{{ $value | humanizePercentage }} of Dash MCP tool calls from LibreChat in the last 15 minutes failed or returned an error result (needs at least 10 calls, so one bad model argument at low traffic does not page). Check the Dash MCP alerts and `docker compose logs swatgpt-mcp`."
 
   - name: swatgpt-eagle
     rules:

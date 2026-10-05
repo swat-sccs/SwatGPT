@@ -1,7 +1,7 @@
 {
   "uid": "swatgpt",
   "title": "SwatGPT",
-  "description": "vLLM on loon, LibreChat on eagle, KB retrieval, and eagle host health.",
+  "description": "vLLM on loon, LibreChat on eagle, KB retrieval, eagle host health, and Dash MCP freshness.",
   "tags": [
     "swatgpt",
     "sccs"
@@ -2433,6 +2433,214 @@
           },
           "expr": "sum(rate(node_network_transmit_bytes_total{job=\"eagle\",device!~\"lo|veth.*|br.*|docker.*\"}[5m]))",
           "legendFormat": "tx",
+          "range": true,
+          "instant": false
+        }
+      ]
+    },
+    {
+      "id": 38,
+      "type": "row",
+      "title": "Dash MCP (eagle)",
+      "collapsed": false,
+      "gridPos": {
+        "h": 1,
+        "w": 24,
+        "x": 0,
+        "y": 82
+      },
+      "panels": []
+    },
+    {
+      "id": 39,
+      "type": "timeseries",
+      "title": "Dash polls per hour by result",
+      "description": "Background polling jobs in dash_mcp; sustained errors with no successes fire SwatGPTMcpPollFailing.",
+      "datasource": {
+        "type": "prometheus",
+        "uid": "${datasource}"
+      },
+      "gridPos": {
+        "h": 8,
+        "w": 8,
+        "x": 0,
+        "y": 83
+      },
+      "fieldConfig": {
+        "defaults": {
+          "unit": "short",
+          "min": 0,
+          "color": {
+            "mode": "palette-classic"
+          },
+          "custom": {
+            "drawStyle": "line",
+            "lineWidth": 1,
+            "fillOpacity": 10,
+            "showPoints": "never",
+            "spanNulls": true,
+            "stacking": {
+              "mode": "normal",
+              "group": "A"
+            },
+            "thresholdsStyle": {
+              "mode": "off"
+            }
+          }
+        },
+        "overrides": []
+      },
+      "options": {
+        "legend": {
+          "displayMode": "list",
+          "placement": "bottom",
+          "showLegend": true,
+          "calcs": []
+        },
+        "tooltip": {
+          "mode": "multi",
+          "sort": "desc"
+        }
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "datasource": {
+            "type": "prometheus",
+            "uid": "${datasource}"
+          },
+          "expr": "sum by (kind, result) (increase(swatgpt_mcp_upstream_polls_total{job=\"swatgpt_mcp\",kind!=\"retention\"}[1h]))",
+          "legendFormat": "{{kind}} {{result}}",
+          "range": true,
+          "instant": false
+        }
+      ]
+    },
+    {
+      "id": 40,
+      "type": "timeseries",
+      "title": "Time since last successful poll",
+      "description": "SwatGPTMcpPollStale fires past 3x the poll interval (alerts 3m, realtime 15m, content 45m, configuration 3h).",
+      "datasource": {
+        "type": "prometheus",
+        "uid": "${datasource}"
+      },
+      "gridPos": {
+        "h": 8,
+        "w": 8,
+        "x": 8,
+        "y": 83
+      },
+      "fieldConfig": {
+        "defaults": {
+          "unit": "s",
+          "min": 0,
+          "color": {
+            "mode": "palette-classic"
+          },
+          "custom": {
+            "drawStyle": "line",
+            "lineWidth": 1,
+            "fillOpacity": 10,
+            "showPoints": "never",
+            "spanNulls": true,
+            "stacking": {
+              "mode": "none",
+              "group": "A"
+            },
+            "thresholdsStyle": {
+              "mode": "off"
+            }
+          }
+        },
+        "overrides": []
+      },
+      "options": {
+        "legend": {
+          "displayMode": "list",
+          "placement": "bottom",
+          "showLegend": true,
+          "calcs": []
+        },
+        "tooltip": {
+          "mode": "multi",
+          "sort": "desc"
+        }
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "datasource": {
+            "type": "prometheus",
+            "uid": "${datasource}"
+          },
+          "expr": "time() - max by (kind) (swatgpt_mcp_upstream_last_success_timestamp_seconds{job=\"swatgpt_mcp\",kind!=\"retention\"})",
+          "legendFormat": "{{kind}}",
+          "range": true,
+          "instant": false
+        }
+      ]
+    },
+    {
+      "id": 41,
+      "type": "timeseries",
+      "title": "Snapshot age by domain",
+      "description": "Seconds since the newest stored Dash snapshot per domain. Alerts, events and other sparse domains can grow legitimately.",
+      "datasource": {
+        "type": "prometheus",
+        "uid": "${datasource}"
+      },
+      "gridPos": {
+        "h": 8,
+        "w": 8,
+        "x": 16,
+        "y": 83
+      },
+      "fieldConfig": {
+        "defaults": {
+          "unit": "s",
+          "min": 0,
+          "color": {
+            "mode": "palette-classic"
+          },
+          "custom": {
+            "drawStyle": "line",
+            "lineWidth": 1,
+            "fillOpacity": 10,
+            "showPoints": "never",
+            "spanNulls": true,
+            "stacking": {
+              "mode": "none",
+              "group": "A"
+            },
+            "thresholdsStyle": {
+              "mode": "off"
+            }
+          }
+        },
+        "overrides": []
+      },
+      "options": {
+        "legend": {
+          "displayMode": "list",
+          "placement": "bottom",
+          "showLegend": true,
+          "calcs": []
+        },
+        "tooltip": {
+          "mode": "multi",
+          "sort": "desc"
+        }
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "datasource": {
+            "type": "prometheus",
+            "uid": "${datasource}"
+          },
+          "expr": "max by (domain) (swatgpt_mcp_snapshot_age_seconds{job=\"swatgpt_mcp\"})",
+          "legendFormat": "{{domain}}",
           "range": true,
           "instant": false
         }

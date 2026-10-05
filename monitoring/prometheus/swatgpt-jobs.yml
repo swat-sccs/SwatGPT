@@ -30,6 +30,13 @@
     static_configs:
       - targets: ["eagle.sccs.swarthmore.edu:3080"]
 
+  # Dash MCP (dash_mcp/src/metrics.ts): poll results, last-success stamps, snapshot ages.
+  # /metrics is unauthenticated, so this needs swatgpt-mcp published on eagle as
+  # ${SWATGPT_METRICS_BIND}:3001:3000 and a gull-only DOCKER-USER rule (see README).
+  - job_name: swatgpt_mcp
+    static_configs:
+      - targets: ["eagle.sccs.swarthmore.edu:3001"]
+
   # Optional: /readyz probing through a blackbox exporter. Only add this if the
   # gull stack runs one (the SwatGPTReadyzFailing alert stays silent otherwise).
   # - job_name: swatgpt_readyz

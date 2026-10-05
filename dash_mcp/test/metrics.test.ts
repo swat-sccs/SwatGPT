@@ -19,6 +19,34 @@ describe('SwatMetrics', () => {
     expect(rendered).toMatch(/swatgpt_mcp_process_cpu_seconds_total/);
   });
 
+  it('zero-fills every poll result for a kind on its first record so failing kinds still expose a success series', async () => {
+    const metrics = new SwatMetrics();
+    metrics.recordPoll('realtime', 'error');
+
+    const rendered = await metrics.render();
+    expect(rendered).toMatch(/swatgpt_mcp_upstream_polls_total\{kind="realtime",result="error"\} 1/);
+    expect(rendered).toMatch(/swatgpt_mcp_upstream_polls_total\{kind="realtime",result="success"\} 0/);
+    expect(rendered).toMatch(/swatgpt_mcp_upstream_polls_total\{kind="realtime",result="skipped"\} 0/);
+    expect(rendered).not.toMatch(/swatgpt_mcp_upstream_last_success_timestamp_seconds\{kind="realtime"\}/);
+  });
+
+  it('stamps the last successful poll per kind and leaves it untouched by later failures', async () => {
+    const metrics = new SwatMetrics();
+    const before = Date.now() / 1000;
+    metrics.recordPoll('content', 'success');
+    const after = Date.now() / 1000;
+    const stampOf = async () => Number((await metrics.render())
+      .match(/swatgpt_mcp_upstream_last_success_timestamp_seconds\{kind="content"\} ([\d.e+]+)/)?.[1]);
+
+    const stamped = await stampOf();
+    expect(stamped).toBeGreaterThanOrEqual(before);
+    expect(stamped).toBeLessThanOrEqual(after);
+
+    metrics.recordPoll('content', 'error');
+    metrics.recordPoll('content', 'skipped');
+    expect(await stampOf()).toBe(stamped);
+  });
+
   it('computes snapshot age per domain at scrape time and drops domains without data', async () => {
     const metrics = new SwatMetrics();
     const observed = new Date(Date.now() - 90_000).toISOString();

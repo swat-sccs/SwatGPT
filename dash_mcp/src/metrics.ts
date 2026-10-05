@@ -6,10 +6,14 @@ export type ToolCallResult = 'success' | 'error' | 'timeout';
 export type PollResult = 'success' | 'error' | 'skipped';
 export type SnapshotObservedAt = (domain: Domain) => Promise<string | undefined>;
 
+const pollResults: readonly PollResult[] = ['success', 'error', 'skipped'];
+
 export class SwatMetrics {
   readonly registry = new Registry();
   private readonly toolCalls: Counter<'tool' | 'result'>;
   private readonly upstreamPolls: Counter<'kind' | 'result'>;
+  private readonly lastPollSuccess: Gauge<'kind'>;
+  private readonly pollKinds = new Set<string>();
   private readonly snapshotAge: Gauge<'domain'>;
   private snapshotObservedAt?: SnapshotObservedAt;
 
@@ -27,6 +31,12 @@ export class SwatMetrics {
       labelNames: ['kind', 'result'] as const,
       registers: [this.registry],
     });
+    this.lastPollSuccess = new Gauge({
+      name: 'swatgpt_mcp_upstream_last_success_timestamp_seconds',
+      help: 'Unix time of the last successful background Dash polling job by job kind',
+      labelNames: ['kind'] as const,
+      registers: [this.registry],
+    });
     this.snapshotAge = new Gauge({
       name: 'swatgpt_mcp_snapshot_age_seconds',
       help: 'Seconds since the newest PostgreSQL snapshot for each data domain was observed',
@@ -40,8 +50,14 @@ export class SwatMetrics {
     this.toolCalls.inc({ tool, result });
   }
 
+  /** Zero-fills every result for a new kind so `increase()` and `unless` see the series before its first change. */
   recordPoll(kind: string, result: PollResult): void {
+    if (!this.pollKinds.has(kind)) {
+      this.pollKinds.add(kind);
+      for (const each of pollResults) this.upstreamPolls.inc({ kind, result: each }, 0);
+    }
     this.upstreamPolls.inc({ kind, result });
+    if (result === 'success') this.lastPollSuccess.set({ kind }, Date.now() / 1000);
   }
 
   /** Registers the lookup used at scrape time to compute snapshot ages; unset means the gauge stays empty. */

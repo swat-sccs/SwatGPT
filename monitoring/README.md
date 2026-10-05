@@ -5,8 +5,8 @@ plus the exporters that run on `eagle`. See `context/observability.md` for the p
 
 | File | Purpose |
 |---|---|
-| `prometheus/swatgpt-jobs.yml` | Scrape jobs to append to gull's `prometheus.yml` (vLLM, TEI, eagle, LibreChat exporter) |
-| `prometheus/swatgpt-alerts.yml` | Alerting rules (vLLM down/queueing/TTFT/KV cache, TEI down, retrieval ratio, app 5xx, eagle disk/RAM, readyz) |
+| `prometheus/swatgpt-jobs.yml` | Scrape jobs to append to gull's `prometheus.yml` (vLLM, TEI, eagle, LibreChat exporter, Dash MCP) |
+| `prometheus/swatgpt-alerts.yml` | Alerting rules (vLLM down/queueing/TTFT/KV cache, TEI down, retrieval ratio, app 5xx, eagle disk/RAM, readyz, Dash MCP down/poll failures/staleness/tool errors) |
 | `grafana/swatgpt.json` | Grafana 11 dashboard, uid `swatgpt`, `datasource` and `router` variables |
 | `alertmanager/alertmanager.yml` | Alertmanager config with Discord/Slack/email receivers and inhibit rules |
 | `alertmanager/stack-fragment.yml` | `alertmanager` service block for the gull swarm stack |
@@ -19,11 +19,14 @@ What gets scraped:
 | `tei` | `loon:8001`, `loon:8002` | `te_request_duration`, `te_request_count` |
 | `eagle` | `eagle:9100`, `eagle:8080` | node_exporter (`node_*`) and cadvisor (`container_*`) |
 | `swatgpt_app` | `eagle:3080/metrics` (bearer token) | `http_requests_total`, `http_request_duration_seconds`, `sse_streams_*`, `mongoose_query_duration_seconds`, `agent_startup_*`, `rag_retrieval_total{result}`, `rag_retrieval_duration_seconds`, `rag_chunks_returned`, `mcp_tool_calls_total{server,tool,result}`, `mcp_tool_call_duration_seconds` |
+| `swatgpt_mcp` | `eagle:3001/metrics` (gull-only firewall, no auth) | `swatgpt_mcp_tool_calls_total{tool,result}`, `swatgpt_mcp_upstream_polls_total{kind,result}`, `swatgpt_mcp_upstream_last_success_timestamp_seconds{kind}`, `swatgpt_mcp_snapshot_age_seconds{domain}` |
 
-Dash MCP also serves `GET /metrics` (`swatgpt_mcp_tool_calls_total{tool,result}`,
-`swatgpt_mcp_upstream_polls_total{kind,result}`, `swatgpt_mcp_snapshot_age_seconds{domain}`), but its port
-3000 is only exposed on the compose network. Scrape it from inside eagle (`docker compose exec api wget -qO- http://swatgpt-mcp:3000/metrics`)
-or publish it on `${SWATGPT_METRICS_BIND}:3001:3000` and add a job if it becomes worth a panel.
+Dash MCP (`dash_mcp/src/metrics.ts`) serves `GET /metrics` on container port 3000 without
+authentication. The `swatgpt_mcp` job expects it published as `${SWATGPT_METRICS_BIND}:3001:3000` on
+eagle with the same gull-only firewall treatment as 9100/8080 (see A.4). Until that publish lands,
+`SwatGPTMcpDown` fires as soon as the job is added, so add the job in B.1 only after the `:3001` check in A.3 succeeds.
+Poll counters are zero-filled for every result the first time a job kind runs, so `increase()` sees a
+`success` series even for a kind that has never succeeded.
 
 ## A. eagle (`aidahxr`)
 
@@ -54,12 +57,16 @@ or publish it on `${SWATGPT_METRICS_BIND}:3001:3000` and add a job if it becomes
    curl -s -H "Authorization: Bearer $TOKEN" http://localhost:3080/metrics | grep -E '^(http_requests_total|rag_retrieval_total|mcp_tool_calls_total)' | head
    curl -s http://130.58.218.151:9100/metrics | grep '^node_filesystem_avail_bytes.*mountpoint="/"'
    curl -s http://130.58.218.151:8080/metrics | grep -c '^container_memory_working_set_bytes'
+   curl -s http://130.58.218.151:3001/metrics | grep -E '^swatgpt_mcp_(upstream_|snapshot_age)'
    docker compose exec -T api node -e "fetch('http://swatgpt-mcp:3000/metrics').then(r=>r.text()).then(t=>console.log(t.split('\n').filter(l=>l.startsWith('swatgpt_mcp_')).join('\n')))"
    ```
 
-4. Firewall: ports 9100, 8080 (exporters) and 3080 (`/metrics`, token protected) on
+4. Firewall: ports 9100, 8080, 3001 (exporters) and 3080 (`/metrics`, token protected) on
    `130.58.218.151` must be reachable from gull. If eagle runs ufw/nftables, allow them from gull's
-   address only.
+   address only. Docker DNATs published ports before `DOCKER-USER`, so a rule matching `--dport` sees
+   the container port: for Dash MCP that is 3000, which the campus-only admin rule in
+   `eagle-harden.sh` also matches. Match the published port with
+   `-m conntrack --ctorigdstport 3001` when restricting it to gull.
 
 ## B. gull (`dcrepublic`)
 
@@ -67,8 +74,12 @@ The `prometheus` stack config lives in `/srv/monitor/prometheus/config/prometheu
 writable). Prometheus has no `--web.enable-lifecycle`, so every config change is followed by a forced
 service update.
 
-1. Append the four jobs from `prometheus/swatgpt-jobs.yml` under `scrape_configs:` in
+1. Append the five jobs from `prometheus/swatgpt-jobs.yml` under `scrape_configs:` in
    `prometheus.yml` (indentation in the file already matches a two-space `scrape_configs:` list).
+   `gull-install.sh` skips this step when `swatgpt_app` is already there, so on the existing gull
+   install append only the `swatgpt_mcp` block by hand. On a fresh install it appends all five, so land
+   the eagle `:3001` publish first. Until the job exists, every Dash MCP alert except
+   `SwatGPTMcpToolErrorRatioHigh` stays silent.
 
 2. Create the bearer-token file with the `METRICS_SECRET` value from A.1 (no trailing newline):
 
@@ -118,7 +129,7 @@ service update.
    curl -s https://prometheus.sccs.swarthmore.edu/api/v1/targets | python3 -c '
    import json,sys
    for t in json.load(sys.stdin)["data"]["activeTargets"]:
-       if t["labels"]["job"] in ("vllm","tei","eagle","swatgpt_app"): print(t["labels"]["job"], t["scrapeUrl"], t["health"], t.get("lastError",""))'
+       if t["labels"]["job"] in ("vllm","tei","eagle","swatgpt_app","swatgpt_mcp"): print(t["labels"]["job"], t["scrapeUrl"], t["health"], t.get("lastError",""))'
    curl -s https://prometheus.sccs.swarthmore.edu/api/v1/rules | python3 -c 'import json,sys; print([g["name"] for g in json.load(sys.stdin)["data"]["groups"]])'
    ```
 
@@ -137,6 +148,9 @@ service update.
 
 ## Alert reference
 
+The staleness thresholds assume the default `SWATGPT_*_POLL_INTERVAL_SECONDS` in
+`docker-compose.override.yml`; scale them in `swatgpt-alerts.yml` if those are overridden.
+
 | Alert | Condition | Severity |
 |---|---|---|
 | `SwatGPTVllmDown` | `up{job="vllm"} == 0` for 2m | critical |
@@ -149,6 +163,11 @@ service update.
 | `SwatGPTAppDown` | `up{job="swatgpt_app"} == 0` for 2m (a 401 counts as down) | critical |
 | `SwatGPTReadyzFailing` | `probe_success{job="swatgpt_readyz"} == 0` for 2m (needs the optional blackbox job) | critical |
 | `SwatGPTApp5xxRateHigh` | 5xx share of `http_requests_total` > 2% for 5m | warning |
+| `SwatGPTMcpDown` | `up{job="swatgpt_mcp"} == 0` for 5m | warning |
+| `SwatGPTMcpPollFailing` | alerts/realtime/content had errors and no successes over 1h (configuration: over 3h, since it polls hourly), for 15m | warning |
+| `SwatGPTMcpPollStale` | last successful poll older than 3x its interval (alerts 3m, realtime 15m, content 45m, configuration 3h) for 10m | warning |
+| `SwatGPTMcpSnapshotStale` | `swatgpt_mcp_snapshot_age_seconds` > 15m for weather/transit or > 45m for hours/news/resources, for 15m (catches polls that "succeed" with zero records) | warning |
+| `SwatGPTMcpToolErrorRatioHigh` | non-success share of app-side `mcp_tool_calls_total{server="swatgpt"}` > 20% with at least 10 calls in 15m, for 15m | warning |
 | `SwatGPTEagleExporterDown` | `up{job="eagle"} == 0` for 5m | warning |
 | `SwatGPTEagleDiskHigh` | `/` usage > 85% for 10m | warning |
 | `SwatGPTEagleMemoryLow` | available RAM < 10% for 10m | warning |
