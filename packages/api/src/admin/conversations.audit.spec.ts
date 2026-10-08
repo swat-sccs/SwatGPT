@@ -53,7 +53,7 @@ describe('admin conversation search auditing (real audit log)', () => {
       getConversationAdmin: jest.fn(),
       findConversationOwner: jest.fn(),
       searchMessagesAdmin: jest.fn().mockResolvedValue([]),
-      searchMessageTextAdmin: jest.fn(),
+      searchMessageTextAdmin: jest.fn().mockResolvedValue([]),
       createFlagAdmin: jest.fn(),
       deleteFlag: jest.fn(),
       recordAuditEntry,

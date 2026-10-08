@@ -58,7 +58,7 @@ interface ConversationsQuery extends ListOptions {
   search?: string;
 }
 
-function parseConversationsQuery(query: Record<string, unknown>): ConversationsQuery {
+function parseConversationsQuery(query: ServerRequest['query']): ConversationsQuery {
   return {
     cursor: parseCursor(query.cursor),
     limit: parseLimit(query.limit, DEFAULT_LIMIT, MAX_LIMIT),
@@ -124,9 +124,10 @@ export function createAdminConversationsHandlers(deps: AdminConversationsDeps): 
   } = deps;
   const emitAudit = createOversightAudit(deps, SCOPE);
 
+  /** Falls back to Mongo on zero Meilisearch hits too, so a partially synced index never hides a match. */
   async function resolveSearchScope(search: string): Promise<string[]> {
     const viaMeili = await searchMessagesAdmin(search, SEARCH_HIT_LIMIT);
-    return viaMeili ?? searchMessageTextAdmin(search, SEARCH_HIT_LIMIT);
+    return viaMeili?.length ? viaMeili : searchMessageTextAdmin(search, SEARCH_HIT_LIMIT);
   }
 
   function searchAuditMetadata(
@@ -153,7 +154,7 @@ export function createAdminConversationsHandlers(deps: AdminConversationsDeps): 
 
   async function listConversationsHandler(req: ServerRequest, res: Response): Promise<Response> {
     try {
-      const { search, ...options } = parseConversationsQuery(req.query as Record<string, unknown>);
+      const { search, ...options } = parseConversationsQuery(req.query);
       if (!search) {
         const page = await listConversationsAdmin(options);
         const body: TAdminConversationsResponse = {

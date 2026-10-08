@@ -219,6 +219,22 @@ describe('createAdminConversationsHandlers', () => {
       );
     });
 
+    it('falls back to the Mongo text search when Meilisearch returns zero hits', async () => {
+      const deps = createDeps({
+        searchMessagesAdmin: jest.fn().mockResolvedValue([]),
+        searchMessageTextAdmin: jest.fn().mockResolvedValue(['c9']),
+      });
+      const handlers = createAdminConversationsHandlers(deps);
+      const { req, res } = createReqRes({ query: { search: 'posted yesterday' } });
+
+      await handlers.listConversations(req, res);
+
+      expect(deps.searchMessageTextAdmin).toHaveBeenCalledWith('posted yesterday', 200);
+      expect(deps.listConversationsAdmin).toHaveBeenCalledWith(
+        expect.objectContaining({ conversationIds: ['c9'] }),
+      );
+    });
+
     it('short-circuits with an empty page when the search matches nothing', async () => {
       const deps = createDeps({ searchMessagesAdmin: jest.fn().mockResolvedValue([]) });
       const handlers = createAdminConversationsHandlers(deps);
@@ -228,6 +244,7 @@ describe('createAdminConversationsHandlers', () => {
 
       expect(status).toHaveBeenCalledWith(200);
       expect(json).toHaveBeenCalledWith({ conversations: [], nextCursor: null });
+      expect(deps.searchMessageTextAdmin).toHaveBeenCalledWith('nothing', 200);
       expect(deps.listConversationsAdmin).not.toHaveBeenCalled();
     });
 
