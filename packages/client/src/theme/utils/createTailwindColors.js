@@ -18,22 +18,38 @@
  * triplet itself, e.g. `color: rgb(var(--text-primary))`.
  */
 
+/**
+ * Upstream neutral grays as `R G B` channels. They are only fallbacks: the
+ * `gray-*` utilities read the `--gray-*` variables that client/src/style.css
+ * redefines per theme (warm paper in light, SCCS navy in dark), so raw
+ * `bg-gray-*` / `dark:bg-gray-*` classes follow the same palette as the
+ * semantic tokens built on those variables.
+ */
+const grayFallbacks = {
+  20: '236 236 241',
+  50: '247 247 248',
+  100: '236 236 236',
+  200: '227 227 227',
+  300: '205 205 205',
+  400: '153 150 150',
+  500: '89 89 89',
+  600: '66 66 66',
+  650: '57 57 57',
+  700: '47 47 47',
+  800: '33 33 33',
+  850: '23 23 23',
+  900: '13 13 13',
+};
+
+const gray = Object.fromEntries(
+  Object.entries(grayFallbacks).map(([step, fallback]) => [
+    step,
+    `rgb(var(--gray-${step}, ${fallback}) / <alpha-value>)`,
+  ]),
+);
+
 const palette = {
-  gray: {
-    20: '#ececf1',
-    50: '#f7f7f8',
-    100: '#ececec',
-    200: '#e3e3e3',
-    300: '#cdcdcd',
-    400: '#999696',
-    500: '#595959',
-    600: '#424242',
-    650: '#393939',
-    700: '#2f2f2f',
-    800: '#212121',
-    850: '#171717',
-    900: '#0d0d0d',
-  },
+  gray,
   green: {
     50: '#f1f9f7',
     100: '#def2ed',

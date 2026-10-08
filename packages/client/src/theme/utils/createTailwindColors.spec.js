@@ -1,10 +1,28 @@
+const fs = require('fs');
+const path = require('path');
 const { createTailwindColors } = require('./createTailwindColors');
 
 describe('createTailwindColors', () => {
   it('includes the gray midpoint used by the dark hover surface', () => {
     const colors = createTailwindColors();
 
-    expect(colors.gray[650]).toBe('#393939');
+    expect(colors.gray[650]).toBe('rgb(var(--gray-650, 57 57 57) / <alpha-value>)');
+  });
+
+  it('backs every gray utility with the themed --gray-* variable so dark overrides apply', () => {
+    const colors = createTailwindColors();
+    const appStyles = fs.readFileSync(
+      path.resolve(__dirname, '../../../../../client/src/style.css'),
+      'utf8',
+    );
+    const defined = new Set(Array.from(appStyles.matchAll(/--gray-(\d+):/g), (match) => match[1]));
+
+    Object.entries(colors.gray).forEach(([step, value]) => {
+      expect(value).toMatch(
+        new RegExp(`^rgb\\(var\\(--gray-${step}, \\d+ \\d+ \\d+\\) / <alpha-value>\\)$`),
+      );
+      expect(defined.has(step)).toBe(true);
+    });
   });
 
   it('exposes semantic overlay and strong status colors', () => {
