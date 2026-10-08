@@ -61,6 +61,7 @@ jest.mock('~/models', () => ({
   deleteUserPrompts: (...args) => mockDeleteUserPrompts(...args),
   deleteUserSkills: (...args) => mockDeleteUserSkills(...args),
   deleteTransactions: jest.fn(),
+  purgeUserOversight: jest.fn(),
   deleteBalances: jest.fn(),
   deleteAllAgentApiKeys: jest.fn(),
   deleteAssistants: jest.fn(),

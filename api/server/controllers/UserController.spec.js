@@ -23,6 +23,14 @@ jest.mock('~/models', () => {
     deleteConversationTags: jest.fn().mockResolvedValue(undefined),
     deleteAllUserMemories: jest.fn().mockResolvedValue(undefined),
     deleteTransactions: jest.fn().mockResolvedValue(undefined),
+    purgeUserOversight: jest
+      .fn()
+      .mockImplementation((userId) =>
+        jest
+          .requireActual('@librechat/data-schemas')
+          .createMethods(_mongoose)
+          .purgeUserOversight(userId),
+      ),
     deleteAclEntries: jest.fn().mockResolvedValue(undefined),
     updateUserPlugins: jest.fn(),
     deleteAssistants: jest.fn().mockResolvedValue(undefined),
@@ -393,6 +401,36 @@ describe('deleteUserController', () => {
 
     expect(mockRes.status).toHaveBeenCalledWith(500);
     expect(mockRes.json).toHaveBeenCalledWith({ message: 'Something went wrong.' });
+  });
+
+  it('should delete flags about the user and detach their ledger rows', async () => {
+    const { Flag, Generation } = require('~/db/models');
+    const userId = new mongoose.Types.ObjectId();
+    const other = new mongoose.Types.ObjectId();
+    const deletedUser = new mongoose.Types.ObjectId('000000000000000000000000');
+
+    await Flag.create([
+      { conversationId: 'c1', user: userId, reason: 'self-harm', source: 'keyword' },
+      { conversationId: 'c2', user: other, reason: 'abuse', source: 'manual', createdBy: userId },
+    ]);
+    await Generation.create([
+      { user: userId, conversationId: 'c1', messageId: 'm1', model: 'qwen', promptTokens: 7 },
+      { user: other, conversationId: 'c2', messageId: 'm2', model: 'qwen', promptTokens: 5 },
+    ]);
+
+    const req = { user: { id: userId.toString(), _id: userId, email: 'flagged@test.com' } };
+    await deleteUserController(req, mockRes);
+
+    expect(mockRes.status).toHaveBeenCalledWith(200);
+    expect(await Flag.countDocuments({ user: userId })).toBe(0);
+    expect(await Flag.countDocuments({ createdBy: userId })).toBe(0);
+    expect(await Flag.countDocuments({ user: other })).toBe(1);
+    expect(await Generation.countDocuments({ user: userId })).toBe(0);
+    const ledger = await Generation.find({}).sort({ messageId: 1 }).lean();
+    expect(ledger.map((row) => [String(row.user), row.promptTokens])).toEqual([
+      [String(deletedUser), 7],
+      [String(other), 5],
+    ]);
   });
 
   it('should use string user.id (not ObjectId user._id) for memberIds removal', async () => {
