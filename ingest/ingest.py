@@ -26,6 +26,8 @@ INFORMATION_DIR = Path(
 )
 EMBED_BATCH_SIZE = int(os.environ.get("EMBED_BATCH_SIZE", "32"))
 UPSERT_BATCH_SIZE = int(os.environ.get("UPSERT_BATCH_SIZE", "256"))
+MIN_POINTS = int(os.environ.get("MIN_POINTS", "5000"))
+MIN_RATIO = float(os.environ.get("MIN_RATIO", "0.8"))
 
 ALIAS = "kb"
 VECTOR_DIM = 768
@@ -121,6 +123,20 @@ def sparse_vector(text):
     )
 
 
+TOKENIZER_GOLDEN = {"eduroam": 617671246, "sharples": 462714589, "cs": 1177122803}
+
+
+def _selfcheck():
+    """Abort if the tokenizer drifted from the golden values pinned in packages/api/src/rag/lexical.spec.ts."""
+    drifted = [t for t, expected in TOKENIZER_GOLDEN.items() if fnv1a(t) != expected]
+    sample = sparse_vector("CS cs, a!")
+    if drifted or sample.indices != [TOKENIZER_GOLDEN["cs"]] or sample.values != [2.0]:
+        sys.exit(
+            "Sparse tokenizer no longer matches packages/api/src/rag/lexical.ts "
+            f"(drifted: {drifted or 'sparse_vector'}). Fix it before ingesting."
+        )
+
+
 def check_tei(client):
     resp = client.get(f"{TEI_URL}/health")
     if resp.status_code != 200:
@@ -145,8 +161,12 @@ def embed_all(client, points):
     return vectors
 
 
+def new_collection_name():
+    return f"kb_{time.strftime('%Y%m%d%H%M%S')}"
+
+
 def create_collection(qdrant):
-    name = f"kb_{time.strftime('%Y%m%d%H%M%S')}"
+    name = new_collection_name()
     qdrant.create_collection(
         collection_name=name,
         vectors_config={
@@ -176,9 +196,63 @@ def upsert_all(qdrant, name, points, vectors):
                     vector={DENSE_VECTOR: vec, SPARSE_VECTOR: sparse_vector(p["embed_text"])},
                     payload=p["payload"],
                 )
-                for p, vec in zip(batch, vectors[start : start + UPSERT_BATCH_SIZE])
+                for p, vec in zip(batch, vectors[start : start + UPSERT_BATCH_SIZE], strict=True)
             ],
         )
+
+
+def current_target(qdrant):
+    for alias in qdrant.get_aliases().aliases:
+        if alias.alias_name == ALIAS:
+            return alias.collection_name
+    return None
+
+
+def point_count(qdrant, name):
+    return qdrant.count(collection_name=name, exact=True).count
+
+
+def missing_dirs():
+    if not INFORMATION_DIR.is_dir():
+        return [INFORMATION_DIR]
+    return [INFORMATION_DIR / subdir for subdir, _ in GROUPS if not (INFORMATION_DIR / subdir).is_dir()]
+
+
+def corpus_problems(doc_counts, total_points):
+    problems = [
+        f"no '{doc_type}' docs found under {INFORMATION_DIR / subdir}"
+        for subdir, doc_type in GROUPS
+        if doc_counts.get(doc_type, 0) == 0
+    ]
+    if total_points < MIN_POINTS:
+        problems.append(f"only {total_points} chunks, below MIN_POINTS={MIN_POINTS}")
+    return problems
+
+
+def shrink_problem(total_points, current_count):
+    if current_count and total_points < MIN_RATIO * current_count:
+        return (
+            f"{total_points} chunks is under {MIN_RATIO:.0%} of the {current_count} points "
+            f"behind '{ALIAS}' (pass --force if the shrink is intended)"
+        )
+    return None
+
+
+def smoke_failures(qdrant, embed, collection_name):
+    return [
+        query
+        for query in SMOKE_QUERIES
+        if not qdrant.query_points(
+            collection_name=collection_name, query=embed(query), using=DENSE_VECTOR, limit=1
+        ).points
+    ]
+
+
+def check_new_collection(qdrant, embed, name, expected):
+    stored = point_count(qdrant, name)
+    if stored != expected:
+        return [f"{name} holds {stored} points, expected {expected}"]
+    return [f"smoke query returned nothing: {q!r}" for q in smoke_failures(qdrant, embed, name)]
 
 
 def swap_alias(qdrant, name):
@@ -196,13 +270,16 @@ def swap_alias(qdrant, name):
 
 def drop_old_collections(qdrant, keep):
     for collection in qdrant.get_collections().collections:
-        if collection.name.startswith("kb_") and collection.name != keep:
+        if collection.name.startswith("kb_") and collection.name not in keep:
             qdrant.delete_collection(collection.name)
             print(f"  deleted old collection {collection.name}")
 
 
-def ingest():
-    started = time.monotonic()
+def abort(reasons):
+    sys.exit("refusing to swap the alias:\n  " + "\n  ".join(reasons))
+
+
+def parse_corpus():
     md_parser = MarkdownNodeParser()
     splitter = SentenceSplitter(chunk_size=CHUNK_SIZE, chunk_overlap=CHUNK_OVERLAP)
 
@@ -225,56 +302,117 @@ def ingest():
         doc_counts[doc_type] = doc_counts.get(doc_type, 0) + 1
         chunk_counts[doc_type] = chunk_counts.get(doc_type, 0) + len(doc_points)
 
-    total_docs = sum(doc_counts.values())
-    print(f"parsed {total_docs} docs -> {len(points)} chunks")
+    print(f"parsed {sum(doc_counts.values())} docs -> {len(points)} chunks from {INFORMATION_DIR}")
     for doc_type in sorted(chunk_counts):
         print(f"  {doc_type}: {doc_counts[doc_type]} docs, {chunk_counts[doc_type]} chunks")
+    return points, doc_counts
 
-    with httpx.Client(timeout=120) as http:
-        check_tei(http)
-        vectors = embed_all(http, points)
 
-    qdrant = QdrantClient(url=QDRANT_URL, timeout=120)
-    name = create_collection(qdrant)
-    print(f"created collection {name}")
+def fill_and_check(qdrant, http, name, points, vectors):
     upsert_all(qdrant, name, points, vectors)
     print(f"upserted {len(points)} points")
+    return check_new_collection(
+        qdrant, lambda query: embed_batch(http, [query])[0], name, len({p["id"] for p in points})
+    )
+
+
+def ingest(qdrant, http, force=False):
+    started = time.monotonic()
+    missing = missing_dirs()
+    if missing:
+        abort([f"missing directory {path} (INFORMATION_DIR={INFORMATION_DIR})" for path in missing])
+
+    points, doc_counts = parse_corpus()
+    previous = current_target(qdrant)
+    current_count = point_count(qdrant, previous) if previous else 0
+    problems = corpus_problems(doc_counts, len(points))
+    shrink = shrink_problem(len(points), current_count)
+    if shrink and not force:
+        problems.append(shrink)
+    if problems:
+        abort(problems)
+
+    check_tei(http)
+    vectors = embed_all(http, points)
+
+    name = create_collection(qdrant)
+    print(f"created collection {name}")
+    try:
+        failures = fill_and_check(qdrant, http, name, points, vectors)
+    except BaseException:
+        qdrant.delete_collection(name)
+        print(f"deleted {name}; '{ALIAS}' still -> {previous}", file=sys.stderr)
+        raise
+    if failures:
+        qdrant.delete_collection(name)
+        abort([*failures, f"deleted {name}; '{ALIAS}' still -> {previous}"])
+
     swap_alias(qdrant, name)
-    print(f"alias '{ALIAS}' -> {name}")
-    drop_old_collections(qdrant, keep=name)
+    print(f"alias '{ALIAS}' -> {name} (previous: {previous})")
+    drop_old_collections(qdrant, keep={name, previous})
     print(f"done in {time.monotonic() - started:.1f}s")
 
 
-def verify():
-    qdrant = QdrantClient(url=QDRANT_URL, timeout=30)
-    with httpx.Client(timeout=30) as http:
-        check_tei(http)
-        for query in SMOKE_QUERIES:
-            vector = embed_batch(http, [query])[0]
-            result = qdrant.query_points(
-                collection_name=ALIAS,
-                query=vector,
-                using=DENSE_VECTOR,
-                limit=5,
-                with_payload=["title", "source"],
-            )
-            print(f"\nQ: {query}")
-            for point in result.points:
-                print(f"  {point.score:.4f}  {point.payload.get('title')}  ({point.payload.get('source')})")
+def rollback(qdrant):
+    current = current_target(qdrant)
+    candidates = sorted(
+        c.name for c in qdrant.get_collections().collections
+        if c.name.startswith("kb_") and c.name != current and point_count(qdrant, c.name) > 0
+    )
+    if not candidates:
+        sys.exit(f"no previous non-empty kb_* collection to roll back to ('{ALIAS}' -> {current})")
+    target = candidates[-1]
+    swap_alias(qdrant, target)
+    print(f"alias '{ALIAS}' -> {target} (was {current})")
+
+
+def verify(qdrant, http, collection_name=ALIAS):
+    check_tei(http)
+    for query in SMOKE_QUERIES:
+        vector = embed_batch(http, [query])[0]
+        result = qdrant.query_points(
+            collection_name=collection_name,
+            query=vector,
+            using=DENSE_VECTOR,
+            limit=5,
+            with_payload=["title", "source"],
+        )
+        print(f"\nQ: {query}")
+        if not result.points:
+            print("  (no results)")
+        for point in result.points:
+            print(f"  {point.score:.4f}  {point.payload.get('title')}  ({point.payload.get('source')})")
 
 
 def main():
     parser = argparse.ArgumentParser(description="SwatGPT KB ingestion pipeline")
-    parser.add_argument(
+    mode = parser.add_mutually_exclusive_group()
+    mode.add_argument(
         "--verify",
         action="store_true",
         help="run smoke queries against the 'kb' alias instead of ingesting",
     )
+    mode.add_argument(
+        "--rollback",
+        action="store_true",
+        help="point the 'kb' alias back at the newest other kb_* collection",
+    )
+    parser.add_argument(
+        "--force",
+        action="store_true",
+        help=f"swap even if the new corpus is under {MIN_RATIO:.0%} of the current one",
+    )
     args = parser.parse_args()
-    if args.verify:
-        verify()
+    _selfcheck()
+    qdrant = QdrantClient(url=QDRANT_URL, timeout=120)
+    if args.rollback:
+        rollback(qdrant)
         return
-    ingest()
+    with httpx.Client(timeout=120) as http:
+        if args.verify:
+            verify(qdrant, http)
+            return
+        ingest(qdrant, http, force=args.force)
 
 
 if __name__ == "__main__":
