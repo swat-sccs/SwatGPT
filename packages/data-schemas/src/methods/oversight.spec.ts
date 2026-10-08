@@ -3,6 +3,7 @@ import { MongoMemoryServer } from 'mongodb-memory-server';
 import type { OversightMethods } from './oversight';
 import { createOversightMethods, decodeKeysetCursor, encodeKeysetCursor } from './oversight';
 import { createModels } from '../models';
+import logger from '~/config/winston';
 
 jest.mock('~/config/winston', () => ({
   error: jest.fn(),
@@ -294,6 +295,47 @@ describe('listConversationsAdmin', () => {
     expect(await ids({ conversationIds: [] })).toEqual([]);
   });
 
+  it('resolves flagged/errors filters per row without loading unbounded id lists', async () => {
+    const messageDistinct = jest.spyOn(models.Message, 'distinct');
+    const flagDistinct = jest.spyOn(models.Flag, 'distinct');
+    const aggregate = jest.spyOn(models.Conversation, 'aggregate');
+    try {
+      await methods.listConversationsAdmin({ errors: false, flagged: false });
+      await methods.listConversationsAdmin({ errors: true, flagged: true });
+      expect(messageDistinct).not.toHaveBeenCalled();
+      const unscopedFlagReads = flagDistinct.mock.calls.filter(
+        ([, filter]) => !(filter as { conversationId?: unknown } | undefined)?.conversationId,
+      );
+      expect(unscopedFlagReads).toHaveLength(0);
+      const pipelines = JSON.stringify(aggregate.mock.calls.map(([pipeline]) => pipeline));
+      expect(pipelines).not.toContain('$nin');
+      expect(pipelines).toContain('$lookup');
+    } finally {
+      messageDistinct.mockRestore();
+      flagDistinct.mockRestore();
+      aggregate.mockRestore();
+    }
+  });
+
+  it('pages a probe-filtered list with the keyset cursor', async () => {
+    const first = await methods.listConversationsAdmin({ errors: false, limit: 2 });
+    expect(first.items.map((i) => i.conversationId)).toEqual(['c4', 'c2']);
+    const second = await methods.listConversationsAdmin({
+      errors: false,
+      limit: 2,
+      cursor: first.nextCursor!,
+    });
+    expect(second.items.map((i) => i.conversationId)).toEqual(['c3']);
+    expect(second.nextCursor).toBeNull();
+  });
+
+  it('treats a conversation whose only flag is resolved as unflagged', async () => {
+    const ids = async (flagged: boolean) =>
+      (await methods.listConversationsAdmin({ flagged })).items.map((i) => i.conversationId);
+    expect(await ids(true)).not.toContain('c2');
+    expect(await ids(false)).toContain('c2');
+  });
+
   it('applies from/to to the sort field and supports createdAt sort', async () => {
     const byUpdated = await methods.listConversationsAdmin({ from: t(15), to: t(25) });
     expect(byUpdated.items.map((i) => i.conversationId)).toEqual(['c2']);
@@ -364,6 +406,44 @@ describe('findConversationOwner', () => {
 });
 
 describe('search', () => {
+  it('searchMessagesAdmin returns null when SEARCH sync is off even with Meilisearch configured', async () => {
+    const previous = {
+      SEARCH: process.env.SEARCH,
+      MEILI_HOST: process.env.MEILI_HOST,
+      MEILI_MASTER_KEY: process.env.MEILI_MASTER_KEY,
+    };
+    process.env.SEARCH = 'false';
+    process.env.MEILI_HOST = 'http://127.0.0.1:1';
+    process.env.MEILI_MASTER_KEY = 'test-key';
+    const logError = jest.mocked(logger.error);
+    logError.mockClear();
+    try {
+      expect(await methods.searchMessagesAdmin('dining', 10)).toBeNull();
+      expect(logError).not.toHaveBeenCalled();
+    } finally {
+      for (const [key, value] of Object.entries(previous)) {
+        if (value === undefined) {
+          delete process.env[key];
+        } else {
+          process.env[key] = value;
+        }
+      }
+    }
+  });
+
+  it('searchMessageTextAdmin finds agent replies stored only in content parts', async () => {
+    await models.Message.collection.insertOne(
+      msg('m8', 'c4', alice, false, t(16), {
+        text: '',
+        content: [
+          { type: 'think', think: 'unrelated' },
+          { type: 'text', text: 'The Registrar office hours are 9 to 5.' },
+        ],
+      }),
+    );
+    expect(await methods.searchMessageTextAdmin('office hours', 10)).toEqual(['c4']);
+  });
+
   it('searchMessagesAdmin returns null when Meilisearch is not configured', async () => {
     const previous = process.env.MEILI_HOST;
     delete process.env.MEILI_HOST;

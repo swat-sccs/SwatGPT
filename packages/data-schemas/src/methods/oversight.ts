@@ -11,7 +11,7 @@ import type {
   TFeedback,
   TMessageContentParts,
 } from 'librechat-data-provider';
-import type { FilterQuery, Model, Types as MongooseTypes } from 'mongoose';
+import type { FilterQuery, Model, PipelineStage, Types as MongooseTypes } from 'mongoose';
 import type { IConversation, IFlag, IGeneration, IMessage, IUser } from '~/types';
 import logger from '~/config/winston';
 
@@ -28,7 +28,20 @@ export const MAX_TEXT_SEARCH_MESSAGES = 200;
 
 const MEILI_MESSAGES_INDEX = 'messages';
 /** Everything `toListItem` and the keyset cursor read from a conversation row. */
-const LIST_PROJECTION = '_id conversationId title user model createdAt updatedAt';
+const LIST_PROJECTION: PipelineStage.Project['$project'] = {
+  _id: 1,
+  conversationId: 1,
+  title: 1,
+  user: 1,
+  model: 1,
+  createdAt: 1,
+  updatedAt: 1,
+};
+/** Default pluralized collection names; probed by `$lookup`, which takes a collection, not a model. */
+const MESSAGES_COLLECTION = 'messages';
+const FLAGS_COLLECTION = 'flags';
+const ERROR_PROBE = '_oversightErrored';
+const FLAG_PROBE = '_oversightFlagged';
 
 export interface ListConversationsAdminOptions {
   cursor?: string;
@@ -73,11 +86,6 @@ interface MessageStats {
 interface TokenStats {
   promptTokens: number;
   completionTokens: number;
-}
-
-interface ConversationScope {
-  include: Set<string> | null;
-  exclude: string[];
 }
 
 const EMPTY_MESSAGE_STATS: MessageStats = { messageCount: 0, errors: 0, up: 0, down: 0 };
@@ -249,35 +257,52 @@ function uniqueInOrder(values: Array<string | undefined>): string[] {
   return out;
 }
 
-function intersect(current: Set<string> | null, ids: string[]): Set<string> {
-  if (current == null) {
-    return new Set(ids);
-  }
-  return new Set(ids.filter((id) => current.has(id)));
+/** Mirrors the mongoMeili `SEARCH` gate; without it the `messages` index is not kept in sync. */
+function isSearchSyncEnabled(): boolean {
+  return process.env.SEARCH?.toLowerCase() === 'true';
 }
 
-/** `keep === true` restricts the scope to `ids`; `keep === false` excludes them. */
-function narrow(
-  scope: ConversationScope,
-  ids: string[] | null,
+/**
+ * Keeps (`keep === true`) or drops conversations that have at least one document in
+ * `from` matching `match`. A per-row `$lookup` probe (one index seek, `$limit: 1`) instead
+ * of loading every matching conversationId into an `$in`/`$nin` that grows with history.
+ */
+function probeStages(
+  from: string,
+  match: PipelineStage.Match['$match'],
+  as: string,
   keep: boolean | undefined,
-): ConversationScope {
-  if (!ids || keep == null) {
-    return scope;
+): PipelineStage[] {
+  if (keep == null) {
+    return [];
   }
-  if (keep) {
-    return { include: intersect(scope.include, ids), exclude: scope.exclude };
-  }
-  return { include: scope.include, exclude: scope.exclude.concat(ids) };
+  return [
+    {
+      $lookup: {
+        from,
+        localField: 'conversationId',
+        foreignField: 'conversationId',
+        pipeline: [{ $match: match }, { $limit: 1 }, { $project: { _id: 1 } }],
+        as,
+      },
+    },
+    { $match: { [as]: keep ? { $ne: [] } : { $eq: [] } } },
+  ];
 }
 
 export interface OversightMethods {
   listConversationsAdmin: (options?: ListConversationsAdminOptions) => Promise<ConversationPage>;
   getConversationAdmin: (conversationId: string) => Promise<TAdminConversationDetail | null>;
   findConversationOwner: (conversationId: string) => Promise<ConversationOwnerRef | null>;
-  /** Meilisearch over the `messages` index without the `user` filter; `null` when Meilisearch is unavailable. */
+  /**
+   * Meilisearch over the `messages` index without the `user` filter; `null` when Meilisearch is
+   * unavailable or `SEARCH` sync is off (the index would be stale), so callers fall back to Mongo.
+   */
   searchMessagesAdmin: (query: string, limit: number) => Promise<string[] | null>;
-  /** Mongo regex fallback over `messages.text`, capped at `MAX_TEXT_SEARCH_MESSAGES` messages. */
+  /**
+   * Mongo regex fallback over `messages.text` and text content parts (`content.text`, where agent
+   * replies keep their body), capped at `MAX_TEXT_SEARCH_MESSAGES` messages.
+   */
   searchMessageTextAdmin: (query: string, limit: number) => Promise<string[]>;
 }
 
@@ -345,34 +370,16 @@ export function createOversightMethods(mongoose: typeof import('mongoose')): Ove
     return new Map(rows.map(({ _id, ...tokens }) => [_id, tokens]));
   }
 
-  async function loadOpenFlagIds(conversationIds?: string[]): Promise<string[]> {
-    const filter: FilterQuery<IFlag> = { resolvedAt: null };
-    if (conversationIds) {
-      filter.conversationId = { $in: conversationIds };
-    }
-    return Flag().distinct('conversationId', filter);
-  }
-
-  async function loadErroredIds(): Promise<string[]> {
-    return Message().distinct('conversationId', { error: true });
-  }
-
-  async function resolveScope(options: ListConversationsAdminOptions): Promise<ConversationScope> {
-    const [flaggedIds, erroredIds] = await Promise.all([
-      options.flagged == null ? null : loadOpenFlagIds(),
-      options.errors == null ? null : loadErroredIds(),
-    ]);
-    const base: ConversationScope = {
-      include: options.conversationIds ? new Set(options.conversationIds) : null,
-      exclude: [],
-    };
-    return narrow(narrow(base, flaggedIds, options.flagged), erroredIds, options.errors);
+  async function loadOpenFlagIds(conversationIds: string[]): Promise<string[]> {
+    return Flag().distinct('conversationId', {
+      conversationId: { $in: conversationIds },
+      resolvedAt: null,
+    });
   }
 
   function buildFilter(
     options: ListConversationsAdminOptions,
     sortField: TAdminConversationsSort,
-    scope: ConversationScope,
     cursor: KeysetCursor | null,
   ): FilterQuery<IConversation> {
     const conditions: FilterQuery<IConversation>[] = [];
@@ -388,11 +395,8 @@ export function createOversightMethods(mongoose: typeof import('mongoose')): Ove
     if (options.to) {
       conditions.push({ [sortField]: { $lte: options.to } });
     }
-    if (scope.include) {
-      conditions.push({ conversationId: { $in: Array.from(scope.include) } });
-    }
-    if (scope.exclude.length) {
-      conditions.push({ conversationId: { $nin: scope.exclude } });
+    if (options.conversationIds) {
+      conditions.push({ conversationId: { $in: options.conversationIds } });
     }
     if (cursor) {
       conditions.push(keysetFilter<IConversation>(sortField, cursor));
@@ -432,15 +436,18 @@ export function createOversightMethods(mongoose: typeof import('mongoose')): Ove
     if (options.cursor && !cursor) {
       throw new Error('Invalid cursor');
     }
-    const scope = await resolveScope(options);
-    if (scope.include && scope.include.size === 0) {
+    if (options.conversationIds?.length === 0) {
       return { items: [], nextCursor: null };
     }
-    const convos = await Conversation()
-      .find(buildFilter(options, sortField, scope, cursor), LIST_PROJECTION)
-      .sort({ [sortField]: -1, _id: -1 })
-      .limit(limit + 1)
-      .lean<IConversation[]>();
+    const convos = await Conversation().aggregate<IConversation>([
+      { $match: buildFilter(options, sortField, cursor) },
+      { $sort: { [sortField]: -1, _id: -1 } },
+      { $project: LIST_PROJECTION },
+      ...probeStages(FLAGS_COLLECTION, { resolvedAt: null }, FLAG_PROBE, options.flagged),
+      ...probeStages(MESSAGES_COLLECTION, { error: true }, ERROR_PROBE, options.errors),
+      { $limit: limit + 1 },
+      { $unset: [FLAG_PROBE, ERROR_PROBE] },
+    ]);
     const hasMore = convos.length > limit;
     const page = hasMore ? convos.slice(0, limit) : convos;
     const last = page[page.length - 1];
@@ -509,7 +516,7 @@ export function createOversightMethods(mongoose: typeof import('mongoose')): Ove
   function meiliIndex() {
     const host = process.env.MEILI_HOST;
     const apiKey = process.env.MEILI_MASTER_KEY;
-    if (!host || !apiKey) {
+    if (!isSearchSyncEnabled() || !host || !apiKey) {
       return null;
     }
     meiliClient ??= new MeiliSearch({ host, apiKey });
@@ -532,8 +539,9 @@ export function createOversightMethods(mongoose: typeof import('mongoose')): Ove
 
   async function searchMessageTextAdmin(query: string, limit: number): Promise<string[]> {
     const capped = clampLimit(limit, MAX_TEXT_SEARCH_MESSAGES, MAX_TEXT_SEARCH_MESSAGES);
+    const pattern = { $regex: escapeRegex(query), $options: 'i' };
     const messages = await Message()
-      .find({ text: { $regex: escapeRegex(query), $options: 'i' } }, 'conversationId')
+      .find({ $or: [{ text: pattern }, { 'content.text': pattern }] }, 'conversationId')
       .sort({ createdAt: -1 })
       .limit(capped)
       .lean<Pick<IMessage, 'conversationId'>[]>();
