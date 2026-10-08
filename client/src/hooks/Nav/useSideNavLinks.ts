@@ -49,7 +49,8 @@ export default function useSideNavLinks({
   keyProvided: boolean;
   endpoint?: EModelEndpoint | null;
   endpointType?: EModelEndpoint | null;
-  interfaceConfig: Partial<TInterfaceConfig>;
+  /** Undefined (startup config missing or failed) denies every feature link. */
+  interfaceConfig?: Partial<TInterfaceConfig>;
   endpointsConfig: TEndpointsConfig;
   includeHidePanel?: boolean;
 }) {
@@ -94,7 +95,25 @@ export default function useSideNavLinks({
   const { agentsConfig } = useGetAgentsConfig({ endpointsConfig });
   const { skillsEnabled } = useAgentCapabilities(agentsConfig?.capabilities);
 
+  const hidePanelLink = useMemo<NavLink | undefined>(
+    () =>
+      includeHidePanel && hidePanel
+        ? {
+            title: 'com_sidepanel_hide_panel',
+            label: '',
+            icon: ArrowRightToLine,
+            onClick: hidePanel,
+            id: 'hide-panel',
+          }
+        : undefined,
+    [includeHidePanel, hidePanel],
+  );
+
   const Links = useMemo(() => {
+    if (!interfaceConfig) {
+      return hidePanelLink ? [hidePanelLink] : [];
+    }
+
     const links: NavLink[] = [];
 
     if (
@@ -214,14 +233,8 @@ export default function useSideNavLinks({
       });
     }
 
-    if (includeHidePanel && hidePanel) {
-      links.push({
-        title: 'com_sidepanel_hide_panel',
-        label: '',
-        icon: ArrowRightToLine,
-        onClick: hidePanel,
-        id: 'hide-panel',
-      });
+    if (hidePanelLink) {
+      links.push(hidePanelLink);
     }
 
     return links;
@@ -236,18 +249,13 @@ export default function useSideNavLinks({
     skillsEnabled,
     hasAccessToMemories,
     hasAccessToReadMemories,
-    interfaceConfig.fileSearch,
-    interfaceConfig.parameters,
+    interfaceConfig,
     endpointType,
     hasAccessToBookmarks,
     availableMCPServers,
     hasAccessToUseMCPSettings,
     hasAccessToCreateMCP,
-    includeHidePanel,
-    hidePanel,
-    interfaceConfig.agents,
-    interfaceConfig.skills,
-    interfaceConfig.memories,
+    hidePanelLink,
   ]);
 
   return Links;
