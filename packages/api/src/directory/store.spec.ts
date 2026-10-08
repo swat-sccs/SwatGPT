@@ -1,4 +1,5 @@
 import type { DirectoryEntry } from '@librechat/data-schemas';
+import type { DirectoryIndex } from './match';
 import { getDirectoryIndex, resetDirectoryStore, warmDirectoryStore } from './store';
 
 jest.mock('@librechat/data-schemas', () => ({
@@ -68,6 +69,54 @@ describe('getDirectoryIndex', () => {
     await flush();
     expect(await getDirectoryIndex(load)).toBeDefined();
     expect(load).toHaveBeenCalledTimes(1);
+  });
+});
+
+describe('getDirectoryIndex after a successful load', () => {
+  type Loader = jest.Mock<Promise<DirectoryEntry[]>, []>;
+
+  async function staleLoad(): Promise<{ load: Loader; previous: DirectoryIndex }> {
+    const load: Loader = jest.fn(async () => [jane]);
+    const previous = await getDirectoryIndex(load);
+    if (!previous) {
+      throw new Error('expected the first load to build an index');
+    }
+    jest.advanceTimersByTime(16 * MINUTE);
+    return { load, previous };
+  }
+
+  it('serves the previous index immediately while a stale refresh is in flight', async () => {
+    const { load, previous } = await staleLoad();
+    load.mockImplementationOnce(() => new Promise<DirectoryEntry[]>(() => undefined));
+
+    expect(await getDirectoryIndex(load)).toBe(previous);
+    expect(await getDirectoryIndex(load)).toBe(previous);
+    expect(load).toHaveBeenCalledTimes(2);
+  });
+
+  it('keeps the previous index when a refresh fails and retries after a minute', async () => {
+    const { load, previous } = await staleLoad();
+    load.mockRejectedValueOnce(new Error('down'));
+    expect(await getDirectoryIndex(load)).toBe(previous);
+    await flush();
+
+    jest.advanceTimersByTime(30 * 1000);
+    expect(await getDirectoryIndex(load)).toBe(previous);
+    expect(load).toHaveBeenCalledTimes(2);
+
+    jest.advanceTimersByTime(31 * 1000);
+    expect(await getDirectoryIndex(load)).toBe(previous);
+    expect(load).toHaveBeenCalledTimes(3);
+  });
+
+  it('drops the index when a refresh returns an empty directory (a deliberate purge)', async () => {
+    const { load, previous } = await staleLoad();
+    load.mockResolvedValueOnce([]);
+    expect(await getDirectoryIndex(load)).toBe(previous);
+    await flush();
+
+    expect(await getDirectoryIndex(load)).toBeUndefined();
+    expect(load).toHaveBeenCalledTimes(2);
   });
 });
 
