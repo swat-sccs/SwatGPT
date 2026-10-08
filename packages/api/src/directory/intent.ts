@@ -4,6 +4,9 @@ export type DirectoryIntent =
   | { kind: 'person'; span: string; roommates: boolean; explicit: boolean }
   | { kind: 'place'; span: string };
 
+/** Housing questions are short; longer text is not scanned, which bounds the regexes' worst case. */
+export const MAX_QUESTION_LENGTH = 500;
+
 const HOUSING_GATE =
   /\b(live|lives|living|lived|dorm|dorms|dormed|room|rooms|rooming|roommate|roommates|housing|reside|resides|residence|hall|building|stay|stays|staying|find|neighbor|neighbors|where (?:is|are))\b/;
 
@@ -168,10 +171,14 @@ function firstCapture(text: string, patterns: ReadonlyArray<RegExp>): string | u
 
 /**
  * Classifies a user message as a housing-directory question and extracts the
- * span naming the person or place. Cheap enough to run on every message: a
- * keyword gate rejects most text before any regex runs.
+ * span naming the person or place. Cheap enough to run on every message:
+ * text over `MAX_QUESTION_LENGTH` and text without housing vocabulary are
+ * rejected before any pattern runs.
  */
 export function detectIntent(text: string): DirectoryIntent | undefined {
+  if (text.length > MAX_QUESTION_LENGTH) {
+    return undefined;
+  }
   const question = prepareQuestion(text);
   if (!question || !HOUSING_GATE.test(question)) {
     return undefined;

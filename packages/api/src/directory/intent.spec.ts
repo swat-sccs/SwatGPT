@@ -1,7 +1,7 @@
 import type { DirectoryEntry } from '@librechat/data-schemas';
 import type { DirectoryLookup } from './match';
 import { buildIndex, runLookup } from './match';
-import { detectIntent } from './intent';
+import { detectIntent, MAX_QUESTION_LENGTH } from './intent';
 
 const entries: DirectoryEntry[] = [
   {
@@ -114,5 +114,51 @@ describe('detectIntent', () => {
     const result = lookup(text);
     expect(result?.kind).toBe('person');
     expect(result?.kind === 'person' && result.matches.map((entry) => entry.uid)).toEqual([uid]);
+  });
+});
+
+describe('detectIntent on long messages', () => {
+  function elapsedMs(run: () => void): number {
+    const start = performance.now();
+    run();
+    return performance.now() - start;
+  }
+
+  it.each([
+    ['where is a ', 20000],
+    ['which room is x ', 15000],
+    ["where's a ", 20000],
+  ])('rejects %j repeated %d times without scanning it', (chunk, times) => {
+    const text = chunk.repeat(times);
+    let intent: ReturnType<typeof detectIntent>;
+    const ms = elapsedMs(() => {
+      intent = detectIntent(text);
+    });
+    expect(intent).toBeUndefined();
+    expect(ms).toBeLessThan(50);
+  });
+
+  it('still answers a housing question at the length limit', () => {
+    const question = 'Where does Jane Doe live?';
+    const text = question.padStart(MAX_QUESTION_LENGTH, ' ');
+    expect(text).toHaveLength(MAX_QUESTION_LENGTH);
+    expect(detectIntent(text)).toEqual({
+      kind: 'person',
+      span: 'jane doe',
+      roommates: false,
+      explicit: true,
+    });
+  });
+
+  it('ignores a housing question buried in a message over the limit', () => {
+    const text = `${'x'.repeat(MAX_QUESTION_LENGTH)} Where does Jane Doe live?`;
+    expect(detectIntent(text)).toBeUndefined();
+  });
+
+  it('stays fast on worst-case input just under the limit', () => {
+    const chunk = 'where is a ';
+    const text = chunk.repeat(Math.floor(MAX_QUESTION_LENGTH / chunk.length));
+    expect(text.length).toBeLessThanOrEqual(MAX_QUESTION_LENGTH);
+    expect(elapsedMs(() => detectIntent(text))).toBeLessThan(50);
   });
 });
