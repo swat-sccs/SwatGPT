@@ -10,6 +10,7 @@ import {
   buildAgentInstructions,
   buildAgentAdditionalInstructions,
   applyContextToAgent,
+  splitTemporalInstructions,
 } from './context';
 
 // Test schema for DynamicStructuredTool
@@ -571,6 +572,30 @@ describe('Agent Context Utilities', () => {
 
       expect(agent.instructions).toBe('Base');
       expect(agent.additional_instructions).toBe('Existing dynamic\n\nContext');
+    });
+  });
+
+  describe('splitTemporalInstructions', () => {
+    it('keeps everything before the first temporal line stable', () => {
+      const text = 'Rules one.\nRules two.\nNow: {{current_datetime}}. Trust it.\nMore.';
+      expect(splitTemporalInstructions(text)).toEqual({
+        stable: 'Rules one.\nRules two.',
+        dynamic: 'Now: {{current_datetime}}. Trust it.\nMore.',
+      });
+    });
+
+    it('returns the whole text as stable when nothing is temporal', () => {
+      expect(splitTemporalInstructions('Hi {{current_user}}')).toEqual({
+        stable: 'Hi {{current_user}}',
+        dynamic: '',
+      });
+    });
+
+    it('moves everything when the first line is temporal', () => {
+      expect(splitTemporalInstructions('Opened {{iso_datetime}}')).toEqual({
+        stable: '',
+        dynamic: 'Opened {{iso_datetime}}',
+      });
     });
   });
 });

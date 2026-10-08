@@ -124,6 +124,31 @@ export function buildAgentAdditionalInstructions({
   return combined || undefined;
 }
 
+const TEMPORAL_SPECIAL_VAR = /{{\s*(current_date|current_datetime|iso_datetime)\s*}}/i;
+
+export interface SplitInstructions {
+  /** Text before the first line with a temporal variable; identical on every request. */
+  stable: string;
+  /** That line and everything after it; resolved per request into the system tail. */
+  dynamic: string;
+}
+
+/**
+ * Splits instructions at the line holding the first temporal special variable
+ * (`{{current_date}}`, `{{current_datetime}}`, `{{iso_datetime}}`). Keeping the
+ * text before it on `instructions` makes it a byte-identical prompt prefix across
+ * requests and users, so provider prefix caches can reuse it; only the tail moves
+ * to the dynamic `additional_instructions`.
+ */
+export function splitTemporalInstructions(text: string): SplitInstructions {
+  const match = TEMPORAL_SPECIAL_VAR.exec(text);
+  if (!match) {
+    return { stable: text, dynamic: '' };
+  }
+  const lineStart = text.lastIndexOf('\n', match.index) + 1;
+  return { stable: text.slice(0, lineStart).trimEnd(), dynamic: text.slice(lineStart).trim() };
+}
+
 /**
  * Applies run context and MCP instructions to an agent's configuration.
  * Mutates the agent object in place.

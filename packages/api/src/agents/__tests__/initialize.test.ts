@@ -758,6 +758,31 @@ describe('initializeAgent — stable and dynamic instruction fields', () => {
     );
   });
 
+  it('keeps the text before the first temporal line stable and moves only the tail', async () => {
+    const { agent, req, res, loadTools, db } = createMocks();
+    agent.instructions = 'Stable rules.\nIt is currently {{current_datetime}}.';
+    req.conversationCreatedAt = '2024-01-15T18:30:00.000Z';
+    req.body = { timezone: 'America/New_York' };
+
+    const result = await initializeAgent(
+      {
+        req,
+        res,
+        agent,
+        loadTools,
+        endpointOption: { endpoint: EModelEndpoint.agents },
+        allowedProviders: new Set([Providers.OPENAI]),
+        isInitialAgent: true,
+      },
+      db,
+    );
+
+    expect(result.instructions).toBe('Stable rules.');
+    expect(result.additional_instructions).toBe(
+      'It is currently 2024-01-15 13:30:00 -05:00 (Monday).',
+    );
+  });
+
   it('keeps non-temporal special vars in stable instructions', async () => {
     const { agent, req, res, loadTools, db } = createMocks();
     agent.instructions = 'You are helping {{current_user}}.';

@@ -66,6 +66,7 @@ import { registerMemoryTools, memoryToolUsageGuard } from './memory';
 import { applyIntentLabels, sanitizeIntentLabels } from './intent';
 import { isFatalAgentInitializationError } from './errors';
 import { applyBackgroundToolCalls } from './background';
+import { splitTemporalInstructions } from './context';
 import { filterFilesByEndpointConfig } from '~/files';
 import { generateArtifactsPrompt } from '~/prompts';
 import { getProviderConfig } from '~/endpoints';
@@ -77,7 +78,6 @@ import { primeResources } from './resources';
  * manages overflow. `createRun` can further override this via `SummarizationConfig.reserveRatio`.
  */
 const DEFAULT_RESERVE_RATIO = 0.05;
-const temporalSpecialVarRegex = /{{\s*(current_date|current_datetime|iso_datetime)\s*}}/i;
 const geminiModelVersionRegex = /^gemini-(\d+)(?:\.(\d+))?(?:-|$)/;
 const googleToolCombinationTextModels = [
   'gemini-3-flash-preview',
@@ -87,10 +87,6 @@ const googleToolCombinationTextModels = [
 ];
 const googleToolCombinationExcludedModalityRegex =
   /(?:^|-)image(?:-|$)|(?:^|-)live(?:-|$)|(?:^|-)tts(?:-|$)/;
-
-function hasTemporalSpecialVars(text: string): boolean {
-  return temporalSpecialVarRegex.test(text);
-}
 
 function appendAdditionalInstructions(agent: Agent, text?: string | null): void {
   if (text == null || text === '') {
@@ -1373,17 +1369,17 @@ export async function initializeAgent(
   }
 
   if (agent.instructions && agent.instructions !== '') {
-    const resolvedInstructions = replaceSpecialVars({
-      text: agent.instructions,
-      user: req.user ? (req.user as unknown as TUser) : null,
-      now: req.conversationCreatedAt,
-      timezone: req.body?.timezone,
-    });
-    if (hasTemporalSpecialVars(agent.instructions)) {
-      agent.instructions = undefined;
-      appendAdditionalInstructions(agent, resolvedInstructions);
-    } else {
-      agent.instructions = resolvedInstructions;
+    const { stable, dynamic } = splitTemporalInstructions(agent.instructions);
+    const resolveVars = (text: string): string =>
+      replaceSpecialVars({
+        text,
+        user: req.user ? (req.user as unknown as TUser) : null,
+        now: req.conversationCreatedAt,
+        timezone: req.body?.timezone,
+      });
+    agent.instructions = stable ? resolveVars(stable) : undefined;
+    if (dynamic) {
+      appendAdditionalInstructions(agent, resolveVars(dynamic));
     }
   }
 
