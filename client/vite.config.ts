@@ -143,8 +143,8 @@ export default defineConfig(({ command }) => ({
         name: 'SwatGPT',
         short_name: 'SwatGPT',
         display: 'standalone',
-        background_color: '#000000',
-        theme_color: '#A11833',
+        background_color: '#faf6ef',
+        theme_color: '#faf6ef',
         icons: [
           {
             src: 'assets/favicon-32x32.png',
