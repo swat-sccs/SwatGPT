@@ -367,8 +367,8 @@ describe('getOpenAIConfig', () => {
     expect(result.configOptions?.baseURL).toBe(reverseProxyUrl);
     expect(result.configOptions?.defaultHeaders).toMatchObject({
       'HTTP-Referer': 'https://librechat.ai',
-      'X-Title': 'LibreChat',
-      'X-OpenRouter-Title': 'LibreChat',
+      'X-Title': 'SwatGPT',
+      'X-OpenRouter-Title': 'SwatGPT',
       'X-OpenRouter-Categories': 'general-chat,personal-agent',
     });
     expect(result.llmConfig.include_reasoning).toBe(true);
@@ -1183,8 +1183,8 @@ describe('getOpenAIConfig', () => {
 
       expect(result.configOptions?.defaultHeaders).toEqual({
         'HTTP-Referer': 'https://librechat.ai',
-        'X-Title': 'LibreChat',
-        'X-OpenRouter-Title': 'LibreChat',
+        'X-Title': 'SwatGPT',
+        'X-OpenRouter-Title': 'SwatGPT',
         'X-OpenRouter-Categories': 'general-chat,personal-agent',
         'X-Custom-Header': 'custom-value',
         Authorization: 'Bearer custom-token',
@@ -1832,7 +1832,7 @@ describe('getOpenAIConfig', () => {
         });
         expect(result.configOptions?.baseURL).toBe(baseURL);
         expect(result.configOptions?.defaultHeaders).toMatchObject({
-          'X-OpenRouter-Title': 'LibreChat',
+          'X-OpenRouter-Title': 'SwatGPT',
           Authorization: `Bearer ${apiKey}`,
         });
         expect(result.provider).toBe('openrouter');
