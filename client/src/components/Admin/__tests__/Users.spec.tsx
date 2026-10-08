@@ -43,6 +43,50 @@ describe('admin users', () => {
     );
   });
 
+  it('returns to the first page when the time range changes', async () => {
+    mockCapabilities();
+    mocks.getAdminUsageUsers.mockImplementation(async (params) => ({
+      users: [user],
+      total: 60,
+      limit: 25,
+      offset: params?.offset ?? 0,
+    }));
+    renderAdmin(<Users />);
+    fireEvent.click(await screen.findByRole('button', { name: 'Next' }));
+    await waitFor(() =>
+      expect(mocks.getAdminUsageUsers).toHaveBeenLastCalledWith(
+        expect.objectContaining({ offset: 25 }),
+      ),
+    );
+
+    fireEvent.click(screen.getByRole('button', { name: '24 h' }));
+    await waitFor(() =>
+      expect(mocks.getAdminUsageUsers).toHaveBeenLastCalledWith(
+        expect.objectContaining({ offset: 0, from: expect.any(String) }),
+      ),
+    );
+    expect(await screen.findByText('Showing 1–1 of 60')).toBeInTheDocument();
+  });
+
+  it('rolls the range end forward when retrying after a failure', async () => {
+    const now = jest.spyOn(Date, 'now').mockReturnValue(Date.parse('2026-10-01T12:00:30.000Z'));
+    mockCapabilities();
+    mocks.getAdminUsageUsers.mockRejectedValueOnce(new Error('boom'));
+    renderAdmin(<Users />);
+    expect(await screen.findByRole('alert')).toBeInTheDocument();
+    expect(mocks.getAdminUsageUsers).toHaveBeenLastCalledWith(
+      expect.objectContaining({ to: '2026-10-01T12:00:00.000Z' }),
+    );
+
+    mocks.getAdminUsageUsers.mockResolvedValue({ users: [user], total: 1, limit: 25, offset: 0 });
+    now.mockReturnValue(Date.parse('2026-10-01T13:05:10.000Z'));
+    fireEvent.click(screen.getByRole('button', { name: 'Retry' }));
+    expect(await screen.findByText('Ada Lovelace')).toBeInTheDocument();
+    expect(mocks.getAdminUsageUsers).toHaveBeenLastCalledWith(
+      expect.objectContaining({ to: '2026-10-01T13:05:00.000Z' }),
+    );
+  });
+
   it('shows an empty state', async () => {
     mockCapabilities();
     mocks.getAdminUsageUsers.mockResolvedValue({ users: [], total: 0, limit: 25, offset: 0 });

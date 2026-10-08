@@ -14,6 +14,7 @@ import {
 import type { FormEvent } from 'react';
 import type { TAdminUsageUser, TAdminUsageUserSort } from 'librechat-data-provider';
 import type { TranslationKeys } from '~/hooks';
+import type { TRangePreset } from './format';
 import { formatDate, formatInt } from './format';
 import { Loading, ErrorState, Empty } from './States';
 import { RangePicker, useRange } from './Range';
@@ -67,7 +68,7 @@ export function UserRow({ user }: { user: TAdminUsageUser }) {
 
 function Content() {
   const localize = useLocalize();
-  const { preset, setPreset, range } = useRange('7d');
+  const { preset, setPreset, range, retry } = useRange('7d');
   const [sort, setSort] = useState<TAdminUsageUserSort>('tokens');
   const [draft, setDraft] = useState('');
   const [search, setSearch] = useState('');
@@ -92,6 +93,11 @@ function Content() {
     setOffset(0);
   };
 
+  const changePreset = (next: TRangePreset) => {
+    setPreset(next);
+    setOffset(0);
+  };
+
   const total = query.data?.total ?? 0;
   const users = query.data?.users ?? [];
   const end = Math.min(offset + users.length, total);
@@ -100,7 +106,7 @@ function Content() {
     <div className="space-y-4">
       <header className="flex flex-wrap items-center justify-between gap-3">
         <h2 className="text-xl font-semibold">{localize('com_admin_nav_users')}</h2>
-        <RangePicker preset={preset} setPreset={setPreset} />
+        <RangePicker preset={preset} setPreset={changePreset} />
       </header>
 
       <form role="search" onSubmit={submitSearch} className="flex max-w-md gap-2">
@@ -118,7 +124,7 @@ function Content() {
 
       <section aria-busy={query.isFetching}>
         {query.isLoading && <Loading />}
-        {query.isError && <ErrorState onRetry={() => query.refetch()} />}
+        {query.isError && <ErrorState onRetry={() => retry(query.refetch)} />}
         {query.data && users.length === 0 && <Empty />}
         {users.length > 0 && (
           <Table>
