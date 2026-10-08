@@ -47,7 +47,7 @@ export interface SettingsContextValue {
   hasAgents: boolean;
   hasModelSelect: boolean;
   hasToolBadges: boolean;
-  hasSharedLinks: boolean;
+  sharedLinksEnabled: boolean;
   isLocalProvider: boolean;
   twoFactorEnabled: boolean;
   allowAccountDeletion: boolean;

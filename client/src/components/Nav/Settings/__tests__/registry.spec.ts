@@ -18,7 +18,7 @@ const settingsContext: SettingsContextValue = {
   hasAgents: false,
   hasModelSelect: false,
   hasToolBadges: false,
-  hasSharedLinks: false,
+  sharedLinksEnabled: false,
   isLocalProvider: true,
   twoFactorEnabled: false,
   allowAccountDeletion: true,
@@ -102,7 +102,6 @@ describe('settings registry', () => {
         'atCommand',
         'autoExpandTools',
         'modularChat',
-        'forkSettings',
         'advancedPrompts',
         'sharedLinks',
         'revokeKeys',
@@ -121,15 +120,25 @@ describe('settings registry', () => {
         hasModelSelect: true,
         hasToolBadges: true,
         hasPrompts: true,
-        hasSharedLinks: true,
+        sharedLinksEnabled: true,
         hasUserProvidedEndpoints: true,
       };
 
-      expect(registry.find((item) => item.id === 'forkSettings')?.show?.(enabled)).toBe(true);
       expect(registry.find((item) => item.id === 'atCommand')?.show?.(enabled)).toBe(true);
       expect(registry.find((item) => item.id === 'advancedPrompts')?.show?.(enabled)).toBe(true);
       expect(registry.find((item) => item.id === 'sharedLinks')?.show?.(enabled)).toBe(true);
       expect(registry.find((item) => item.id === 'revokeKeys')?.show?.(enabled)).toBe(true);
+    });
+
+    it('keeps the fork default visible because Fork works without agents', () => {
+      expect(registry.find((item) => item.id === 'forkSettings')?.show).toBeUndefined();
+    });
+
+    it('keeps shared-link management visible when sharing is on but creation is not', () => {
+      const entry = registry.find((item) => item.id === 'sharedLinks');
+
+      expect(entry?.show?.({ ...settingsContext, sharedLinksEnabled: true })).toBe(true);
+      expect(entry?.show?.({ ...settingsContext, sharedLinksEnabled: false })).toBe(false);
     });
   });
 });

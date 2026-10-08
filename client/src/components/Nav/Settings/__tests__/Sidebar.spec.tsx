@@ -16,7 +16,7 @@ const ctx: SettingsContextValue = {
   hasAgents: false,
   hasModelSelect: false,
   hasToolBadges: false,
-  hasSharedLinks: false,
+  sharedLinksEnabled: false,
   isLocalProvider: true,
   twoFactorEnabled: false,
   allowAccountDeletion: true,

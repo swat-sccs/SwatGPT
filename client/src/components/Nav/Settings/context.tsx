@@ -30,10 +30,6 @@ export function useSettingsContext(): SettingsContextValue {
     permissionType: PermissionTypes.AGENTS,
     permission: Permissions.USE,
   });
-  const hasSharedLinks = useHasAccess({
-    permissionType: PermissionTypes.SHARED_LINKS,
-    permission: Permissions.CREATE,
-  });
   const hasFileSearch = useHasAccess({
     permissionType: PermissionTypes.FILE_SEARCH,
     permission: Permissions.USE,
@@ -52,6 +48,7 @@ export function useSettingsContext(): SettingsContextValue {
   });
 
   const balanceEnabled = startupConfig?.balance?.enabled === true;
+  const sharedLinksEnabled = startupConfig?.sharedLinksEnabled === true;
   const langfuseConnectionAccess = startupConfig?.langfuseConnectionAccess === true;
   const adminPanelURL = startupConfig?.adminPanelURL ?? '';
   const adminDashboardAccess = adminCapabilities?.capabilities.includes('access:admin') === true;
@@ -63,7 +60,6 @@ export function useSettingsContext(): SettingsContextValue {
   const hasMultiConvoBool = hasMultiConvo === true;
   const hasPromptsBool = hasPrompts === true;
   const hasAgentsBool = hasAgents === true;
-  const hasSharedLinksBool = hasSharedLinks === true;
   const hasModelSelect = startupConfig?.interface?.modelSelect !== false;
   const hasToolBadges =
     hasFileSearch === true ||
@@ -86,7 +82,7 @@ export function useSettingsContext(): SettingsContextValue {
       hasAgents: hasAgentsBool,
       hasModelSelect,
       hasToolBadges,
-      hasSharedLinks: hasSharedLinksBool,
+      sharedLinksEnabled,
       isLocalProvider,
       twoFactorEnabled,
       allowAccountDeletion,
@@ -107,7 +103,7 @@ export function useSettingsContext(): SettingsContextValue {
       hasAgentsBool,
       hasModelSelect,
       hasToolBadges,
-      hasSharedLinksBool,
+      sharedLinksEnabled,
       isLocalProvider,
       twoFactorEnabled,
       allowAccountDeletion,

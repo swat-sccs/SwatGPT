@@ -369,7 +369,6 @@ export const registry: SettingEntry[] = [
     section: 'conversations',
     labelKey: 'com_ui_fork_default',
     keywords: ['fork', 'branch', 'split'],
-    show: (ctx) => ctx.hasAgents,
     Component: ForkSettings,
   },
   // Chat · Prompts
@@ -533,7 +532,7 @@ export const registry: SettingEntry[] = [
     tab: DATA,
     section: 'data',
     labelKey: 'com_ui_settings_label_shared_links',
-    show: (ctx) => ctx.hasSharedLinks,
+    show: (ctx) => ctx.sharedLinksEnabled,
     Component: SharedLinks,
   },
   // Data controls · API keys
