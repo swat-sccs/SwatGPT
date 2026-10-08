@@ -1,11 +1,9 @@
 import { Navigate } from 'react-router-dom';
-import { getConfigDefaults } from 'librechat-data-provider';
 import type { ReactNode } from 'react';
 import type { TInterfaceConfig } from 'librechat-data-provider';
 import { useGetStartupConfig } from '~/data-provider';
 
-const defaultInterface = getConfigDefaults().interface;
-
+/** Denies the route unless a loaded startup config explicitly allows it; a failed fetch never falls back to upstream defaults. */
 export default function InterfaceGate({
   allow,
   children,
@@ -19,8 +17,8 @@ export default function InterfaceGate({
     return null;
   }
 
-  const iface = startupConfig?.interface ?? defaultInterface;
-  if (!allow(iface)) {
+  const iface = startupConfig?.interface;
+  if (!iface || !allow(iface)) {
     return <Navigate to="/c/new" replace={true} />;
   }
 

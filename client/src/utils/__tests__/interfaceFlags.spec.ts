@@ -1,7 +1,9 @@
+import type { TInterfaceConfig } from 'librechat-data-provider';
 import {
   areProjectsEnabled,
   isFilesPanelEnabled,
   isInterfaceUseEnabled,
+  isHelpUrlEnabled,
   shouldHideModelSelector,
 } from '../interfaceFlags';
 
@@ -16,8 +18,10 @@ describe('isInterfaceUseEnabled', () => {
   });
 
   it('reads the use field on an object flag', () => {
+    const agents: TInterfaceConfig['agents'] = { use: true, create: false };
+
     expect(isInterfaceUseEnabled({ use: false })).toBe(false);
-    expect(isInterfaceUseEnabled({ use: true, create: false })).toBe(true);
+    expect(isInterfaceUseEnabled(agents)).toBe(true);
     expect(isInterfaceUseEnabled({})).toBe(true);
   });
 });
@@ -46,5 +50,14 @@ describe('shouldHideModelSelector', () => {
     expect(shouldHideModelSelector(false, 2)).toBe(false);
     expect(shouldHideModelSelector(true, 1)).toBe(false);
     expect(shouldHideModelSelector(undefined, 0)).toBe(false);
+  });
+});
+
+describe('isHelpUrlEnabled', () => {
+  it('treats the "/" sentinel and empty values as disabled', () => {
+    expect(isHelpUrlEnabled('/')).toBe(false);
+    expect(isHelpUrlEnabled('')).toBe(false);
+    expect(isHelpUrlEnabled(undefined)).toBe(false);
+    expect(isHelpUrlEnabled('https://www.swarthmore.edu/its')).toBe(true);
   });
 });
