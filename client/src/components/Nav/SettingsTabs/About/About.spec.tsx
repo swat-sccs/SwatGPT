@@ -72,6 +72,37 @@ describe('About', () => {
     });
   });
 
+  describe('help link', () => {
+    it('links to the configured help URL', () => {
+      mockUseGetStartupConfig.mockReturnValue({
+        data: { helpAndFaqURL: 'https://help.example.edu' },
+      });
+      render(<About />);
+
+      expect(screen.getByRole('link', { name: 'com_nav_help_faq' })).toHaveAttribute(
+        'href',
+        'https://help.example.edu',
+      );
+    });
+
+    it('falls back to ITS help when no URL is configured', () => {
+      render(<About />);
+
+      expect(screen.getByRole('link', { name: 'com_nav_help_faq' })).toHaveAttribute(
+        'href',
+        'https://www.swarthmore.edu/its',
+      );
+    });
+
+    it('hides the link when help is disabled with the "/" sentinel', () => {
+      mockUseGetStartupConfig.mockReturnValue({ data: { helpAndFaqURL: '/' } });
+      render(<About />);
+
+      expect(screen.queryByRole('link', { name: 'com_nav_help_faq' })).not.toBeInTheDocument();
+      expect(screen.getByText('com_nav_about_swatgpt_disclaimer')).toBeInTheDocument();
+    });
+  });
+
   describe('copy diagnostics', () => {
     it('writes a preformatted diagnostics blob to the clipboard on click', async () => {
       const user = userEvent.setup();

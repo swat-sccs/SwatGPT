@@ -17,6 +17,11 @@ export function isFilesPanelEnabled(interfaceConfig?: Partial<TInterfaceConfig>)
   return interfaceConfig?.fileSearch !== false;
 }
 
+/** LibreChat treats `HELP_AND_FAQ_URL=/` as "help disabled". */
+export function isHelpUrlEnabled(url: string | undefined): boolean {
+  return !!url && url !== '/';
+}
+
 export function shouldHideModelSelector(
   modelSelect: boolean | undefined,
   specCount: number,

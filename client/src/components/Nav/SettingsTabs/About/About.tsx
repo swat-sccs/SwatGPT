@@ -3,10 +3,19 @@ import copy from 'copy-to-clipboard';
 import { Constants } from 'librechat-data-provider';
 import type { TStartupConfig } from 'librechat-data-provider';
 import CopyButton from '~/components/Messages/Content/CopyButton';
+import { isHelpUrlEnabled } from '~/utils/interfaceFlags';
 import { useGetStartupConfig } from '~/data-provider';
 import { useLocalize } from '~/hooks';
 
 const UNKNOWN_PLACEHOLDER = '—';
+const FALLBACK_HELP_URL = 'https://www.swarthmore.edu/its';
+
+function resolveHelpUrl(configured: string | undefined): string | null {
+  if (configured === undefined || configured === '') {
+    return FALLBACK_HELP_URL;
+  }
+  return isHelpUrlEnabled(configured) ? configured : null;
+}
 
 function formatBuildDate(raw: string | null | undefined): string {
   if (!raw) {
@@ -52,6 +61,7 @@ function About() {
   const copyResetTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
 
   const buildInfo = startupConfig?.buildInfo;
+  const helpUrl = resolveHelpUrl(startupConfig?.helpAndFaqURL);
   const version: string = Constants.VERSION;
 
   const diagnosticsBlob = useMemo(
@@ -86,15 +96,15 @@ function About() {
         <p>{localize('com_nav_about_swatgpt')}</p>
         <p>{localize('com_nav_about_swatgpt_sources')}</p>
         <p>
-          {localize('com_nav_about_swatgpt_disclaimer')}{' '}
-          <a
-            href={startupConfig?.helpAndFaqURL || 'https://www.swarthmore.edu/its'}
-            className="text-link underline"
-            target="_blank"
-            rel="noreferrer"
-          >
-            {localize('com_nav_help_faq')}
-          </a>
+          {localize('com_nav_about_swatgpt_disclaimer')}
+          {helpUrl && (
+            <>
+              {' '}
+              <a href={helpUrl} className="text-link underline" target="_blank" rel="noreferrer">
+                {localize('com_nav_help_faq')}
+              </a>
+            </>
+          )}
         </p>
       </div>
       <dl className="flex flex-col divide-y divide-border-light">
