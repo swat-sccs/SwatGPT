@@ -1,3 +1,5 @@
 reports/*
 !reports/baseline.md
 !reports/baseline.json
+!reports/after.md
+!reports/after.json

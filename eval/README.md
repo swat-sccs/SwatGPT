@@ -18,7 +18,7 @@ with automatic checks. Every run writes a JSON report and a Markdown report to
 | `lib/score.ts` | Fact, citation, invented-URL/email and refusal checks |
 | `lib/report.ts` | Summary numbers, worst failures, Markdown |
 | `reports/baseline.*` | The committed first run |
-| `reports/after.*` | Run after the prompt-caching, grounding and citation changes (see its notes for what was reverted afterwards) |
+| `reports/after.*` | Run after the prompt-caching, grounding, top_p and unnumbered-entry changes (same settings as the baseline) |
 
 ### Question format
 
