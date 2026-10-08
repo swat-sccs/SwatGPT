@@ -4,22 +4,160 @@ on:
   push:
     branches: [main]
   workflow_dispatch:
+    inputs:
+      skip_tests:
+        description: 'Emergency only: deploy without running the test gate'
+        type: boolean
+        default: false
 
 concurrency:
   group: deploy-production
   cancel-in-progress: false
 
+permissions:
+  contents: read
+
 jobs:
+  test:
+    name: Test SwatGPT suites
+    if: ${{ !inputs.skip_tests }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    env:
+      NODE_OPTIONS: '--max-old-space-size=6144'
+    services:
+      postgres:
+        image: postgres:16
+        env:
+          POSTGRES_DB: dash_test
+          POSTGRES_USER: dash
+          POSTGRES_PASSWORD: dash
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U dash -d dash_test"
+          --health-interval 5s
+          --health-timeout 5s
+          --health-retries 20
+    defaults:
+      run:
+        shell: bash
+    steps:
+      - uses: actions/checkout@v5
+        with:
+          ref: ${{ github.sha }}
+
+      - name: Use Node.js 24.16.0
+        uses: actions/setup-node@v5
+        with:
+          node-version: '24.16.0'
+          cache: npm
+          cache-dependency-path: |
+            package-lock.json
+            dash_mcp/package-lock.json
+
+      - name: Cache MongoDB test binaries
+        uses: actions/cache@v5
+        with:
+          path: ~/.cache/mongodb-binaries
+          key: mongodb-binaries-${{ runner.os }}-${{ hashFiles('package-lock.json') }}
+
+      - name: Install dependencies
+        run: |
+          npm ci
+          npm ci --prefix dash_mcp
+
+      - name: Build packages
+        run: npm run build:packages
+
+      - name: 'packages/api: SwatGPT suites'
+        working-directory: packages/api
+        run: >-
+          npx jest --ci --coverage=false
+          src/admin/ src/oversight/ src/agents/generation src/directory/ src/rag/ src/middleware/csp
+          --testPathIgnorePatterns '/node_modules/' '/dist/' '\.dev\.ts$' '\.helper\.ts$' '\.helper\.d\.ts$'
+          '/__tests__/helpers/' '\.manual\.spec\.[jt]sx?$' '\.integration\.spec\.'
+
+      - name: 'packages/data-schemas: methods'
+        working-directory: packages/data-schemas
+        run: npx jest --ci --coverage=false src/methods/
+
+      - name: 'client: Admin'
+        working-directory: client
+        env:
+          NODE_ENV: development
+        run: npx jest --ci --coverage=false src/components/Admin/
+
+      - name: 'dash_mcp: typecheck and tests'
+        working-directory: dash_mcp
+        env:
+          DASH_TEST_DATABASE_URL: postgres://dash:dash@localhost:5432/dash_test
+          PG_CONTAINER: ${{ job.services.postgres.id }}
+        run: |
+          docker exec "$PG_CONTAINER" psql -U dash -d dash_test \
+            -c 'ALTER SYSTEM SET fsync = off' \
+            -c 'ALTER SYSTEM SET synchronous_commit = off' \
+            -c 'SELECT pg_reload_conf()'
+          npm run typecheck
+          npm test
+
   deploy:
+    needs: test
+    if: ${{ !cancelled() && github.ref == 'refs/heads/main' && (needs.test.result == 'success' || (needs.test.result == 'skipped' && inputs.skip_tests)) }}
     runs-on: [self-hosted, eagle]
     defaults:
       run:
+        shell: bash
         working-directory: /srv/SwatGPT
     steps:
-      - name: Sync deploy tree to pushed commit
+      - name: Snapshot running release
         run: |
-          git fetch "https://x-access-token:${{ secrets.GITHUB_TOKEN }}@github.com/${{ github.repository }}.git" "+refs/heads/main:refs/remotes/origin/main"
-          git reset --hard "${{ github.sha }}" || git reset --hard origin/main
+          deployed_file=$(git rev-parse --git-path swatgpt-deployed-sha)
+          prev_sha=$(cat "$deployed_file" 2>/dev/null || true)
+          if [ -n "$prev_sha" ] && git cat-file -e "${prev_sha}^{commit}" 2>/dev/null; then
+            echo "DEPLOY_RECORDED=true" >> "$GITHUB_ENV"
+          else
+            prev_sha=$(git rev-parse HEAD)
+            echo "DEPLOY_RECORDED=false" >> "$GITHUB_ENV"
+          fi
+          echo "Running release: $prev_sha"
+
+          {
+            echo "DEPLOYED_SHA_FILE=$deployed_file"
+            echo "PREV_SHA=$prev_sha"
+          } >> "$GITHUB_ENV"
+
+          previous_tag() {
+            case "${1##*/}" in
+              *:*) echo "${1%:*}:previous" ;;
+              *) echo "$1:previous" ;;
+            esac
+          }
+
+          snapshot() {
+            local service=$1 env_name=$2 cid image source target
+            cid=$(docker compose ps -q "$service" 2>/dev/null || true)
+            if [ -z "$cid" ]; then
+              echo "No running $service container; rollback will be unavailable"
+              return 0
+            fi
+            image=$(docker inspect --format '{{.Config.Image}}' "$cid")
+            source=$(docker inspect --format '{{.Image}}' "$cid")
+            target=$(previous_tag "$image")
+            docker tag "$source" "$target"
+            echo "$env_name=$image" >> "$GITHUB_ENV"
+            echo "Tagged $service image $source as $target"
+          }
+
+          snapshot api API_IMAGE
+          snapshot swatgpt-mcp MCP_IMAGE
+
+      - name: Sync deploy tree to pushed commit
+        env:
+          FETCH_URL: https://x-access-token:${{ secrets.GITHUB_TOKEN }}@github.com/${{ github.repository }}.git
+        run: |
+          git fetch "$FETCH_URL" "+refs/heads/main:refs/remotes/origin/main" "$GITHUB_SHA"
+          git reset --hard "$GITHUB_SHA"
 
       - name: Require Dash MCP database password
         run: |
@@ -32,9 +170,40 @@ jobs:
         run: docker compose build api swatgpt-mcp
 
       - name: Deploy
-        run: docker compose up -d --remove-orphans
+        id: deploy
+        run: |
+          before_api=$(docker compose ps -q api 2>/dev/null || true)
+          docker compose up -d --remove-orphans
+          after_api=$(docker compose ps -q api)
+
+          if [ -n "$before_api" ] && [ "$before_api" != "$after_api" ]; then
+            echo "api was recreated by compose; it already mounts the new librechat.yaml"
+            exit 0
+          fi
+
+          reason=""
+          if [ "$DEPLOY_RECORDED" != "true" ]; then
+            reason="no recorded deployed sha"
+          elif ! git diff --quiet "$PREV_SHA" "$GITHUB_SHA" -- librechat.yaml; then
+            reason="librechat.yaml changed since $PREV_SHA"
+          else
+            host_sha=$(sha256sum librechat.yaml | cut -d' ' -f1)
+            container_sha=$(docker compose exec -T api sha256sum /app/librechat.yaml 2>/dev/null | cut -d' ' -f1 || true)
+            if [ "$host_sha" != "$container_sha" ]; then
+              reason="api sees librechat.yaml ${container_sha:-unreadable}, host has $host_sha"
+            fi
+          fi
+
+          if [ -z "$reason" ]; then
+            echo "librechat.yaml unchanged; api left running"
+            exit 0
+          fi
+
+          echo "Recreating api: $reason"
+          docker compose up -d --no-build --no-deps --force-recreate api
 
       - name: Health check
+        id: health
         run: |
           fail() {
             echo "$1"
@@ -55,6 +224,13 @@ jobs:
           if [ "$code" != "200" ]; then
             fail "LibreChat readiness check failed (last /readyz status: $code)"
           fi
+
+          host_sha=$(sha256sum librechat.yaml | cut -d' ' -f1)
+          container_sha=$(docker compose exec -T api sha256sum /app/librechat.yaml | cut -d' ' -f1) || true
+          if [ "$host_sha" != "$container_sha" ]; then
+            fail "api is serving a stale librechat.yaml (container ${container_sha:-unreadable}, host $host_sha)"
+          fi
+          echo "api librechat.yaml sha256 $host_sha"
 
           mcp_status=$(docker inspect --format='{{if .State.Health}}{{.State.Health.Status}}{{else}}{{.State.Status}}{{end}}' "$(docker compose ps -q swatgpt-mcp)")
           if [ "$mcp_status" != "healthy" ]; then
@@ -80,3 +256,73 @@ jobs:
           if echo "$last_mcp_init" | grep -Eq 'and 0 tools'; then
             fail "LibreChat started with the Dash MCP server configured but 0 tools"
           fi
+
+      - name: Record deployed commit
+        run: git rev-parse HEAD > "$DEPLOYED_SHA_FILE"
+
+      - name: Prune old build cache and dangling images
+        continue-on-error: true
+        run: |
+          docker builder prune -f --filter until=168h
+          docker image prune -f
+
+      - name: Roll back to previous release
+        if: ${{ failure() && steps.health.outcome != 'success' }}
+        env:
+          DEPLOY_OUTCOME: ${{ steps.deploy.outcome }}
+        run: |
+          if [ -z "${PREV_SHA:-}" ]; then
+            echo "No previous release was recorded; nothing to roll back"
+            exit 1
+          fi
+
+          if [ "$DEPLOY_OUTCOME" = "skipped" ]; then
+            git reset --hard "$PREV_SHA"
+            echo "Deploy never started; restored the tree to $PREV_SHA and left running containers untouched"
+            exit 0
+          fi
+
+          previous_tag() {
+            case "${1##*/}" in
+              *:*) echo "${1%:*}:previous" ;;
+              *) echo "$1:previous" ;;
+            esac
+          }
+
+          if [ -z "${API_IMAGE:-}" ] || [ -z "${MCP_IMAGE:-}" ]; then
+            echo "api or swatgpt-mcp was not running before this deploy; cannot roll back automatically. Revert the commit on main to redeploy $PREV_SHA."
+            exit 1
+          fi
+
+          api_previous=$(previous_tag "$API_IMAGE")
+          mcp_previous=$(previous_tag "$MCP_IMAGE")
+          for image in "$api_previous" "$mcp_previous"; do
+            if ! docker image inspect "$image" >/dev/null 2>&1; then
+              echo "Missing $image; cannot roll back automatically. Revert the commit on main to redeploy $PREV_SHA."
+              exit 1
+            fi
+          done
+
+          echo "Rolling back to $PREV_SHA"
+          git reset --hard "$PREV_SHA"
+          docker tag "$api_previous" "$API_IMAGE"
+          docker tag "$mcp_previous" "$MCP_IMAGE"
+          failed_api=$(docker compose ps -q api 2>/dev/null || true)
+          docker compose up -d --no-build --remove-orphans
+          if [ "$(docker compose ps -q api)" = "$failed_api" ]; then
+            docker compose up -d --no-build --no-deps --force-recreate api
+          fi
+
+          code=000
+          for i in $(seq 1 30); do
+            code=$(curl -s -o /dev/null -w '%{http_code}' http://localhost:3080/readyz) || true
+            if [ "$code" = "200" ]; then
+              echo "Rolled back to $PREV_SHA; LibreChat ready after ~$((i * 5))s"
+              exit 0
+            fi
+            sleep 5
+          done
+          echo "Rollback to $PREV_SHA did not become ready (last /readyz status: $code)"
+          docker compose ps || true
+          docker compose logs --tail=80 api swatgpt-mcp || true
+          exit 1
