@@ -1,10 +1,13 @@
 import { ThumbsUp, ThumbsDown } from 'lucide-react';
 import { ContentTypes } from 'librechat-data-provider';
 import type {
-  TAdminConversationMessage,
   TAdminGeneration,
   TMessageContentParts,
+  TAdminGenerationStatus,
+  TAdminConversationMessage,
 } from 'librechat-data-provider';
+import type { ReactNode } from 'react';
+import type { TranslationKeys } from '~/hooks';
 import { formatDate, formatInt, formatMs } from './format';
 import { useLocalize } from '~/hooks';
 import { cn } from '~/utils';
@@ -26,39 +29,67 @@ const bodyOf = (message: TAdminConversationMessage): string => {
   return parts.length > 0 ? parts.join('\n\n') : message.text;
 };
 
+type TMetaEntry = { term: TranslationKeys; value: ReactNode };
+
+const statusKeys: Record<Exclude<TAdminGenerationStatus, 'ok'>, TranslationKeys> = {
+  error: 'com_admin_generation_error',
+  aborted: 'com_admin_generation_aborted',
+};
+
 function Meta({ generation }: { generation: TAdminGeneration }) {
   const localize = useLocalize();
-  const entries: string[] = [
-    generation.model,
-    localize('com_admin_meta_tokens', {
-      0: formatInt(generation.promptTokens),
-      1: formatInt(generation.completionTokens),
-    }),
-    localize('com_admin_meta_ttft', { 0: formatMs(generation.ttftMs) }),
-    localize('com_admin_meta_duration', { 0: formatMs(generation.durationMs) }),
+  const entries: TMetaEntry[] = [
+    { term: 'com_ui_model', value: generation.model },
+    {
+      term: 'com_admin_col_tokens',
+      value: localize('com_admin_meta_tokens', {
+        0: formatInt(generation.promptTokens),
+        1: formatInt(generation.completionTokens),
+      }),
+    },
+    {
+      term: 'com_admin_meta_ttft_term',
+      value: localize('com_admin_meta_ttft', { 0: formatMs(generation.ttftMs) }),
+    },
+    {
+      term: 'com_admin_meta_duration_term',
+      value: localize('com_admin_meta_duration', { 0: formatMs(generation.durationMs) }),
+    },
   ];
   if (generation.toolCalls.length > 0) {
-    entries.push(localize('com_admin_meta_tools', { 0: generation.toolCalls.join(', ') }));
+    entries.push({
+      term: 'com_admin_meta_tools_term',
+      value: localize('com_admin_meta_tools', { 0: generation.toolCalls.join(', ') }),
+    });
   }
   if (generation.ragChunks > 0) {
-    entries.push(localize('com_admin_meta_rag', { 0: formatInt(generation.ragChunks) }));
+    entries.push({
+      term: 'com_admin_meta_rag_term',
+      value: localize('com_admin_meta_rag', { 0: formatInt(generation.ragChunks) }),
+    });
+  }
+  if (generation.status !== 'ok') {
+    const status = localize(statusKeys[generation.status]);
+    entries.push({
+      term: 'com_admin_col_status',
+      value: (
+        <Pill tone="destructive">
+          {generation.errorType ? `${status}: ${generation.errorType}` : status}
+        </Pill>
+      ),
+    });
   }
   return (
-    <dl className="mt-2 flex flex-wrap items-center gap-x-3 gap-y-1 text-xs text-text-tertiary">
+    <dl
+      aria-label={localize('com_admin_meta_label')}
+      className="mt-2 flex flex-wrap items-center gap-x-3 gap-y-1 text-xs text-text-tertiary"
+    >
       {entries.map((entry) => (
-        <dd key={entry} className="tabular-nums">
-          {entry}
-        </dd>
+        <div key={entry.term} className="tabular-nums">
+          <dt className="sr-only">{localize(entry.term)}</dt>
+          <dd>{entry.value}</dd>
+        </div>
       ))}
-      {generation.status !== 'ok' && (
-        <dd>
-          <Pill tone="destructive">
-            {generation.errorType
-              ? `${generation.status}: ${generation.errorType}`
-              : generation.status}
-          </Pill>
-        </dd>
-      )}
     </dl>
   );
 }
