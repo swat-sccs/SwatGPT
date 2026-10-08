@@ -10,6 +10,7 @@ export * from './conversation';
 export * from './discovery';
 export * from './edges';
 export * from './errors';
+export * from './expiry';
 export * from './envelope';
 export * from './handlers';
 export * from './harvest';

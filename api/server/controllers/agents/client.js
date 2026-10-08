@@ -102,6 +102,7 @@ const {
   findKeywordFlags,
   createGenerationTiming,
   createFirstTokenTimingHandlers,
+  resolveGenerationExpiry,
 } = require('@librechat/api');
 const {
   Run,
@@ -1623,6 +1624,7 @@ class AgentClient extends BaseClient {
       messages,
     };
 
+    this.promptTokenEstimate = promptTokens;
     if (promptTokens >= 0 && typeof opts?.getReqData === 'function') {
       opts.getReqData({ promptTokens });
     }
@@ -3094,6 +3096,8 @@ class AgentClient extends BaseClient {
         });
       }
     } finally {
+      /** The abort middleware empties `collectedUsage` in place; copy it before any await. */
+      const usageSnapshot = [...this.collectedUsage];
       /** Capture calibration state from the run for persistence on the response message.
        *  Runs in finally so values are captured even on abort. */
       const ratio = this.run?.getCalibrationRatio() ?? 0;
@@ -3150,8 +3154,8 @@ class AgentClient extends BaseClient {
           conversationId: this.conversationId,
           messageId: this.responseMessageId,
           model: this.model ?? this.options.agent.model_parameters.model,
-          collectedUsage: this.collectedUsage,
-          usage: this.usage,
+          collectedUsage: this.collectedUsage.length > 0 ? this.collectedUsage : usageSnapshot,
+          estimatedPromptTokens: this.promptTokenEstimate,
           contentParts: this.contentParts,
           userText: this.kbQueryText ?? '',
           ragChunks: this.kbRetrieval?.chunks,
@@ -3160,6 +3164,7 @@ class AgentClient extends BaseClient {
           aborted: abortController?.signal?.aborted === true,
           error: runError,
           tenantId: this.options.req.user?.tenantId,
+          expiredAt: resolveGenerationExpiry(this.options.req),
         },
       );
       if (this._resolveRun) {

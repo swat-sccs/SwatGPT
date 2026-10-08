@@ -5,6 +5,9 @@ const mockIsHITLEnabled = jest.fn().mockReturnValue(false);
 const mockBuildAgentScopedContext = jest.fn((...args) =>
   jest.requireActual('@librechat/api').buildAgentScopedContext(...args),
 );
+const mockRetrieveKbContextDetailed = jest.fn((...args) =>
+  jest.requireActual('@librechat/api').retrieveKbContextDetailed(...args),
+);
 const mockFormatAgentMessages = jest.fn(() => ({
   messages: [],
   indexTokenCountMap: {},
@@ -38,6 +41,7 @@ jest.mock('@librechat/agents', () => ({
 jest.mock('@librechat/api', () => ({
   ...jest.requireActual('@librechat/api'),
   buildAgentScopedContext: (...args) => mockBuildAgentScopedContext(...args),
+  retrieveKbContextDetailed: (...args) => mockRetrieveKbContextDetailed(...args),
   checkAccess: jest.fn(),
   createRun: (...args) => mockCreateRun(...args),
   countFormattedMessageTokens: jest.fn(() => 42),
@@ -1986,6 +1990,37 @@ describe('AgentClient - titleConvo', () => {
 
       expect(client.augmentedPrompt).toBe('Retrieved context');
       expect(client.options.agent.additional_instructions).toContain('Retrieved context');
+    });
+
+    it('appends KB context to the dynamic system tail after the stable instructions', async () => {
+      const kbContext = '# Swarthmore College knowledge base context\n\n[1] Wi-Fi (https://kb)';
+      mockRetrieveKbContextDetailed.mockResolvedValueOnce({
+        context: kbContext,
+        result: 'hit',
+        chunks: 1,
+        elapsedMs: 5,
+      });
+
+      const result = await client.buildMessages(
+        [
+          {
+            messageId: 'msg-1',
+            parentMessageId: null,
+            sender: 'User',
+            text: 'How do I get on Wi-Fi?',
+            isCreatedByUser: true,
+          },
+        ],
+        'msg-1',
+        {},
+      );
+
+      expect(result.prompt.at(-1).content).toBe('How do I get on Wi-Fi?');
+      expect(client.options.agent.instructions).toContain('Base agent instructions');
+      expect(client.options.agent.instructions).not.toContain('[1] Wi-Fi');
+      expect(client.options.agent.additional_instructions).toContain(kbContext);
+      expect(client.kbRetrieval.chunks).toBe(1);
+      expect(client.promptTokenEstimate).toBe(42);
     });
 
     it('starts independent context and current-file work at their earliest dependency barriers', async () => {
