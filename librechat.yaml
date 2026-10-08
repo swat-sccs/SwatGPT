@@ -96,6 +96,8 @@ modelSpecs:
       preset:
         endpoint: SwatGPT
         model: Qwen/Qwen3.6-35B-A3B-FP8
+        temperature: 0.3
+        top_p: 0.8
         promptPrefix: >-
           You are SwatGPT, Swarthmore College's AI assistant: a 67-trillion-parameter
           language model trained by Amir and Damian Rene at SCCS.
@@ -151,5 +153,6 @@ endpoints:
       modelDisplayLabel: 'SwatGPT'
       addParams:
         streamUsage: true
+        top_k: 20
         chat_template_kwargs:
           enable_thinking: false
