@@ -21,7 +21,7 @@ import {
 import type { TooltipProps } from 'recharts';
 import type { TAdminUsageBucket, TAdminUsagePoint } from 'librechat-data-provider';
 import type { TranslationKeys } from '~/hooks';
-import { formatCompact, formatDate, formatInt, formatTick } from './format';
+import { formatCompact, formatBucket, formatInt, formatTick } from './format';
 import { useLocalize } from '~/hooks';
 import { Empty } from './States';
 
@@ -84,7 +84,8 @@ function Tip({
   payload,
   label,
   series,
-}: TooltipProps<number, string> & { series: Series[] }) {
+  bucket,
+}: TooltipProps<number, string> & { series: Series[]; bucket: TAdminUsageBucket }) {
   const localize = useLocalize();
   if (!active || !payload?.length || typeof label !== 'string') {
     return null;
@@ -92,7 +93,7 @@ function Tip({
   const byKey = new Map(payload.map((entry) => [entry.dataKey, entry.value]));
   return (
     <div className="rounded-lg border border-border-light bg-surface-dialog p-2 text-xs shadow-lg">
-      <p className="mb-1 text-text-secondary">{formatDate(label)}</p>
+      <p className="mb-1 text-text-secondary">{formatBucket(label, bucket)}</p>
       {series.map((item) => (
         <p key={item.key} className="flex items-center gap-2">
           <span
@@ -149,7 +150,7 @@ function Panel({
             />
             <Tooltip
               cursor={{ fill: 'rgb(var(--surface-hover))', opacity: 0.4 }}
-              content={<Tip series={series} />}
+              content={<Tip series={series} bucket={bucket} />}
             />
             {series.map((item) =>
               item.mark === 'bar' ? (

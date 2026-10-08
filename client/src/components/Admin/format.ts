@@ -7,7 +7,13 @@ const integer = new Intl.NumberFormat(undefined, { maximumFractionDigits: 0 });
 const percent = new Intl.NumberFormat(undefined, { style: 'percent', maximumFractionDigits: 1 });
 const dateTime = new Intl.DateTimeFormat(undefined, { dateStyle: 'medium', timeStyle: 'short' });
 const hourTick = new Intl.DateTimeFormat(undefined, { hour: 'numeric' });
-const dayTick = new Intl.DateTimeFormat(undefined, { month: 'short', day: 'numeric' });
+/** Day buckets are UTC midnights on the server, so their labels must be read in UTC too. */
+const dayTick = new Intl.DateTimeFormat(undefined, {
+  month: 'short',
+  day: 'numeric',
+  timeZone: 'UTC',
+});
+const dayLabel = new Intl.DateTimeFormat(undefined, { dateStyle: 'medium', timeZone: 'UTC' });
 
 type Nullable = number | null | undefined;
 
@@ -36,6 +42,10 @@ export const formatDate = (iso: string | null | undefined): string =>
 export const formatTick = (iso: string, bucket: TAdminUsageBucket): string =>
   (bucket === 'hour' ? hourTick : dayTick).format(new Date(iso));
 
+/** Full label for one bucket: the local hour it starts at, or the UTC day it covers. */
+export const formatBucket = (iso: string, bucket: TAdminUsageBucket): string =>
+  bucket === 'hour' ? formatDate(iso) : dayLabel.format(new Date(iso));
+
 export const ratio = (numerator: number, denominator: number): number | null =>
   denominator > 0 ? numerator / denominator : null;
 
@@ -43,7 +53,8 @@ export type TRangePreset = '24h' | '7d' | '30d' | 'all';
 
 export const RANGE_PRESETS: readonly TRangePreset[] = ['24h', '7d', '30d', 'all'];
 
-const HOUR_MS = 60 * 60 * 1000;
+const MINUTE_MS = 60 * 1000;
+const HOUR_MS = 60 * MINUTE_MS;
 const DAY_MS = 24 * HOUR_MS;
 
 const presetDurations: Record<Exclude<TRangePreset, 'all'>, number> = {
@@ -55,9 +66,11 @@ const presetDurations: Record<Exclude<TRangePreset, 'all'>, number> = {
 export const bucketFor = (preset: TRangePreset): TAdminUsageBucket =>
   preset === '24h' ? 'hour' : 'day';
 
+export const floorToMinute = (ms: number): number => Math.floor(ms / MINUTE_MS) * MINUTE_MS;
+
 /** Builds ISO bounds for a preset, aligned to the minute so query keys stay stable. */
 export const rangeFor = (preset: TRangePreset, now: number = Date.now()): TAdminUsageRange => {
-  const to = Math.floor(now / 60000) * 60000;
+  const to = floorToMinute(now);
   if (preset === 'all') {
     return { to: new Date(to).toISOString(), all: true };
   }

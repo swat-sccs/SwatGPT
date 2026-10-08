@@ -1,0 +1,61 @@
+import {
+  bucketFor,
+  formatTick,
+  rangeFor,
+  formatDate,
+  formatBucket,
+  floorToMinute,
+} from '../format';
+
+const NOW = Date.parse('2026-10-05T12:34:56.789Z');
+
+describe('admin format helpers', () => {
+  it('labels day buckets by their UTC date, whatever the viewer time zone', () => {
+    const utcMidnight = '2026-10-01T00:00:00.000Z';
+    const expected = new Intl.DateTimeFormat(undefined, {
+      month: 'short',
+      day: 'numeric',
+      timeZone: 'UTC',
+    }).format(new Date(utcMidnight));
+    expect(formatTick(utcMidnight, 'day')).toBe(expected);
+    expect(formatTick(utcMidnight, 'day')).toMatch(/\b1\b/);
+    expect(formatTick('2026-10-01T23:59:00.000Z', 'day')).toBe(expected);
+  });
+
+  it('does not shift day labels back a day for Eastern viewers', () => {
+    const eastern = new Intl.DateTimeFormat(undefined, {
+      month: 'short',
+      day: 'numeric',
+      timeZone: 'America/New_York',
+    });
+    const bucket = '2026-10-01T00:00:00.000Z';
+    expect(eastern.format(new Date(bucket))).not.toBe(formatTick(bucket, 'day'));
+  });
+
+  it('labels a day bucket tooltip by its UTC date and an hour bucket by local time', () => {
+    const utcMidnight = '2026-10-01T00:00:00.000Z';
+    const expected = new Intl.DateTimeFormat(undefined, {
+      dateStyle: 'medium',
+      timeZone: 'UTC',
+    }).format(new Date(utcMidnight));
+    expect(formatBucket(utcMidnight, 'day')).toBe(expected);
+    expect(formatBucket(utcMidnight, 'hour')).toBe(formatDate(utcMidnight));
+  });
+
+  it('picks hourly buckets only for the 24h preset', () => {
+    expect(bucketFor('24h')).toBe('hour');
+    expect(bucketFor('7d')).toBe('day');
+    expect(bucketFor('30d')).toBe('day');
+    expect(bucketFor('all')).toBe('day');
+  });
+
+  it('aligns range ends to the minute', () => {
+    expect(new Date(floorToMinute(NOW)).toISOString()).toBe('2026-10-05T12:34:00.000Z');
+    expect(rangeFor('all', NOW)).toEqual({ to: '2026-10-05T12:34:00.000Z', all: true });
+    expect(rangeFor('7d', NOW)).toEqual({
+      from: '2026-09-28T12:34:00.000Z',
+      to: '2026-10-05T12:34:00.000Z',
+    });
+    expect(rangeFor('24h', NOW).from).toBe('2026-10-04T12:34:00.000Z');
+  });
+});

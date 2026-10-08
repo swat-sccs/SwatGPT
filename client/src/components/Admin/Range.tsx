@@ -1,8 +1,8 @@
-import { useMemo, useState } from 'react';
+import { useMemo, useState, useCallback } from 'react';
 import { Button } from '@librechat/client';
 import type { TAdminUsageBucket, TAdminUsageRange } from 'librechat-data-provider';
 import type { TRangePreset } from './format';
-import { RANGE_PRESETS, bucketFor, rangeFor } from './format';
+import { RANGE_PRESETS, bucketFor, rangeFor, floorToMinute } from './format';
 import { useLocalize } from '~/hooks';
 import { cn } from '~/utils';
 
@@ -11,12 +11,40 @@ export type TRangeState = {
   setPreset: (preset: TRangePreset) => void;
   range: TAdminUsageRange;
   bucket: TAdminUsageBucket;
+  /** Rolls the range end forward to now, refetching in place when it is already current. */
+  retry: (refetch: () => void) => void;
 };
 
+const currentMinute = (): number => floorToMinute(Date.now());
+
+/**
+ * Keeps the selected preset and the instant its range ends at. Choosing a preset (including the
+ * active one) or retrying moves the end to the current minute, so a long-open tab is never stuck
+ * on the window it was first loaded with.
+ */
 export function useRange(initial: TRangePreset = '24h'): TRangeState {
-  const [preset, setPreset] = useState<TRangePreset>(initial);
-  const range = useMemo(() => rangeFor(preset), [preset]);
-  return { preset, setPreset, range, bucket: bucketFor(preset) };
+  const [preset, setPresetState] = useState<TRangePreset>(initial);
+  const [now, setNow] = useState(currentMinute);
+
+  const setPreset = useCallback((next: TRangePreset) => {
+    setPresetState(next);
+    setNow(currentMinute());
+  }, []);
+
+  const retry = useCallback(
+    (refetch: () => void) => {
+      const next = currentMinute();
+      if (next === now) {
+        refetch();
+        return;
+      }
+      setNow(next);
+    },
+    [now],
+  );
+
+  const range = useMemo(() => rangeFor(preset, now), [preset, now]);
+  return { preset, setPreset, range, bucket: bucketFor(preset), retry };
 }
 
 const presetLabelKeys = {

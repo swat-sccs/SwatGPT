@@ -54,7 +54,7 @@ function Models({ models }: { models: TAdminUsageModel[] }) {
 
 function Content() {
   const localize = useLocalize();
-  const { preset, setPreset, range, bucket } = useRange();
+  const { preset, setPreset, range, bucket, retry } = useRange();
   const summary = useAdminUsageSummary(range);
   const series = useAdminUsageTimeseries({ ...range, bucket });
   const models = useAdminUsageModels(range);
@@ -71,13 +71,13 @@ function Content() {
           {localize('com_admin_section_kpis')}
         </h3>
         {summary.isLoading && <Loading />}
-        {summary.isError && <ErrorState onRetry={() => summary.refetch()} />}
+        {summary.isError && <ErrorState onRetry={() => retry(summary.refetch)} />}
         {summary.data && <Tiles summary={summary.data} />}
       </section>
 
       <section aria-busy={series.isFetching}>
         {series.isLoading && <Loading />}
-        {series.isError && <ErrorState onRetry={() => series.refetch()} />}
+        {series.isError && <ErrorState onRetry={() => retry(series.refetch)} />}
         {series.data && <Chart points={series.data.points} bucket={series.data.bucket} />}
       </section>
 
@@ -86,7 +86,7 @@ function Content() {
           {localize('com_admin_section_models')}
         </h3>
         {models.isLoading && <Loading />}
-        {models.isError && <ErrorState onRetry={() => models.refetch()} />}
+        {models.isError && <ErrorState onRetry={() => retry(models.refetch)} />}
         {models.data && <Models models={models.data} />}
       </section>
     </div>
