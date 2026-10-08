@@ -9,6 +9,8 @@ services:
         condition: service_started
       swatgpt-mcp:
         condition: service_healthy
+    environment:
+      TZ: America/New_York
     volumes:
       - type: bind
         source: ./librechat.yaml
