@@ -1,0 +1,12 @@
+{
+  "name": "@swatgpt/eval",
+  "private": true,
+  "type": "module",
+  "description": "SwatGPT answer-quality evaluation harness (not an npm workspace).",
+  "scripts": {
+    "eval": "node run.ts",
+    "eval:local": "node run.ts --mode local",
+    "test": "node --test \"test/*.test.ts\"",
+    "typecheck": "tsc -p tsconfig.json"
+  }
+}

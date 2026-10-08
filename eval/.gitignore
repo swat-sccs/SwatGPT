@@ -1,0 +1,3 @@
+reports/*
+!reports/baseline.md
+!reports/baseline.json

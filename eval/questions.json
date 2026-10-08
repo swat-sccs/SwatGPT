@@ -1,0 +1,774 @@
+{
+  "version": 1,
+  "questions": [
+    {
+      "id": "helpdesk-phone",
+      "kind": "answerable",
+      "turns": [
+        "What is the ITS Help Desk phone number?"
+      ],
+      "docs": [
+        "help-desk-hours-of-operation.md"
+      ],
+      "facts": [
+        [
+          "x8513",
+          "610-328-8513",
+          "(610) 328-8513",
+          "610.328.8513"
+        ]
+      ]
+    },
+    {
+      "id": "wifi-networks",
+      "kind": "answerable",
+      "turns": [
+        "What Wi-Fi networks does Swarthmore have?"
+      ],
+      "docs": [
+        "wireless.md"
+      ],
+      "facts": [
+        [
+          "eduroam"
+        ],
+        [
+          "SwatGuest"
+        ],
+        [
+          "SwatDevice"
+        ]
+      ]
+    },
+    {
+      "id": "password-reset-site",
+      "kind": "answerable",
+      "turns": [
+        "Where do I go to change my Swarthmore password?"
+      ],
+      "docs": [
+        "resetting-passwords.md",
+        "getting-an-account.md",
+        "resetting-email-and-network-passwords.md"
+      ],
+      "facts": [
+        [
+          "password.swarthmore.edu"
+        ]
+      ]
+    },
+    {
+      "id": "student-no-username",
+      "kind": "answerable",
+      "turns": [
+        "I'm a new student and never received a Swarthmore username. Who should I contact?"
+      ],
+      "docs": [
+        "getting-an-account.md",
+        "resetting-passwords.md"
+      ],
+      "facts": [
+        [
+          "Registrar"
+        ]
+      ]
+    },
+    {
+      "id": "switch-wifi",
+      "kind": "answerable",
+      "turns": [
+        "How do I get my Nintendo Switch onto the campus Wi-Fi?"
+      ],
+      "docs": [
+        "gaming-and-device-registration.md"
+      ],
+      "facts": [
+        [
+          "SwatDevice"
+        ],
+        [
+          "MAC address"
+        ]
+      ]
+    },
+    {
+      "id": "vpn-session-limit",
+      "kind": "answerable",
+      "turns": [
+        "How long can I stay connected to the Swarthmore VPN before I have to log in again?"
+      ],
+      "docs": [
+        "vpn-and-off-campus-access.md"
+      ],
+      "facts": [
+        [
+          "10 hours",
+          "ten hours"
+        ]
+      ]
+    },
+    {
+      "id": "vpn-client",
+      "kind": "answerable",
+      "turns": [
+        "What software do I need to connect to the Swarthmore VPN from home?"
+      ],
+      "docs": [
+        "vpn-and-off-campus-access.md",
+        "vpn.md"
+      ],
+      "facts": [
+        [
+          "Cisco",
+          "AnyConnect"
+        ]
+      ]
+    },
+    {
+      "id": "student-print-cost",
+      "kind": "answerable",
+      "turns": [
+        "Do students have to pay to print on campus?"
+      ],
+      "docs": [
+        "printing-for-students.md"
+      ],
+      "facts": [
+        [
+          "no charge",
+          "free",
+          "no cost",
+          "not charged",
+          "doesn't cost",
+          "does not cost",
+          "don't have to pay",
+          "do not have to pay",
+          "don't need to pay",
+          "do not need to pay"
+        ]
+      ]
+    },
+    {
+      "id": "print-queue-name",
+      "kind": "answerable",
+      "turns": [
+        "What print queue should students send black-and-white jobs to so they can release them at any campus Canon printer?"
+      ],
+      "docs": [
+        "printing-for-students.md"
+      ],
+      "facts": [
+        [
+          "GarnetPrint"
+        ]
+      ]
+    },
+    {
+      "id": "print-release-expiry",
+      "kind": "answerable",
+      "turns": [
+        "How long does a print job wait in the queue before it has to be released at the printer?"
+      ],
+      "docs": [
+        "print-release-faq.md"
+      ],
+      "facts": [
+        [
+          "one hour",
+          "1 hour",
+          "an hour"
+        ]
+      ]
+    },
+    {
+      "id": "poster-size",
+      "kind": "answerable",
+      "turns": [
+        "What paper size should I pick to print a standard poster on the large format printer?"
+      ],
+      "docs": [
+        "large-format-poster-printing-instructions.md",
+        "printing-policies-faq.md"
+      ],
+      "facts": [
+        [
+          "48x35",
+          "48 x 35",
+          "35x48",
+          "35 x 48",
+          "48 by 35",
+          "35 by 48"
+        ]
+      ]
+    },
+    {
+      "id": "poster-party",
+      "kind": "answerable",
+      "turns": [
+        "Can I print a poster advertising my club's party on the large format printer in the Creative Media Commons?"
+      ],
+      "docs": [
+        "printing-policies-faq.md"
+      ],
+      "facts": [
+        [
+          "curricular"
+        ],
+        [
+          "Print Services"
+        ]
+      ]
+    },
+    {
+      "id": "firebird-nodes",
+      "kind": "answerable",
+      "turns": [
+        "How many compute nodes does the Firebird cluster have?"
+      ],
+      "docs": [
+        "firebird-technical-specifications.md"
+      ],
+      "facts": [
+        [
+          "32"
+        ]
+      ]
+    },
+    {
+      "id": "firebird-account",
+      "kind": "answerable",
+      "turns": [
+        "What do I need to do to get an account on Firebird?"
+      ],
+      "docs": [
+        "requesting-an-account-on-firebird.md",
+        "firebird-computing-cluster.md"
+      ],
+      "facts": [
+        [
+          "ed25519"
+        ],
+        [
+          "SSH key",
+          "ssh key"
+        ]
+      ]
+    },
+    {
+      "id": "moodle-course-retention",
+      "kind": "answerable",
+      "turns": [
+        "How long does ITS keep old courses on the Moodle server?"
+      ],
+      "docs": [
+        "moodle-data-retention-policy.md"
+      ],
+      "facts": [
+        [
+          "7 years",
+          "seven years"
+        ]
+      ]
+    },
+    {
+      "id": "moodle-logs",
+      "kind": "answerable",
+      "turns": [
+        "How long are Moodle activity logs kept?"
+      ],
+      "docs": [
+        "moodle-data-retention-policy.md"
+      ],
+      "facts": [
+        [
+          "120 days"
+        ]
+      ]
+    },
+    {
+      "id": "phishing-report",
+      "kind": "answerable",
+      "turns": [
+        "I got a suspicious email asking for my password. Where should I forward it?"
+      ],
+      "docs": [
+        "phishing.md"
+      ],
+      "facts": [
+        [
+          "phishing@swarthmore.edu"
+        ]
+      ]
+    },
+    {
+      "id": "personal-laptop-repair",
+      "kind": "answerable",
+      "turns": [
+        "My personal laptop's screen is cracked. Can ITS repair it for me? I'm a student."
+      ],
+      "docs": [
+        "hardware-repair.md"
+      ],
+      "facts": [
+        [
+          "manufacturer"
+        ]
+      ]
+    },
+    {
+      "id": "dell-discount",
+      "kind": "answerable",
+      "turns": [
+        "How can I get a discount on a Dell laptop as a Swarthmore student?"
+      ],
+      "docs": [
+        "buying-a-computer.md"
+      ],
+      "facts": [
+        [
+          "dell.com/swarthmore",
+          "dell.com/Swarthmore"
+        ]
+      ]
+    },
+    {
+      "id": "matlab-online",
+      "kind": "answerable",
+      "turns": [
+        "Can I use MATLAB in a web browser without installing it?"
+      ],
+      "docs": [
+        "matlab.md"
+      ],
+      "facts": [
+        [
+          "matlab.mathworks.com"
+        ]
+      ]
+    },
+    {
+      "id": "linkedin-learning",
+      "kind": "answerable",
+      "turns": [
+        "How do I access LinkedIn Learning through Swarthmore?"
+      ],
+      "docs": [
+        "linkedin-learning.md"
+      ],
+      "facts": [
+        [
+          "linkedin.swarthmore.edu"
+        ]
+      ]
+    },
+    {
+      "id": "make-me-admin",
+      "kind": "answerable",
+      "turns": [
+        "How long does Make Me Admin give me administrator rights on a campus Windows computer?"
+      ],
+      "docs": [
+        "make-me-admin.md"
+      ],
+      "facts": [
+        [
+          "15 minutes",
+          "fifteen minutes"
+        ]
+      ]
+    },
+    {
+      "id": "zoom-participants",
+      "kind": "answerable",
+      "turns": [
+        "How many participants can a licensed Swarthmore Zoom account host?"
+      ],
+      "docs": [
+        "zoom-meeting.md"
+      ],
+      "facts": [
+        [
+          "300"
+        ]
+      ]
+    },
+    {
+      "id": "gemini-retention",
+      "kind": "answerable",
+      "turns": [
+        "How long does Google keep my Gemini chats when I use my Swarthmore account?"
+      ],
+      "docs": [
+        "google-gemini.md"
+      ],
+      "facts": [
+        [
+          "3 months",
+          "three months"
+        ]
+      ]
+    },
+    {
+      "id": "no-ethernet-dorms",
+      "kind": "answerable",
+      "turns": [
+        "Which residence halls have no wired ethernet?"
+      ],
+      "docs": [
+        "legacy-wired-ethernet-in-residence-halls.md"
+      ],
+      "facts": [
+        [
+          "Alice Paul"
+        ],
+        [
+          "Mertz"
+        ],
+        [
+          "Wharton"
+        ]
+      ]
+    },
+    {
+      "id": "dash-feedback",
+      "kind": "answerable",
+      "turns": [
+        "Where do I send feedback or suggestions about the Dash?"
+      ],
+      "docs": [
+        "the-dash.md"
+      ],
+      "facts": [
+        [
+          "dash@swarthmore.edu"
+        ]
+      ]
+    },
+    {
+      "id": "knowbe4-login",
+      "kind": "answerable",
+      "turns": [
+        "How do I log into the KnowBe4 security training?"
+      ],
+      "docs": [
+        "knowbe4.md"
+      ],
+      "facts": [
+        [
+          "swarthmore.edu/safeonline"
+        ]
+      ]
+    },
+    {
+      "id": "google-storage",
+      "kind": "answerable",
+      "turns": [
+        "Is there a storage limit on my Swarthmore Google account?"
+      ],
+      "docs": [
+        "preparing-for-graduation.md"
+      ],
+      "facts": [
+        [
+          "unlimited"
+        ]
+      ]
+    },
+    {
+      "id": "spring-classes-begin",
+      "kind": "answerable",
+      "turns": [
+        "When do classes begin for the spring 2027 semester?"
+      ],
+      "docs": [
+        "www/academics-2027-spring-semester.md"
+      ],
+      "facts": [
+        [
+          "January 19",
+          "Jan 19",
+          "Jan. 19",
+          "1/19"
+        ]
+      ]
+    },
+    {
+      "id": "spring-drop-add",
+      "kind": "answerable",
+      "turns": [
+        "When does drop/add end in spring 2027?"
+      ],
+      "docs": [
+        "www/academics-2027-spring-semester.md"
+      ],
+      "facts": [
+        [
+          "February 1",
+          "Feb 1",
+          "Feb. 1",
+          "2/1"
+        ]
+      ]
+    },
+    {
+      "id": "individualized-major",
+      "kind": "answerable",
+      "turns": [
+        "How many courses does an individualized (design your own) major usually require?"
+      ],
+      "docs": [
+        "www/academics-design-your-own-major.md"
+      ],
+      "facts": [
+        [
+          "10"
+        ],
+        [
+          "12"
+        ]
+      ]
+    },
+    {
+      "id": "mccabe-mile",
+      "kind": "answerable",
+      "turns": [
+        "How many laps do runners do in the McCabe Mile?"
+      ],
+      "docs": [
+        "www/campus-life-mccabe-mile.md"
+      ],
+      "facts": [
+        [
+          "18",
+          "eighteen"
+        ]
+      ]
+    },
+    {
+      "id": "troy-credits",
+      "kind": "answerable",
+      "turns": [
+        "How many credits is ANCH 013, In Search of Troy?"
+      ],
+      "docs": [
+        "catalog/anch-013-first-year-seminar-in-search-of-troy.md"
+      ],
+      "facts": [
+        [
+          "1 credit",
+          "one credit",
+          "1.0 credit",
+          "1-credit"
+        ]
+      ]
+    },
+    {
+      "id": "account-extension-research",
+      "kind": "answerable",
+      "turns": [
+        "I'm graduating but staying for summer research with a professor. How can my Swarthmore account be extended?"
+      ],
+      "docs": [
+        "extending-account-access.md"
+      ],
+      "facts": [
+        [
+          "Registrar"
+        ]
+      ]
+    },
+    {
+      "id": "tri-co",
+      "kind": "answerable",
+      "turns": [
+        "Which colleges are in the Tri-College Consortium with Swarthmore?"
+      ],
+      "docs": [
+        "www/academics-tri-college-consortium.md"
+      ],
+      "facts": [
+        [
+          "Bryn Mawr"
+        ],
+        [
+          "Haverford"
+        ]
+      ]
+    },
+    {
+      "id": "u-firebird-cost",
+      "kind": "unanswerable",
+      "turns": [
+        "How much does it cost per core-hour to run jobs on the Firebird cluster?"
+      ],
+      "docs": [],
+      "facts": []
+    },
+    {
+      "id": "u-its-budget",
+      "kind": "unanswerable",
+      "turns": [
+        "What is ITS's annual budget for 2026?"
+      ],
+      "docs": [],
+      "facts": []
+    },
+    {
+      "id": "u-turbotax",
+      "kind": "unanswerable",
+      "turns": [
+        "Does Swarthmore give students a free TurboTax license?"
+      ],
+      "docs": [],
+      "facts": []
+    },
+    {
+      "id": "u-windows12",
+      "kind": "unanswerable",
+      "turns": [
+        "When is ITS rolling out Windows 12 on campus computers?"
+      ],
+      "docs": [],
+      "facts": []
+    },
+    {
+      "id": "u-mccabe-aps",
+      "kind": "unanswerable",
+      "turns": [
+        "How many Wi-Fi access points are installed in McCabe Library?"
+      ],
+      "docs": [],
+      "facts": []
+    },
+    {
+      "id": "u-mccabe-mile-winner",
+      "kind": "unanswerable",
+      "turns": [
+        "Who won the McCabe Mile in 2026?"
+      ],
+      "docs": [],
+      "facts": []
+    },
+    {
+      "id": "u-firebird-pager",
+      "kind": "unanswerable",
+      "turns": [
+        "What's the after-hours emergency pager number for Firebird outages?"
+      ],
+      "docs": [],
+      "facts": []
+    },
+    {
+      "id": "u-zoom-license-cost",
+      "kind": "unanswerable",
+      "turns": [
+        "How much does Swarthmore pay per year for its Zoom license?"
+      ],
+      "docs": [],
+      "facts": []
+    },
+    {
+      "id": "u-spotify",
+      "kind": "unanswerable",
+      "turns": [
+        "Does ITS offer free Spotify Premium to students?"
+      ],
+      "docs": [],
+      "facts": []
+    },
+    {
+      "id": "u-helpdesk-tickets",
+      "kind": "unanswerable",
+      "turns": [
+        "How many tickets does the ITS Help Desk resolve each year?"
+      ],
+      "docs": [],
+      "facts": []
+    },
+    {
+      "id": "f-helpdesk-friday",
+      "kind": "followup",
+      "turns": [
+        "What are the in-person hours at the Clothier Hall Help Desk?",
+        "what about on Fridays?"
+      ],
+      "docs": [
+        "help-desk-hours-of-operation.md"
+      ],
+      "facts": [
+        [
+          "9:30"
+        ],
+        [
+          "12:30"
+        ]
+      ]
+    },
+    {
+      "id": "f-swatguest-duration",
+      "kind": "followup",
+      "turns": [
+        "How can a visitor get on the Swarthmore Wi-Fi?",
+        "how long does that account last?"
+      ],
+      "docs": [
+        "self-service-guest-wireless.md"
+      ],
+      "facts": [
+        [
+          "4 days",
+          "four days"
+        ]
+      ]
+    },
+    {
+      "id": "f-firebird-gpus",
+      "kind": "followup",
+      "turns": [
+        "Tell me about the Firebird computing cluster.",
+        "how many GPUs does it have?"
+      ],
+      "docs": [
+        "firebird-technical-specifications.md"
+      ],
+      "facts": [
+        [
+          "19"
+        ]
+      ]
+    },
+    {
+      "id": "f-moodle-backups",
+      "kind": "followup",
+      "turns": [
+        "What is the Moodle data retention policy?",
+        "and how long are the backup files kept?"
+      ],
+      "docs": [
+        "moodle-data-retention-policy.md"
+      ],
+      "facts": [
+        [
+          "10 years",
+          "ten years"
+        ]
+      ]
+    },
+    {
+      "id": "f-panopto-deletion",
+      "kind": "followup",
+      "turns": [
+        "What's the Panopto retention policy?",
+        "when do archived videos get deleted?"
+      ],
+      "docs": [
+        "panopto-retention-policy.md"
+      ],
+      "facts": [
+        [
+          "July 1"
+        ]
+      ]
+    }
+  ]
+}
