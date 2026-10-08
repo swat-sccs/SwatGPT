@@ -11,7 +11,7 @@ interface:
   bookmarks: false
   memories: false
   projects: true
-  temporaryChat: true
+  temporaryChat: false
   runCode: false
   webSearch: false
   fileSearch: false
