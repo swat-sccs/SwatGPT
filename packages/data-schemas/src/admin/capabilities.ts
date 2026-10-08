@@ -56,6 +56,22 @@ export const SystemCapabilities = {
 /** Base capabilities derived from the SystemCapabilities constant. */
 export type BaseSystemCapability = (typeof SystemCapabilities)[keyof typeof SystemCapabilities];
 
+/**
+ * Capabilities that disclose student conversations or pull operational levers. They stay
+ * out of the boot-time ADMIN seed so a revocation is not silently re-inserted on the next
+ * restart; grant them through the audit-logged grants API instead.
+ */
+export const OVERSIGHT_CAPABILITIES: ReadonlySet<BaseSystemCapability> = new Set([
+  SystemCapabilities.READ_CONVERSATIONS,
+  SystemCapabilities.EXPORT_CONVERSATIONS,
+  SystemCapabilities.MANAGE_CONTROLS,
+]);
+
+/** Base capabilities the startup seed upserts onto the ADMIN role. */
+export const ADMIN_SEED_CAPABILITIES: readonly BaseSystemCapability[] = Object.values(
+  SystemCapabilities,
+).filter((capability) => !OVERSIGHT_CAPABILITIES.has(capability));
+
 /** Principal types that can receive config overrides. */
 export type ConfigAssignTarget = 'user' | 'group' | 'role';
 
