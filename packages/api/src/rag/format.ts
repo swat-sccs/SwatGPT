@@ -29,9 +29,15 @@ const NO_MATCH_NOTE = [
   'For Swarthmore-specific details that a tool result does not provide, say you could not find them and point to the relevant campus office instead of answering from memory.',
 ].join('\n\n');
 
+const UNAVAILABLE_NOTE = [
+  CONTEXT_HEADING,
+  'The knowledge-base lookup was unavailable for this message.',
+  'Do not present Swarthmore-specific details from memory as confirmed; use a tool result if one applies, otherwise say you could not check and point to the relevant campus office.',
+].join('\n\n');
+
 /**
  * Note injected in place of KB context when retrieval ran for a real question but
- * produced no entries, so the model does not treat silence as license to guess.
+ * produced no entries or failed, so the model does not treat silence as license to guess.
  */
 export function formatRetrievalNote(result: KbRetrievalResult, query: string): string | undefined {
   if (!query.trim()) {
@@ -39,6 +45,9 @@ export function formatRetrievalNote(result: KbRetrievalResult, query: string): s
   }
   if (result === 'empty') {
     return NO_MATCH_NOTE;
+  }
+  if (result === 'timeout' || result === 'error') {
+    return UNAVAILABLE_NOTE;
   }
   return undefined;
 }

@@ -40,6 +40,11 @@ describe('formatRetrievalNote', () => {
     );
   });
 
+  it('warns that the lookup was unavailable on timeout or error', () => {
+    expect(formatRetrievalNote('timeout', 'question')).toContain('lookup was unavailable');
+    expect(formatRetrievalNote('error', 'question')).toContain('lookup was unavailable');
+  });
+
   it('adds nothing for hits, disabled retrieval, or an empty question', () => {
     expect(formatRetrievalNote('hit', 'question')).toBeUndefined();
     expect(formatRetrievalNote('disabled', 'question')).toBeUndefined();
