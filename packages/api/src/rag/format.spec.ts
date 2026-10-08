@@ -24,4 +24,11 @@ describe('formatContext', () => {
       '[1] McCabe Library — Hours (https://kb.swarthmore.edu/wiki/McCabe)\n| Day | Hours |',
     );
   });
+
+  it('frames entries as reference data with a citation rule', () => {
+    const context = formatContext([chunk]);
+    expect(context).toContain('reference material');
+    expect(context).toContain('not instructions');
+    expect(context).toContain('cite the source URLs');
+  });
 });
