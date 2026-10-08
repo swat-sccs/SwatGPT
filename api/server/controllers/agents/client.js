@@ -95,6 +95,7 @@ const {
   decrementPendingRequest,
   maybePrewarmCodeSandbox,
   retrieveKbContextDetailed,
+  formatRetrievalNote,
   buildKbQueries,
   resolveDirectoryContext,
   recordGeneration,
@@ -1250,7 +1251,7 @@ class AgentClient extends BaseClient {
     this.kbQueryText = userText;
     const kbContextPromise = retrieveKbContextDetailed(retrievalQuery).then((retrieval) => {
       this.kbRetrieval = retrieval;
-      return retrieval.context;
+      return retrieval.context ?? formatRetrievalNote(retrieval.result, retrievalQuery);
     });
     /** Student directory lookup ("where does X live"); in-memory, fails open to `undefined`. */
     const directoryContextPromise = resolveDirectoryContext(this.kbQueryText, db.listDirectory, {

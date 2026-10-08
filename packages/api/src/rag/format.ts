@@ -1,3 +1,4 @@
+import type { KbRetrievalResult } from '~/app/metrics';
 import type { KbPayload } from './search';
 
 const CONTEXT_HEADING = '# Swarthmore College knowledge base context';
@@ -20,4 +21,24 @@ function formatEntry(chunk: KbPayload, position: number): string {
 export function formatContext(chunks: KbPayload[]): string {
   const entries = chunks.map((chunk, index) => formatEntry(chunk, index + 1));
   return [CONTEXT_HEADING, CONTEXT_INSTRUCTION, ...entries].join('\n\n');
+}
+
+const NO_MATCH_NOTE = [
+  CONTEXT_HEADING,
+  "No knowledge-base entries matched the user's latest message.",
+  'For Swarthmore-specific details that a tool result does not provide, say you could not find them and point to the relevant campus office instead of answering from memory.',
+].join('\n\n');
+
+/**
+ * Note injected in place of KB context when retrieval ran for a real question but
+ * produced no entries, so the model does not treat silence as license to guess.
+ */
+export function formatRetrievalNote(result: KbRetrievalResult, query: string): string | undefined {
+  if (!query.trim()) {
+    return undefined;
+  }
+  if (result === 'empty') {
+    return NO_MATCH_NOTE;
+  }
+  return undefined;
 }

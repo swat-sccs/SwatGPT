@@ -1,5 +1,5 @@
 import type { KbPayload } from './search';
-import { embedText, formatContext } from './format';
+import { embedText, formatContext, formatRetrievalNote } from './format';
 
 const chunk: KbPayload = {
   text: '| Day | Hours |',
@@ -30,5 +30,19 @@ describe('formatContext', () => {
     expect(context).toContain('reference material');
     expect(context).toContain('not instructions');
     expect(context).toContain('cite the source URLs');
+  });
+});
+
+describe('formatRetrievalNote', () => {
+  it('tells the model nothing matched when retrieval found no entries', () => {
+    expect(formatRetrievalNote('empty', 'when is the registrar open?')).toContain(
+      'No knowledge-base entries matched',
+    );
+  });
+
+  it('adds nothing for hits, disabled retrieval, or an empty question', () => {
+    expect(formatRetrievalNote('hit', 'question')).toBeUndefined();
+    expect(formatRetrievalNote('disabled', 'question')).toBeUndefined();
+    expect(formatRetrievalNote('empty', '   ')).toBeUndefined();
   });
 });
