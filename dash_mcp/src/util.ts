@@ -108,8 +108,13 @@ export function currentCampusDate(now = new Date()): string {
 }
 
 function campusMidnight(date: string): Date {
+  return campusWallTime(date, 0, 0);
+}
+
+/** The instant a campus (America/New_York) wall clock reads `hour:minute` on `date` (YYYY-MM-DD). */
+export function campusWallTime(date: string, hour: number, minute: number): Date {
   const [year, month, day] = date.split('-').map(Number) as [number, number, number];
-  const guess = Date.UTC(year, month - 1, day, 0, 0, 0);
+  const guess = Date.UTC(year, month - 1, day, hour, minute, 0);
   const formatter = new Intl.DateTimeFormat('en-US', {
     timeZone: 'America/New_York', hour12: false, year: 'numeric', month: '2-digit', day: '2-digit',
     hour: '2-digit', minute: '2-digit', second: '2-digit',

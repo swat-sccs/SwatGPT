@@ -5,7 +5,7 @@ import type {
 } from './types.js';
 import { transitStations } from './types.js';
 import {
-  asObject, asObjects, campusDayRange, cleanText, currentCampusDate, fuzzyMatch,
+  asObject, asObjects, campusDayRange, campusWallTime, cleanText, currentCampusDate, fuzzyMatch,
   log, normalizeRawRecord, toPublicRecord, withoutTypename,
 } from './util.js';
 import { campusHoursAliasesFor, campusHoursPlaceMatches } from './hoursAliases.js';
@@ -21,8 +21,25 @@ export const TRANSIT_PAIRS: ReadonlyArray<{ origin: TransitStation; destination:
   (origin) => transitStations.filter((destination) => destination !== origin).map((destination) => ({ origin, destination })),
 );
 
+/** Days ahead the scheduled content poll keeps in the events snapshot. */
+export const EVENTS_POLL_DAYS = 30;
+/** Furthest ahead the Dash `CampusEvents` query can list. */
+const EVENTS_MAX_DAYS = 365;
+const EVENTS_SOURCE = 'SwatCentral';
+const DAY_MS = 86_400_000;
+const HALF_DAY_MS = DAY_MS / 2;
+/** A departure this recent is still shown, since trains rarely leave on the exact minute. */
+const DEPARTURE_GRACE_MS = 60_000;
+
 type DiningInput = { location?: string; date?: string; meal?: string; query?: string; limit?: number };
 type DiningFilters = { meal?: string; query?: string };
+type HoursInput = { place?: string; category?: string; date?: string; limit?: number };
+type EventsInput = { query?: string; start?: string; end?: string; limit?: number };
+type PersistOptions = { window?: TimeWindow; exhaustive?: boolean };
+type EventsCoverage =
+  | { kind: 'covered'; warning?: string }
+  | { kind: 'past'; warning: string }
+  | { kind: 'live'; days: number; warning?: string };
 
 export class SwatService {
   constructor(
@@ -64,7 +81,7 @@ export class SwatService {
       ]);
       const records: NormalizedRecord[] = [];
       const criticalData = asObject(asObject(critical)?.data);
-      if (criticalData && criticalData.showMessage !== false) records.push(normalizeRawRecord('alerts', 'critical-announcement', criticalData));
+      if (criticalData && isShown(criticalData.showMessage)) records.push(normalizeRawRecord('alerts', 'critical-announcement', criticalData));
       for (const announcement of registry.appAnnouncements) {
         if (announcement.status === false) continue;
         records.push(normalizeRawRecord('alerts', 'app-announcement', {
@@ -83,7 +100,7 @@ export class SwatService {
           domain: 'alerts' as const,
           source: cleanText(asObject(calendar)?.calendarName, 300) ?? `announcement-calendar-${index + 1}`,
         })),
-      ]);
+      ], { exhaustive: true });
       return makeResult(records.map(toPublicRecord), fetchedAt, records.map((item) => item.source), limit);
     } catch (error) {
       if (refresh) throw error;
@@ -102,7 +119,8 @@ export class SwatService {
     }
     try {
       const raw = await this.client.query<unknown>('Weather', queries.weather);
-      const data = asObject(asObject(raw)?.data) ?? {};
+      const data = asObject(asObject(raw)?.data);
+      if (!data) throw new Error('Dash weather result.data was not an object');
       const current = asObject(data.current);
       const forecast = asObjects(data.forecast).slice(0, days);
       const item = withoutTypename({ created: data.created, location: data.location, current, forecast }) as JsonObject;
@@ -116,87 +134,88 @@ export class SwatService {
     }
   }
 
-  async getHours(input: { place?: string; category?: string; date?: string; limit?: number }, refresh = false): Promise<FeedResult<JsonObject>> {
+  async getHours(input: HoursInput, refresh = false): Promise<FeedResult<JsonObject>> {
     const fetchedAt = new Date();
     const limit = input.limit ?? 30;
-    const resolvedDate = input.date ?? currentCampusDate();
-    if (!refresh) {
-      const range = campusDayRange(resolvedDate);
-      const cached = await this.cachedRecords('hours', limit, fetchedAt, (item) =>
-        campusHoursPlaceMatches(JSON.stringify(item), input.place) &&
-        fuzzyMatch(JSON.stringify(item), input.category) &&
-        recordOverlapsRange(item, new Date(range.start), new Date(range.end)),
-      this.config.contentPollMs);
+    const resolvedDate = input.date ?? currentCampusDate(fetchedAt);
+    const range = campusDayRange(resolvedDate);
+    if (refresh) {
+      const exhaustive = !input.place && !input.category;
+      return withHoursQueryMeta(await this.fetchHours(input, limit, fetchedAt, range, { exhaustive }), resolvedDate, input);
+    }
 
-      if (cached.items.length && !cached.meta.stale) {
-        return withHoursQueryMeta(cached, resolvedDate, input);
-      }
-      try {
-        const elapsedMs = Date.now() - fetchedAt.getTime();
-        const liveBudgetMs = Math.max(250, this.config.mcpToolTimeoutMs - elapsedMs - 500);
-        const live = await withDeadline(
-          this.getHours({ ...input, date: resolvedDate }, true),
-          liveBudgetMs,
-          `Live Dash campus-hours lookup exceeded ${liveBudgetMs}ms`,
-        );
-        return withHoursQueryMeta(live, resolvedDate, input);
-      } catch (error) {
-        if (cached.items.length) {
-          return withHoursQueryMeta(
-            makeStaleResult(cached.items, fetchedAt, cached.meta.source, cached.meta.data_as_of, error),
-            resolvedDate,
-            input,
-          );
-        }
-        return withHoursQueryMeta(makeUnavailableResult(
-          fetchedAt,
-          'hours',
-          `No matching cached campus-hours data is available and the live Dash lookup failed: ${error instanceof Error ? error.message : String(error)}`,
-        ), resolvedDate, input);
-      }
-    }
+    const polled = resolvedDate === currentCampusDate(fetchedAt);
+    const cached = await this.cachedRecords('hours', limit, fetchedAt, (item) =>
+      campusHoursPlaceMatches(JSON.stringify(item), input.place) &&
+      fuzzyMatch(JSON.stringify(item), input.category) &&
+      recordOverlapsRange(item, new Date(range.start), new Date(range.end)),
+    this.config.contentPollMs);
+    if (polled && cached.items.length && !cached.meta.stale) return withHoursQueryMeta(cached, resolvedDate, input);
+
     try {
-      const range = campusDayRange(resolvedDate);
-      let registry: DashboardRegistry;
-      try {
-        registry = this.registry();
-      } catch {
-        registry = await this.discovery.load();
-      }
-      const sources = registry.hours.filter((source) =>
-        campusHoursPlaceMatches(source.place, input.place) && fuzzyMatch(source.category ?? '', input.category),
+      const live = await this.withinToolBudget(
+        fetchedAt,
+        'hours',
+        this.fetchHours(input, limit, new Date(), range, { window: range }),
       );
-      const records = (await Promise.all(sources.map(async (source) => {
-        const query = source.kind === 'libcal' ? queries.libcal : source.kind === 'cbord' ? queries.cbord : queries.calendar;
-        const operation = source.kind === 'libcal' ? 'LibraryCalendar' : source.kind === 'cbord' ? 'DiningMenu' : 'Calendar';
-        const raw = await this.client.query<unknown>(operation, query, {
-          calendarId: source.sourceId, order: 'ASC', timeMin: range.start, timeMax: range.end, maxResults: 50,
-        });
-        const events = resultData(raw).map((item) => normalizeRawRecord('hours', source.place, {
-          ...item, campus_place: source.place, campus_category: source.category,
-          campus_aliases: campusHoursAliasesFor(source.place),
-          additional_info_url: source.additionalInfoUrl, location_text: source.locationText,
-          location_url: source.locationUrl, hours_announcement: source.announcement, hours_override: source.override,
-        }, { category: source.category, location: source.locationText }));
-        if (!events.length && (source.announcement || source.override)) {
-          events.push(normalizeRawRecord('hours', source.place, {
-            id: `configuration-${source.sourceId}`, title: source.place, description: source.announcement,
-            campus_category: source.category, campus_aliases: campusHoursAliasesFor(source.place),
-            hours_override: source.override,
-          }, { category: source.category, location: source.locationText }));
-        }
-        return events;
-      }))).flat();
-      await this.persist(records, sources.map((source) => ({ domain: 'hours', source: source.place })));
-      return withHoursQueryMeta(
-        makeResult(records.map(toPublicRecord), fetchedAt, sources.map((source) => source.place), limit),
-        resolvedDate,
-        input,
-      );
+      return withHoursQueryMeta(live, resolvedDate, input);
     } catch (error) {
-      if (refresh) throw error;
-      return this.recordsFallback('hours', limit, fetchedAt, error, input.place ?? input.category);
+      const coverage = polled ? undefined : `Campus hours for ${resolvedDate} are outside the synced snapshot (today only).`;
+      if (cached.items.length) {
+        return withHoursQueryMeta(
+          makeStaleResult(cached.items, fetchedAt, cached.meta.source, cached.meta.data_as_of, error, coverage),
+          resolvedDate,
+          input,
+        );
+      }
+      return withHoursQueryMeta(makeUnavailableResult(
+        fetchedAt,
+        'hours',
+        [coverage, `No matching cached campus-hours data is available and the live Dash lookup failed: ${errorMessage(error)}`]
+          .filter(Boolean).join(' '),
+      ), resolvedDate, input);
     }
+  }
+
+  /**
+   * Fetches one campus day of hours for the matching registry places and persists it.
+   * The scheduled poll replaces each place's rows; a read-through passes `window` so
+   * only that day is retired and today's polled snapshot stays cached.
+   */
+  private async fetchHours(
+    input: HoursInput,
+    limit: number,
+    fetchedAt: Date,
+    range: TimeWindow,
+    persistOptions: PersistOptions,
+  ): Promise<FeedResult<JsonObject>> {
+    const registry = await this.loadedRegistry();
+    const sources = registry.hours.filter((source) =>
+      campusHoursPlaceMatches(source.place, input.place) && fuzzyMatch(source.category ?? '', input.category),
+    );
+    const records = (await Promise.all(sources.map(async (source) => {
+      const query = source.kind === 'libcal' ? queries.libcal : source.kind === 'cbord' ? queries.cbord : queries.calendar;
+      const operation = source.kind === 'libcal' ? 'LibraryCalendar' : source.kind === 'cbord' ? 'DiningMenu' : 'Calendar';
+      const raw = await this.client.query<unknown>(operation, query, {
+        calendarId: source.sourceId, order: 'ASC', timeMin: range.start, timeMax: range.end, maxResults: 50,
+      });
+      const events = resultData(raw).map((item) => normalizeRawRecord('hours', source.place, {
+        ...item, campus_place: source.place, campus_category: source.category,
+        campus_aliases: campusHoursAliasesFor(source.place),
+        additional_info_url: source.additionalInfoUrl, location_text: source.locationText,
+        location_url: source.locationUrl, hours_announcement: source.announcement, hours_override: source.override,
+      }, { category: source.category, location: source.locationText }));
+      if (!events.length && (source.announcement || source.override)) {
+        events.push(normalizeRawRecord('hours', source.place, {
+          id: `configuration-${source.sourceId}`, title: source.place, description: source.announcement,
+          campus_category: source.category, campus_aliases: campusHoursAliasesFor(source.place),
+          hours_override: source.override,
+        }, { category: source.category, location: source.locationText }));
+      }
+      return events;
+    }))).flat();
+    await this.persist(records, sources.map((source) => ({ domain: 'hours', source: source.place })), persistOptions);
+    return makeResult(records.map(toPublicRecord), fetchedAt, sources.map((source) => source.place), limit);
   }
 
   async getDining(input: DiningInput, refresh = false): Promise<FeedResult<JsonObject>> {
@@ -247,12 +266,7 @@ export class SwatService {
     range: TimeWindow,
     persistWindow?: TimeWindow,
   ): Promise<FeedResult<JsonObject>> {
-    let registry: DashboardRegistry;
-    try {
-      registry = this.registry();
-    } catch {
-      registry = await this.discovery.load();
-    }
+    const registry = await this.loadedRegistry();
     const sources = registry.dining.filter((source) =>
       diningLocationMatches(`${source.location} ${source.sourceId} ${source.labels.join(' ')}`, input.location),
     );
@@ -266,36 +280,52 @@ export class SwatService {
         ...item, dining_location: source.location, dining_labels: source.labels,
       }, { location: source.location }));
     }))).flat();
-    await this.persist(records, sources.map((source) => ({ domain: 'dining', source: source.location })), persistWindow);
+    await this.persist(records, sources.map((source) => ({ domain: 'dining', source: source.location })), {
+      window: persistWindow,
+      exhaustive: !persistWindow && !input.location,
+    });
     if (filters.meal) records = records.filter((record) => fuzzyMatch(`${record.title} ${record.description ?? ''}`, filters.meal));
     if (filters.query) records = records.filter((record) => fuzzyMatch(record.searchText, filters.query));
     return makeResult(records.map(toPublicRecord), fetchedAt, sources.map((source) => source.location), limit);
   }
 
-  async searchEvents(input: { query?: string; start?: string; end?: string; limit?: number }, refresh = false): Promise<FeedResult<JsonObject>> {
+  async searchEvents(input: EventsInput, refresh = false): Promise<FeedResult<JsonObject>> {
     const fetchedAt = new Date();
     const limit = input.limit ?? 20;
-    if (!refresh) {
-      const start = input.start ? new Date(campusDayRange(input.start).start) : fetchedAt;
-      const end = input.end ? new Date(campusDayRange(input.end).end) : new Date(start.getTime() + 30 * 86_400_000);
-      return this.cachedRecords('events', limit, fetchedAt, (item) =>
-        fuzzyMatch(JSON.stringify(item), input.query) && recordOverlapsRange(item, start, end),
-      this.config.contentPollMs);
+    const start = input.start ? new Date(campusDayRange(input.start).start) : fetchedAt;
+    const end = input.end ? new Date(campusDayRange(input.end).end) : new Date(start.getTime() + EVENTS_POLL_DAYS * DAY_MS);
+    if (refresh) {
+      const records = await this.fetchEvents(EVENTS_POLL_DAYS);
+      await this.persist(records, [{ domain: 'events', source: EVENTS_SOURCE }], { exhaustive: true });
+      return makeResult(filterEvents(records, start, end, input.query).map(toPublicRecord), fetchedAt, [EVENTS_SOURCE], limit);
     }
+
+    const cached = await this.cachedRecords('events', limit, fetchedAt, (item) =>
+      fuzzyMatch(JSON.stringify(item), input.query) && recordOverlapsRange(item, start, end),
+    this.config.contentPollMs);
+    const coverage = eventsCoverage(input, start, end, fetchedAt, cached.meta.data_as_of);
+    if (coverage.kind === 'covered') return withWarning(cached, coverage.warning);
+    if (coverage.kind === 'past') return { ...cached, meta: { ...cached.meta, stale: true, warning: coverage.warning } };
+
     try {
-      const start = input.start ? new Date(campusDayRange(input.start).start) : fetchedAt;
-      const end = input.end ? new Date(campusDayRange(input.end).end) : new Date(start.getTime() + 30 * 86_400_000);
-      const days = Math.max(1, Math.min(365, Math.ceil((end.getTime() - fetchedAt.getTime()) / 86_400_000)));
-      const raw = await this.client.query<unknown>('CampusEvents', queries.events, { currentOnly: false, days });
-      let records = resultData(raw).map((item) => normalizeRawRecord('events', 'SwatCentral', item));
-      await this.persist(records, [{ domain: 'events', source: 'SwatCentral' }]);
-      records = filterRange(records, start, end);
-      if (input.query) records = records.filter((record) => fuzzyMatch(record.searchText, input.query));
-      return makeResult(records.map(toPublicRecord), fetchedAt, ['SwatCentral'], limit);
+      const records = await this.withinToolBudget(fetchedAt, 'events', this.fetchEvents(coverage.days));
+      return withWarning(
+        makeResult(filterEvents(records, start, end, input.query).map(toPublicRecord), fetchedAt, [EVENTS_SOURCE], limit),
+        coverage.warning,
+      );
     } catch (error) {
-      if (refresh) throw error;
-      return this.recordsFallback('events', limit, fetchedAt, error, input.query);
+      const outside = `The requested events window is outside the synced snapshot (today through the next ${EVENTS_POLL_DAYS} days).`;
+      if (cached.items.length) {
+        return makeStaleResult(cached.items, fetchedAt, cached.meta.source, cached.meta.data_as_of, error, outside);
+      }
+      return makeUnavailableResult(fetchedAt, 'events', `${outside} The live Dash lookup failed: ${errorMessage(error)}`);
     }
+  }
+
+  /** Reads SwatCentral events from now through `days` ahead; the Dash query has no start bound. */
+  private async fetchEvents(days: number): Promise<NormalizedRecord[]> {
+    const raw = await this.client.query<unknown>('CampusEvents', queries.events, { currentOnly: false, days });
+    return resultData(raw).map((item) => normalizeRawRecord('events', EVENTS_SOURCE, item));
   }
 
   async searchNews(input: { query?: string; source?: string; publishedAfter?: string; publishedBefore?: string; limit?: number }, refresh = false): Promise<FeedResult<JsonObject>> {
@@ -323,7 +353,11 @@ export class SwatService {
         prevDaysToQuery: prevDays,
       });
       let records = resultData(raw).map((item) => normalizeRawRecord('news', cleanText(item.source, 300) ?? 'Around Campus', item));
-      await this.persist(records, registry.news.map((source) => ({ domain: 'news', source: source.title })));
+      await this.persist(
+        records,
+        registry.news.map((source) => ({ domain: 'news', source: source.title })),
+        { exhaustive: !input.publishedAfter },
+      );
       if (input.query) records = records.filter((record) => fuzzyMatch(record.searchText, input.query));
       if (input.source) records = records.filter((record) => fuzzyMatch(record.source, input.source));
       if (input.publishedAfter) {
@@ -349,18 +383,18 @@ export class SwatService {
     const source = `${input.origin}->${input.destination}`;
     if (!refresh) {
       const cached = await this.store.latestObservation('transit', source);
-      if (cached) {
-        const items = Array.isArray(cached.payload.departures) ? cached.payload.departures as JsonObject[] : [cached.payload];
-        return makeCachedResult(items, fetchedAt, [source], cached.observed_at, this.config.realtimePollMs, limit);
+      const departures = cached ? cachedDepartures(cached.payload) : [];
+      const upcoming = cached ? upcomingDepartures(departures, new Date(cached.observed_at), fetchedAt) : [];
+      if (cached && (upcoming.length || !departures.length)) {
+        return makeCachedResult(upcoming, fetchedAt, [source], cached.observed_at, this.config.realtimePollMs, limit);
       }
       try {
         return await this.withinToolBudget(fetchedAt, 'transit', this.getTransit(input, true));
       } catch (error) {
-        return makeUnavailableResult(
-          fetchedAt,
-          'transit',
-          `No cached transit data is available for ${source} and the live Dash lookup failed: ${error instanceof Error ? error.message : String(error)}`,
-        );
+        const reason = cached
+          ? `Every cached departure for ${source} has already left`
+          : `No cached transit data is available for ${source}`;
+        return makeUnavailableResult(fetchedAt, 'transit', `${reason} and the live Dash lookup failed: ${errorMessage(error)}`);
       }
     }
     const raw = await this.client.query<unknown>('Transit', queries.transit, {
@@ -389,7 +423,7 @@ export class SwatService {
     try {
       const raw = await this.client.query<unknown>('Sports', queries.sports, { count: 100 });
       let records = resultData(raw).map((item) => normalizeRawRecord('sports', 'Swarthmore Athletics', item));
-      await this.persist(records, [{ domain: 'sports', source: 'Swarthmore Athletics' }]);
+      await this.persist(records, [{ domain: 'sports', source: 'Swarthmore Athletics' }], { exhaustive: true });
       if (input.sport) records = records.filter((record) => fuzzyMatch(String(record.payload.sport_title ?? record.title), input.sport));
       if (input.gender) records = records.filter((record) => fuzzyMatch(String(record.payload.gender ?? ''), input.gender));
       if (input.start || input.end) records = filterRange(
@@ -410,7 +444,7 @@ export class SwatService {
     try {
       const raw = await this.client.query<unknown>('MindCandy', queries.mindCandy, { maxResults: 10 });
       const records = resultData(raw).map((item) => normalizeRawRecord('mind_candy', 'The Dash', item));
-      await this.persist(records, [{ domain: 'mind_candy', source: 'The Dash' }]);
+      await this.persist(records, [{ domain: 'mind_candy', source: 'The Dash' }], { exhaustive: true });
       return makeResult(records.map(toPublicRecord), fetchedAt, ['The Dash'], 10);
     } catch (error) {
       if (refresh) throw error;
@@ -430,7 +464,11 @@ export class SwatService {
         const title = cleanText(header?.processed ?? header?.value ?? object.title, 500) ?? `${resource.section} resource ${index + 1}`;
         return normalizeRawRecord('resources', resource.section, { ...object, id: object.id ?? `${resource.section}-${index}`, title });
       }));
-      await this.persist(records, selected.map((resource) => ({ domain: 'resources', source: resource.section })));
+      await this.persist(
+        records,
+        selected.map((resource) => ({ domain: 'resources', source: resource.section })),
+        { exhaustive: !section },
+      );
       return makeResult(records.map(toPublicRecord), fetchedAt, selected.map((item) => item.section), limit);
     } catch (error) {
       if (refresh) throw error;
@@ -461,6 +499,15 @@ export class SwatService {
     return makeResult(items, fetchedAt, ['SwatGPT sync history'], 50);
   }
 
+  /** Daily retention: high-frequency observations, sync history, and (when configured) record history. */
+  async pruneHistory(): Promise<void> {
+    const { store, config } = this;
+    const observations = await store.pruneObservations(config.observationRetentionDays);
+    const syncRuns = await store.pruneSyncRuns(config.syncRunRetentionDays);
+    const archive = config.archiveRetentionDays > 0 ? await store.pruneArchive(config.archiveRetentionDays) : undefined;
+    log('info', 'Pruned stored history', { observations, syncRuns, ...archive });
+  }
+
   async syncRealtime(): Promise<void> {
     assertPollResults(await Promise.allSettled([
       this.getWeather(7, true),
@@ -484,10 +531,23 @@ export class SwatService {
     return withDeadline(task, budgetMs, `Live Dash ${domain} lookup exceeded ${budgetMs}ms`);
   }
 
+  private async loadedRegistry(): Promise<DashboardRegistry> {
+    try {
+      return this.registry();
+    } catch {
+      return this.discovery.load();
+    }
+  }
+
+  /**
+   * Replaces each fetched source's active rows (only inside `window` when given). An
+   * `exhaustive` poll read the whole domain, so it also retires sources that were not
+   * returned at all, unless upstream returned nothing, which is treated as a transient gap.
+   */
   private async persist(
     records: NormalizedRecord[],
     expectedSources: Array<{ domain: Domain; source: string }> = [],
-    window?: TimeWindow,
+    { window, exhaustive = false }: PersistOptions = {},
   ): Promise<void> {
     const grouped = new Map<string, NormalizedRecord[]>();
     const sourceInfo = new Map<string, { domain: Domain; source: string }>();
@@ -498,12 +558,21 @@ export class SwatService {
     }
     for (const record of records) {
       const key = `${record.domain}\0${record.source}`;
-      grouped.set(key, [...(grouped.get(key) ?? []), record]);
+      const group = grouped.get(key);
+      if (group) group.push(record);
+      else grouped.set(key, [record]);
       sourceInfo.set(key, { domain: record.domain, source: record.source });
     }
     await Promise.all([...grouped.entries()].map(([key, items]) => {
       const source = sourceInfo.get(key)!;
       return this.store.replaceSourceRecords(source.domain, source.source, items, undefined, window);
+    }));
+    if (!exhaustive || window || !records.length) return;
+    const keep = new Map<Domain, string[]>();
+    for (const { domain, source } of sourceInfo.values()) keep.set(domain, [...(keep.get(domain) ?? []), source]);
+    await Promise.all([...keep.entries()].map(async ([domain, sources]) => {
+      const retired = await this.store.deactivateMissingSources(domain, sources);
+      if (retired) log('info', 'Retired records from sources no longer returned upstream', { domain, retired });
     }));
   }
 
@@ -627,12 +696,95 @@ function makeUnavailableResult(fetchedAt: Date, domain: Domain, warning?: string
   } };
 }
 
-function makeStaleResult<T>(items: T[], fetchedAt: Date, sources: string[], dataAsOf: string, error: unknown): FeedResult<T> {
+function makeStaleResult<T>(
+  items: T[],
+  fetchedAt: Date,
+  sources: string[],
+  dataAsOf: string,
+  error: unknown,
+  context?: string,
+): FeedResult<T> {
   return { items, meta: {
     source: sources, fetched_at: fetchedAt.toISOString(), data_as_of: dataAsOf, stale: true,
     total: items.length, returned: items.length, truncated: false,
-    warning: `Live Dash request failed; returning archived data: ${error instanceof Error ? error.message : String(error)}`,
+    warning: [context, `Live Dash request failed; returning archived data: ${errorMessage(error)}`].filter(Boolean).join(' '),
   } };
+}
+
+function withWarning<T>(result: FeedResult<T>, warning?: string): FeedResult<T> {
+  if (!warning) return result;
+  return { ...result, meta: { ...result.meta, warning: [result.meta.warning, warning].filter(Boolean).join(' ') } };
+}
+
+function errorMessage(error: unknown): string {
+  return error instanceof Error ? error.message : String(error);
+}
+
+/** The Dash sends `campusmessageon` as 0/1 (sometimes as a boolean or string). */
+function isShown(value: unknown): boolean {
+  return value === true || value === 1 || value === '1' || value === 'true';
+}
+
+/**
+ * Decides whether the polled events snapshot can answer [start, end]. The poll keeps today
+ * through EVENTS_POLL_DAYS after its last run; later windows need a live read and earlier
+ * days are only in the archive.
+ */
+function eventsCoverage(input: EventsInput, start: Date, end: Date, fetchedAt: Date, dataAsOf: string): EventsCoverage {
+  const today = currentCampusDate(fetchedAt);
+  const todayStart = new Date(campusDayRange(today).start);
+  const pastWarning = `Events before ${today} are not in SwatGPT's upcoming-events snapshot; use search_archive for past events.`;
+  if (end <= todayStart) return { kind: 'past', warning: pastWarning };
+  const partialPast = start < todayStart ? pastWarning : undefined;
+  const snapshotAt = new Date(dataAsOf).getTime();
+  const polledThrough = (Number.isNaN(snapshotAt) ? fetchedAt.getTime() : snapshotAt) + EVENTS_POLL_DAYS * DAY_MS;
+  if ((!input.start && !input.end) || end.getTime() <= polledThrough) return { kind: 'covered', warning: partialPast };
+  const neededDays = Math.max(1, Math.ceil((end.getTime() - fetchedAt.getTime()) / DAY_MS));
+  const beyond = neededDays > EVENTS_MAX_DAYS
+    ? `The Dash lists events at most ${EVENTS_MAX_DAYS} days ahead; later events are not included.`
+    : undefined;
+  return {
+    kind: 'live',
+    days: Math.min(EVENTS_MAX_DAYS, neededDays),
+    warning: [partialPast, beyond].filter(Boolean).join(' ') || undefined,
+  };
+}
+
+function filterEvents(records: NormalizedRecord[], start: Date, end: Date, query?: string): NormalizedRecord[] {
+  const inRange = filterRange(records, start, end);
+  return query ? inRange.filter((record) => fuzzyMatch(record.searchText, query)) : inRange;
+}
+
+function cachedDepartures(payload: JsonObject): JsonObject[] {
+  return Array.isArray(payload.departures) ? asObjects(payload.departures) : [payload];
+}
+
+/** Drops departures whose scheduled time plus reported delay is already past; unparseable times are kept. */
+function upcomingDepartures(departures: JsonObject[], observedAt: Date, now: Date): JsonObject[] {
+  const cutoff = now.getTime() - DEPARTURE_GRACE_MS;
+  return departures.filter((departure) => {
+    const instant = departureInstant(departure, observedAt);
+    return instant === undefined || instant >= cutoff;
+  });
+}
+
+const DEPARTURE_TIME = /^\s*(\d{1,2}):(\d{2})\s*([AP])\.?M\.?\s*$/i;
+const DELAY_MINUTES = /(\d+)\s*min/i;
+
+/**
+ * SEPTA reports `orig_departure_time` as a campus clock time such as "10:10AM" with no date,
+ * and `orig_delay` as "On time" or "3 mins". The date is taken from the snapshot, shifted a
+ * day when the clock time is more than twelve hours from it (a midnight rollover).
+ */
+export function departureInstant(departure: JsonObject, observedAt: Date): number | undefined {
+  const match = typeof departure.orig_departure_time === 'string' ? DEPARTURE_TIME.exec(departure.orig_departure_time) : null;
+  if (!match) return undefined;
+  const hour = (Number(match[1]) % 12) + (match[3]!.toUpperCase() === 'P' ? 12 : 0);
+  const scheduled = campusWallTime(currentCampusDate(observedAt), hour, Number(match[2])).getTime();
+  const offset = scheduled - observedAt.getTime();
+  const rollover = offset < -HALF_DAY_MS ? DAY_MS : offset > HALF_DAY_MS ? -DAY_MS : 0;
+  const delayMinutes = Number(DELAY_MINUTES.exec(String(departure.orig_delay ?? ''))?.[1] ?? 0);
+  return scheduled + rollover + delayMinutes * 60_000;
 }
 
 async function withDeadline<T>(promise: Promise<T>, timeoutMs: number, message: string): Promise<T> {

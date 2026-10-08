@@ -40,7 +40,7 @@ export class DashClient {
       if (envelope.errors?.length) {
         throw new Error(`Dash GraphQL error: ${envelope.errors.map((error) => error.message ?? 'unknown error').join('; ')}`);
       }
-      if (!envelope.data || !('result' in envelope.data)) throw new Error('Dash GraphQL response did not contain data.result');
+      if (envelope.data?.result == null) throw new Error('Dash GraphQL response did not contain data.result');
       this.cache.set(key, { value: envelope.data.result, expiresAt: Date.now() + ttlSeconds * 1000 });
       return envelope.data.result;
     });
@@ -101,8 +101,12 @@ export class DashClient {
   }
 }
 
+/**
+ * Returns a feed result's `data` rows. Anything other than an array is an upstream shape
+ * change, so it throws instead of returning [] and letting the caller retire a snapshot.
+ */
 export function resultData(value: unknown): Record<string, unknown>[] {
-  const object = asObject(value);
-  const data = object?.data;
-  return Array.isArray(data) ? data.filter((item): item is Record<string, unknown> => Boolean(asObject(item))) : [];
+  const data = asObject(value)?.data;
+  if (!Array.isArray(data)) throw new Error('Dash result.data was not an array');
+  return data.filter((item): item is Record<string, unknown> => Boolean(asObject(item)));
 }
