@@ -1,9 +1,10 @@
 import { GraphEvents } from '@librechat/agents';
 import { logger } from '@librechat/data-schemas';
-import { ContentTypes } from 'librechat-data-provider';
+import { ContentTypes, inputTokensIncludesCache } from 'librechat-data-provider';
 import type { EventHandler, MessageContentComplex } from '@librechat/agents';
 import type { GenerationMethods, FlagMethods, GenerationStatus } from '@librechat/data-schemas';
 import type { UsageMetadata } from '~/stream/interfaces/IJobStore';
+import { countTokens } from '~/utils/tokenizer';
 
 const MAX_ERROR_TYPE_LENGTH = 64;
 const FALLBACK_MODEL = 'unknown';
@@ -68,9 +69,16 @@ export interface RecordGenerationInput {
   messageId: string | undefined;
   /** Agent model; overridden by the model reported in usage when present. */
   model: string | undefined;
+  /**
+   * Usage reported for every model call of the turn. Pass a copy taken before
+   * any await on the abort path: the abort middleware empties the shared array.
+   */
   collectedUsage: CollectedUsage[];
-  /** Authoritative totals from `recordCollectedUsage`; absent on aborted runs. */
-  usage?: { input_tokens: number; output_tokens: number };
+  /**
+   * Prompt-size estimate for the turn's first model call. Used only for an
+   * aborted turn whose calls never reported usage (streams report it last).
+   */
+  estimatedPromptTokens?: number;
   contentParts: MessageContentComplex[];
   userText: string;
   /** Chunk count from `retrieveKbContextDetailed`; falls back to counting `kbContext` entries. */
@@ -88,13 +96,90 @@ function isPrimaryUsage(usage: CollectedUsage | null | undefined): usage is Coll
   return usage != null && (usage.usage_type == null || usage.usage_type === 'message');
 }
 
-function sumPrimaryUsage(collected: CollectedUsage[]): {
-  input_tokens: number;
-  output_tokens: number;
-} {
-  const primary = collected.filter(isPrimaryUsage);
-  const output = primary.reduce((total, usage) => total + (Number(usage.output_tokens) || 0), 0);
-  return { input_tokens: Number(primary[0]?.input_tokens) || 0, output_tokens: output };
+interface TokenTotals {
+  promptTokens: number;
+  completionTokens: number;
+}
+
+/** Full prompt of one call, cache included, by the same rule `splitUsage` bills with. */
+function callPromptTokens(usage: CollectedUsage): number {
+  const input = Number(usage.input_tokens) || 0;
+  if (inputTokensIncludesCache(usage.provider)) {
+    return input;
+  }
+  const details = usage.input_token_details;
+  const cacheRead = Number(details?.cache_read) || Number(usage.cache_read_input_tokens) || 0;
+  const cacheCreation =
+    Number(details?.cache_creation) ||
+    Number(details?.cache_write_tokens) ||
+    Number(usage.cache_creation_input_tokens) ||
+    Number(usage.cache_write_tokens) ||
+    0;
+  return input + cacheRead + cacheCreation;
+}
+
+/** Output of one call; recovers reasoning tokens a provider left out of `output_tokens`. */
+function callCompletionTokens(usage: CollectedUsage, prompt: number): number {
+  const output = Number(usage.output_tokens) || 0;
+  const total = Number(usage.total_tokens) || 0;
+  return total > prompt + output ? total - prompt : output;
+}
+
+/**
+ * Sums every primary model call of the turn. Each tool round resends the full
+ * context, so the ledger counts each call's prompt (matching Transactions and
+ * vLLM's prompt counter), unlike the message `tokenCount`, which keeps only the
+ * first call's input.
+ */
+function sumPrimaryUsage(collected: CollectedUsage[]): TokenTotals & { calls: number } {
+  return collected.reduce(
+    (totals, usage) => {
+      if (!isPrimaryUsage(usage)) {
+        return totals;
+      }
+      const prompt = callPromptTokens(usage);
+      return {
+        promptTokens: totals.promptTokens + prompt,
+        completionTokens: totals.completionTokens + callCompletionTokens(usage, prompt),
+        calls: totals.calls + 1,
+      };
+    },
+    { promptTokens: 0, completionTokens: 0, calls: 0 },
+  );
+}
+
+async function countStreamed(text: string): Promise<number> {
+  if (!text) {
+    return 0;
+  }
+  try {
+    return await countTokens(text);
+  } catch (error) {
+    logger.warn('[recordGeneration] Failed to count streamed tokens', error);
+    return 0;
+  }
+}
+
+/**
+ * Token totals for the ledger. A stopped stream never reports usage for the
+ * call in flight, so an aborted turn falls back to the prompt estimate and a
+ * token count of the streamed text and reasoning, keeping the larger figure
+ * when completed calls did report.
+ */
+async function resolveTokens(
+  input: RecordGenerationInput,
+  generatedText: string,
+): Promise<TokenTotals> {
+  const reported = sumPrimaryUsage(input.collectedUsage);
+  if (!input.aborted) {
+    return reported;
+  }
+  const streamed = await countStreamed(generatedText);
+  return {
+    promptTokens:
+      reported.calls > 0 ? reported.promptTokens : Math.max(0, input.estimatedPromptTokens ?? 0),
+    completionTokens: Math.max(reported.completionTokens, streamed),
+  };
 }
 
 function lastPrimaryUsage(collected: CollectedUsage[]): CollectedUsage | undefined {
@@ -140,12 +225,24 @@ function resolveErrorType(error: unknown, errorText: string | undefined): string
 interface ContentDigest {
   toolCalls: string[];
   responseText: string;
+  /** Response text plus reasoning: everything the model streamed as output. */
+  generatedText: string;
   errorText: string | undefined;
+}
+
+function thinkText(part: MessageContentComplex): string | undefined {
+  const think = (part as { think?: unknown }).think;
+  if (typeof think === 'string') {
+    return think;
+  }
+  const value = (think as { value?: unknown } | null | undefined)?.value;
+  return typeof value === 'string' ? value : undefined;
 }
 
 function digestContent(parts: MessageContentComplex[]): ContentDigest {
   const toolCalls: string[] = [];
   const texts: string[] = [];
+  const thoughts: string[] = [];
   let errorText: string | undefined;
   for (const part of parts) {
     if (part == null) {
@@ -165,12 +262,21 @@ function digestContent(parts: MessageContentComplex[]): ContentDigest {
       }
       continue;
     }
+    if (part.type === ContentTypes.THINK) {
+      const text = thinkText(part);
+      if (text) {
+        thoughts.push(text);
+      }
+      continue;
+    }
     if (part.type === ContentTypes.ERROR) {
       const text = (part as { error?: unknown }).error;
       errorText = typeof text === 'string' ? text : '';
     }
   }
-  return { toolCalls, responseText: texts.join('\n'), errorText };
+  const responseText = texts.join('\n');
+  const generatedText = thoughts.length ? [...thoughts, responseText].join('\n') : responseText;
+  return { toolCalls, responseText, generatedText, errorText };
 }
 
 function resolveStatus(aborted: boolean, hasError: boolean): GenerationStatus {
@@ -253,7 +359,7 @@ export async function recordGeneration(
   try {
     const digest = digestContent(input.contentParts);
     responseText = digest.responseText;
-    const tokens = input.usage ?? sumPrimaryUsage(input.collectedUsage);
+    const tokens = await resolveTokens(input, digest.generatedText);
     const lastUsage = lastPrimaryUsage(input.collectedUsage);
     const errorType = resolveErrorType(input.error, digest.errorText);
     const endedAt = input.endedAt ?? Date.now();
@@ -262,8 +368,8 @@ export async function recordGeneration(
       conversationId,
       messageId,
       model: lastUsage?.model || input.model || FALLBACK_MODEL,
-      promptTokens: tokens.input_tokens,
-      completionTokens: tokens.output_tokens,
+      promptTokens: tokens.promptTokens,
+      completionTokens: tokens.completionTokens,
       ttftMs: elapsed(input.timing.startedAt, input.timing.firstTokenAt),
       durationMs: elapsed(input.timing.startedAt, endedAt),
       finishReason: lastUsage?.finish_reason,

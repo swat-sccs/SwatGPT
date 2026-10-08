@@ -2,6 +2,7 @@ import { GraphEvents } from '@librechat/agents';
 import { logger } from '@librechat/data-schemas';
 import type { EventHandler, MessageContentComplex } from '@librechat/agents';
 import type { RecordGenerationDeps, RecordGenerationInput } from './generation';
+import { countTokens } from '~/utils/tokenizer';
 import {
   countKbChunks,
   recordGeneration,
@@ -27,6 +28,7 @@ const textPart = (text: string): MessageContentComplex => ({ type: 'text', text 
 const toolPart = (name: string): MessageContentComplex =>
   ({ type: 'tool_call', tool_call: { name, args: '{}', id: `call_${name}` } }) as never;
 const errorPart = (error: string): MessageContentComplex => ({ type: 'error', error }) as never;
+const thinkPart = (think: string): MessageContentComplex => ({ type: 'think', think }) as never;
 
 function createInput(overrides: Partial<RecordGenerationInput> = {}): RecordGenerationInput {
   return {
@@ -97,7 +99,6 @@ describe('recordGeneration', () => {
           { input_tokens: 900, output_tokens: 40, model: 'qwen3', finish_reason: 'stop' },
           { input_tokens: 10, output_tokens: 5, usage_type: 'summarization' },
         ],
-        usage: { input_tokens: 950, output_tokens: 42 },
         contentParts: [toolPart('dash_menu'), textPart('Pizza'), toolPart('dash_menu')],
         kbContext: '[1] A (https://a)\nx\n\n[2] B (https://b)\ny',
         ragMs: 120.4,
@@ -109,8 +110,8 @@ describe('recordGeneration', () => {
       conversationId: 'convo-1',
       messageId: 'msg-1',
       model: 'qwen3',
-      promptTokens: 950,
-      completionTokens: 42,
+      promptTokens: 900,
+      completionTokens: 40,
       ttftMs: 250,
       durationMs: 2000,
       finishReason: 'stop',
@@ -133,7 +134,52 @@ describe('recordGeneration', () => {
     );
   });
 
-  it('falls back to summing primary usage when no authoritative usage exists', async () => {
+  it('sums the prompt of every model call in a tool-using turn', async () => {
+    const deps = createDeps();
+    await recordGeneration(
+      deps,
+      createInput({
+        collectedUsage: [
+          { input_tokens: 6000, output_tokens: 80, model: 'qwen3', finish_reason: 'tool_calls' },
+          { input_tokens: 6200, output_tokens: 300, model: 'qwen3', finish_reason: 'stop' },
+        ],
+        contentParts: [toolPart('dash_search'), textPart('Answer')],
+      }),
+    );
+    expect(deps.createGeneration).toHaveBeenCalledWith(
+      expect.objectContaining({ promptTokens: 12200, completionTokens: 380, finishReason: 'stop' }),
+    );
+  });
+
+  it('counts cache tokens the way billing does and recovers omitted reasoning output', async () => {
+    const deps = createDeps();
+    await recordGeneration(
+      deps,
+      createInput({
+        collectedUsage: [
+          {
+            input_tokens: 1000,
+            output_tokens: 10,
+            provider: 'openAI',
+            input_token_details: { cache_read: 800 },
+          },
+          {
+            input_tokens: 100,
+            output_tokens: 10,
+            provider: 'bedrock',
+            cache_read_input_tokens: 500,
+          },
+          { input_tokens: 50, output_tokens: 5, total_tokens: 85 },
+          { input_tokens: 30, output_tokens: 4, input_token_details: { cache_read: 20 } },
+        ],
+      }),
+    );
+    expect(deps.createGeneration).toHaveBeenCalledWith(
+      expect.objectContaining({ promptTokens: 1700, completionTokens: 59 }),
+    );
+  });
+
+  it('keeps reported usage from completed calls on an aborted turn', async () => {
     const deps = createDeps();
     await recordGeneration(
       deps,
@@ -143,19 +189,53 @@ describe('recordGeneration', () => {
           { input_tokens: 400, output_tokens: 7, usage_type: 'subagent' },
           { input_tokens: 130, output_tokens: 20 },
         ],
+        estimatedPromptTokens: 90,
         aborted: true,
         timing: { startedAt: 1_000, firstTokenAt: null },
       }),
     );
     expect(deps.createGeneration).toHaveBeenCalledWith(
       expect.objectContaining({
-        promptTokens: 100,
+        promptTokens: 230,
         completionTokens: 30,
         model: 'agent-model',
         status: 'aborted',
         ttftMs: undefined,
         durationMs: 2000,
       }),
+    );
+  });
+
+  it('estimates tokens for an aborted turn whose stream never reported usage', async () => {
+    const deps = createDeps();
+    const reasoning = 'Let me think about the dining hours at Sharples for a moment.';
+    const answer = 'Sharples opens at 7:30 on weekdays and closes at 8 in the evening.';
+    await recordGeneration(
+      deps,
+      createInput({
+        collectedUsage: [],
+        estimatedPromptTokens: 5400,
+        contentParts: [thinkPart(reasoning), textPart(answer)],
+        aborted: true,
+      }),
+    );
+    const streamed = await countTokens(`${reasoning}\n${answer}`);
+    expect(streamed).toBeGreaterThan(await countTokens(answer));
+    expect(deps.createGeneration).toHaveBeenCalledWith(
+      expect.objectContaining({
+        promptTokens: 5400,
+        completionTokens: streamed,
+        status: 'aborted',
+      }),
+    );
+    expect(deps.findKeywordFlags).toHaveBeenCalledWith('What is for lunch?', answer);
+  });
+
+  it('ignores the prompt estimate on a completed turn', async () => {
+    const deps = createDeps();
+    await recordGeneration(deps, createInput({ estimatedPromptTokens: 5400 }));
+    expect(deps.createGeneration).toHaveBeenCalledWith(
+      expect.objectContaining({ promptTokens: 0, completionTokens: 0, status: 'ok' }),
     );
   });
 
