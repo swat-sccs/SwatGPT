@@ -102,10 +102,30 @@ Then ask SwatGPT where a consenting student lives.
 All `ITS_DB_*` and `OVERLAY_DB_*` variables are required; there is no way to export without
 the overlay.
 
+`export.sh` never puts these credentials on the `docker` command line, where any user on gull
+could read them from `ps`. It writes them to a `0600` file under `$TMPDIR` (default `/tmp`,
+local disk rather than the shared NFS home), passes that with `--env-file`, and deletes it as
+soon as the service is created (and on any exit). A missing credential aborts before anything
+is written or created.
+
+## Dependencies
+
+`mysql2` is pinned exactly in `package.json` and resolved by the committed
+`package-lock.json`. The exporter installs with `npm ci --omit=dev --ignore-scripts`, so a run
+that holds the database credentials only ever installs the locked, integrity-checked tree and
+runs no install scripts. The `node:24-alpine` image is pinned by digest in `export.sh`. To
+upgrade, bump the version in `package.json`, regenerate the lockfile with
+`npm install --package-lock-only`, and update the image digest deliberately.
+
 Overrides for `export.sh` and `sync.sh`: `OUT_DIR`, `CYGNET_NETWORK`, `CYGNET_SERVICE`,
 `OVERLAY_HOST`, `IMAGE`, `TIMEOUT_S`, `EAGLE`, `EAGLE_REPO`, `REMOTE_FILE`.
 
 ## Tests
 
 `export.test.mjs` covers the fail-closed checks and flag parsing with `node:test`. It imports
-`export.mjs`, so install dependencies first: `npm install && node --test export.test.mjs`.
+`export.mjs`, so install dependencies first: `npm ci && node --test export.test.mjs`.
+
+`script.test.mjs` runs `export.sh` against a stub `docker` on `PATH` and checks that no
+credential reaches the docker command line, that the env file is private and removed, that a
+missing credential aborts, and that the exporter installs from the lockfile. It needs bash and
+no dependencies: `node --test script.test.mjs`. `npm test` runs both.
