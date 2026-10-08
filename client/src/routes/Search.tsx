@@ -317,7 +317,7 @@ export default function Search() {
   }
 
   return (
-    <div className="relative flex h-full w-full flex-col bg-white pt-4 dark:bg-gray-800">
+    <div className="relative flex h-full w-full flex-col bg-surface-primary pt-4">
       <div className="sr-only" role="alert" aria-atomic="true">
         {resultsAnnouncement}
       </div>
@@ -342,7 +342,7 @@ export default function Search() {
           <Spinner className="text-text-primary" />
         </div>
       )}
-      <div className="pointer-events-none absolute bottom-0 left-0 right-0 h-[5%] bg-gradient-to-t from-gray-50 to-transparent dark:from-gray-800" />
+      <div className="pointer-events-none absolute bottom-0 left-0 right-0 h-[5%] bg-gradient-to-t from-surface-primary to-transparent" />
     </div>
   );
 }

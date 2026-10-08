@@ -16,6 +16,7 @@ import {
 import { ArchivedChatsModal } from '~/components/Nav/SettingsTabs/General/ArchivedChatsModal';
 import { MyFilesModal } from '~/components/Chat/Input/Files/MyFilesModal';
 import { useGetStartupConfig, useGetUserBalance } from '~/data-provider';
+import { isHelpUrlEnabled } from '~/utils/interfaceFlags';
 import { useAuthContext } from '~/hooks/AuthContext';
 import { useLocalize } from '~/hooks';
 import Settings from './Settings';
@@ -33,7 +34,7 @@ function HelpSubmenu({
   onShowShortcuts: () => void;
 }) {
   const localize = useLocalize();
-  const hasHelpFaq = !!helpAndFaqURL && helpAndFaqURL !== '/';
+  const hasHelpFaq = isHelpUrlEnabled(helpAndFaqURL);
   const hasTos = !!termsOfServiceURL;
   const hasPrivacy = !!privacyPolicyURL;
   const showLegalDivider = (hasHelpFaq || true) && (hasTos || hasPrivacy);
