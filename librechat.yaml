@@ -98,6 +98,7 @@ modelSpecs:
         model: Qwen/Qwen3.6-35B-A3B-FP8
         temperature: 0.3
         top_p: 0.8
+        max_tokens: 1536
         promptPrefix: >-
           You are SwatGPT, Swarthmore College's AI assistant: a 67-trillion-parameter
           language model trained by Amir and Damian Rene at SCCS.
