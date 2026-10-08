@@ -22,24 +22,31 @@ What gets scraped:
 | `swatgpt_mcp` | `eagle:3001/metrics` (gull-only firewall, no auth) | `swatgpt_mcp_tool_calls_total{tool,result}`, `swatgpt_mcp_upstream_polls_total{kind,result}`, `swatgpt_mcp_upstream_last_success_timestamp_seconds{kind}`, `swatgpt_mcp_snapshot_age_seconds{domain}` |
 
 Dash MCP (`dash_mcp/src/metrics.ts`) serves `GET /metrics` on container port 3000 without
-authentication. The `swatgpt_mcp` job expects it published as `${SWATGPT_METRICS_BIND}:3001:3000` on
-eagle with the same gull-only firewall treatment as 9100/8080 (see A.4). Until that publish lands,
-`SwatGPTMcpDown` fires as soon as the job is added, so add the job in B.1 only after the `:3001` check in A.3 succeeds.
+authentication. `docker-compose.override.yml` publishes it as `${SWATGPT_METRICS_BIND}:3001:3000` on
+eagle, and `eagle-harden.sh` gives 3001 the same gull-only firewall treatment as 9100/8080 (see A.4).
+The publish exposes the whole Dash MCP HTTP server, not just `/metrics`, which is why the firewall
+rule must be in place before the deploy that adds it. The scrape's `Host: eagle.sccs.swarthmore.edu:3001`
+header must be in `SWATGPT_MCP_ALLOWED_HOSTS` (the compose default includes it); otherwise the
+DNS-rebinding guard answers 403 and `SwatGPTMcpDown` fires. Add the job in B.1 only after the `:3001`
+check in A.3 succeeds.
 Poll counters are zero-filled for every result the first time a job kind runs, so `increase()` sees a
 `success` series even for a kind that has never succeeded.
 
 ## A. eagle (`aidahxr`)
 
-1. Set the scrape token in `/home/aidahxr/SwatGPT/.env`:
+The deploy tree is `/srv/SwatGPT` (the working directory of `.github/workflows/production.yml`).
+Host-level setup that is not monitoring (runner unit, `.env` permissions) is in `ops/eagle/README.md`.
+
+1. Set the scrape token in `/srv/SwatGPT/.env`:
 
    ```sh
-   cd /home/aidahxr/SwatGPT
+   cd /srv/SwatGPT
    grep -q '^METRICS_SECRET=' .env || printf 'METRICS_SECRET=%s\n' "$(openssl rand -hex 32)" >> .env
    grep '^METRICS_SECRET=' .env      # hand this value to dcrepublic for step B.2
    ```
 
    Optional: `SWATGPT_METRICS_BIND=130.58.218.151` is the default bind address for the exporter
-   ports; override it in `.env` only if eagle's address changes.
+   ports (9100, 8080, 3001); override it in `.env` only if eagle's address changes.
 
 2. Start the exporters and restart the app so it picks up `METRICS_SECRET`:
 
@@ -61,12 +68,34 @@ Poll counters are zero-filled for every result the first time a job kind runs, s
    docker compose exec -T api node -e "fetch('http://swatgpt-mcp:3000/metrics').then(r=>r.text()).then(t=>console.log(t.split('\n').filter(l=>l.startsWith('swatgpt_mcp_')).join('\n')))"
    ```
 
-4. Firewall: ports 9100, 8080, 3001 (exporters) and 3080 (`/metrics`, token protected) on
-   `130.58.218.151` must be reachable from gull. If eagle runs ufw/nftables, allow them from gull's
-   address only. Docker DNATs published ports before `DOCKER-USER`, so a rule matching `--dport` sees
-   the container port: for Dash MCP that is 3000, which the campus-only admin rule in
-   `eagle-harden.sh` also matches. Match the published port with
-   `-m conntrack --ctorigdstport 3001` when restricting it to gull.
+4. Firewall: run `sudo ./monitoring/eagle-harden.sh` (idempotent). It puts a `SWATGPT-INGRESS`
+   chain in front of `DOCKER-USER` (ufw does not see published container ports) that drops traffic
+   on `enp6s18` to these host ports unless it comes from gull (`130.58.218.21`):
+
+   | Port | Service | Allowed from |
+   |---|---|---|
+   | 3080 | LibreChat (Traefik upstream and `/metrics`) | gull |
+   | 9100, 8080 | node_exporter, cadvisor | gull |
+   | 3001 | Dash MCP `/metrics` (no auth) | gull |
+   | 3000 | admin panel | campus `130.58.0.0/16`; compose already binds it to `127.0.0.1` |
+
+   Docker DNATs published ports before `DOCKER-USER`, so `--dport` would see the container port
+   (3000 for both Dash MCP and the admin panel). The rules match the published host port with
+   `-m conntrack --ctorigdstport` instead. Dropping 3080 from everything but gull stops campus
+   clients from skipping Traefik/CrowdSec and forging `X-Forwarded-For` (the app trusts one proxy
+   hop). The script also removes the per-port `DOCKER-USER` rules an earlier version installed,
+   persists the result with `netfilter-persistent save`, and force-recreates `api` so
+   `AUDIT_LOG_FAIL_CLOSED=true` actually takes effect. Afterwards confirm
+   `https://chat.sccs.swarthmore.edu/readyz` returns 200, the gull targets `eagle:3080`/`:9100`/
+   `:8080`/`:3001` are `up`, and `curl -m5 http://130.58.218.151:3080/readyz` from a campus host
+   other than gull times out.
+   The rules are IPv4 only. `api` publishes `${PORT}:${PORT}` on all addresses, so if eagle has a
+   global IPv6 address, docker-proxy answers 3080 over IPv6 through `INPUT`, outside `DOCKER-USER`;
+   the script prints a warning in that case.
+
+5. Log rotation: every compose service logs through `json-file` with `max-size`/`max-file`
+   (`SWATGPT_LOG_MAX_SIZE`, default `20m`; `SWATGPT_LOG_MAX_FILE`, default `5`). The first deploy
+   that carries this recreates every container once.
 
 ## B. gull (`dcrepublic`)
 
@@ -76,12 +105,17 @@ service update.
 
 1. Append the five jobs from `prometheus/swatgpt-jobs.yml` under `scrape_configs:` in
    `prometheus.yml` (indentation in the file already matches a two-space `scrape_configs:` list).
-   `gull-install.sh` skips this step when `swatgpt_app` is already there, so on the existing gull
-   install append only the `swatgpt_mcp` block by hand. On a fresh install it appends all five, so land
-   the eagle `:3001` publish first. Until the job exists, every Dash MCP alert except
-   `SwatGPTMcpToolErrorRatioHigh` stays silent.
+   `gull-install.sh` appends only the jobs whose `job_name` is not there yet, so re-running it on the
+   existing gull install adds just `swatgpt_mcp`. Land the eagle `:3001` publish and firewall rule
+   first. Until the job exists, every Dash MCP alert except `SwatGPTMcpToolErrorRatioHigh` stays silent.
 
-2. Create the bearer-token file with the `METRICS_SECRET` value from A.1 (no trailing newline):
+2. Create the bearer-token file with the `METRICS_SECRET` value from A.1 (no trailing newline).
+   `gull-install.sh` does this; it reads the secret from a prompt, stdin, `METRICS_SECRET_FILE`, or a
+   `METRICS_SECRET` exported after a silent `read -rs` and passed with `sudo --preserve-env=METRICS_SECRET`
+   (never `METRICS_SECRET=... sudo`, which lands in shell history), and refuses it as an argument
+   (sudo logs the full command line to the journal and `auth.log`, and arguments show in `ps`). It
+   writes the file through a `mktemp` (mode 600) and only then sets `root:docker 640` and moves it into
+   place, so it is never world-readable. By hand, the same without the secret on a command line:
 
    ```sh
    printf '%s' 'PASTE_METRICS_SECRET_HERE' > /srv/monitor/prometheus/config/swatgpt_metrics_token
