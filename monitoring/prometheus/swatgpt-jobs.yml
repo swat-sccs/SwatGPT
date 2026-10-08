@@ -4,7 +4,7 @@
 # `docker service update --force prometheus_prometheus`.
 #
 # The swatgpt_app job needs /etc/prometheus/swatgpt_metrics_token to contain the
-# value of METRICS_SECRET from eagle's /home/aidahxr/SwatGPT/.env (no trailing newline).
+# value of METRICS_SECRET from eagle's /srv/SwatGPT/.env (no trailing newline).
 
   # vLLM (Qwen3.6-35B-A3B-FP8) on loon; 5s so TTFT/queue spikes are visible.
   - job_name: vllm
@@ -31,8 +31,8 @@
       - targets: ["eagle.sccs.swarthmore.edu:3080"]
 
   # Dash MCP (dash_mcp/src/metrics.ts): poll results, last-success stamps, snapshot ages.
-  # /metrics is unauthenticated, so this needs swatgpt-mcp published on eagle as
-  # ${SWATGPT_METRICS_BIND}:3001:3000 and a gull-only DOCKER-USER rule (see README).
+  # /metrics is unauthenticated: docker-compose.override.yml publishes swatgpt-mcp on eagle as
+  # ${SWATGPT_METRICS_BIND}:3001:3000 and eagle-harden.sh restricts 3001 to gull (see README).
   - job_name: swatgpt_mcp
     static_configs:
       - targets: ["eagle.sccs.swarthmore.edu:3001"]

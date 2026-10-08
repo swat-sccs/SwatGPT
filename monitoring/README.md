@@ -192,7 +192,7 @@ The staleness thresholds assume the default `SWATGPT_*_POLL_INTERVAL_SECONDS` in
 | `SwatGPTVllmTtftHigh` | p95 TTFT > 5s for 5m | warning |
 | `SwatGPTVllmKvCacheHigh` | `vllm:kv_cache_usage_perc > 0.9` for 5m | warning |
 | `SwatGPTTeiDown` | `up{job="tei"} == 0` for 2m | critical |
-| `SwatGPTRetrievalNonHitRatioHigh` | non-hit share of `rag_retrieval_total` > 20% for 10m (includes `empty`, as planned) | warning |
+| `SwatGPTRetrievalFailureRatioHigh` | `timeout`/`error` share of non-`disabled` `rag_retrieval_total` > 20% with at least 10 retrievals in 10m, for 10m. `empty` is excluded: it is the normal result for greetings and off-topic chat; watch it on the dashboard's by-result panel | warning |
 | `SwatGPTRetrievalDisabled` | any `result="disabled"` retrievals in 10m (RAG env vars missing) | warning |
 | `SwatGPTAppDown` | `up{job="swatgpt_app"} == 0` for 2m (a 401 counts as down) | critical |
 | `SwatGPTReadyzFailing` | `probe_success{job="swatgpt_readyz"} == 0` for 2m (needs the optional blackbox job) | critical |

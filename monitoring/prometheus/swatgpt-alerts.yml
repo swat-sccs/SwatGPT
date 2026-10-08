@@ -66,21 +66,21 @@ groups:
           summary: "TEI {{ $labels.instance }} is not answering scrapes"
           description: "Embeddings (:8001) or reranker (:8002) is down. Retrieval fails open, so users silently lose the Swarthmore knowledge base."
 
-      - alert: SwatGPTRetrievalNonHitRatioHigh
+      - alert: SwatGPTRetrievalFailureRatioHigh
         expr: |
           (
-            sum(rate(rag_retrieval_total{job="swatgpt_app",result!="hit"}[10m]))
+            sum(rate(rag_retrieval_total{job="swatgpt_app",result=~"timeout|error"}[10m]))
             /
-            sum(rate(rag_retrieval_total{job="swatgpt_app"}[10m]))
+            sum(rate(rag_retrieval_total{job="swatgpt_app",result!="disabled"}[10m]))
           ) > 0.2
-          and sum(rate(rag_retrieval_total{job="swatgpt_app"}[10m])) > 0
+          and sum(increase(rag_retrieval_total{job="swatgpt_app",result!="disabled"}[10m])) >= 10
         for: 10m
         labels:
           severity: warning
           service: swatgpt
         annotations:
-          summary: "More than 20% of KB retrievals returned no context"
-          description: "{{ $value | humanizePercentage }} of retrievals in the last 10 minutes were empty, timed out, errored, or ran with RAG disabled. TEI or Qdrant outage signal; see the retrieval panels for the breakdown by result."
+          summary: "More than 20% of KB retrievals timed out or errored"
+          description: "{{ $value | humanizePercentage }} of retrievals in the last 10 minutes timed out or errored (needs at least 10 retrievals, so a quiet night cannot page). TEI or Qdrant outage signal; see the retrieval panels for the breakdown by result. 'empty' (nothing passed the rerank floor, normal for greetings and off-topic chat) is not counted; 'disabled' has its own alert."
 
       - alert: SwatGPTRetrievalDisabled
         expr: increase(rag_retrieval_total{job="swatgpt_app",result="disabled"}[10m]) > 0

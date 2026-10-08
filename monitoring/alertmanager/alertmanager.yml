@@ -23,7 +23,7 @@ inhibit_rules:
     equal: ["service"]
   # Dead TEI already explains the retrieval ratio.
   - source_matchers: ["alertname = SwatGPTTeiDown"]
-    target_matchers: ["alertname = SwatGPTRetrievalNonHitRatioHigh"]
+    target_matchers: ["alertname = SwatGPTRetrievalFailureRatioHigh"]
     equal: ["service"]
 
 receivers:
