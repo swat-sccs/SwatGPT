@@ -29,9 +29,9 @@ flowchart LR
 ## Why it's interesting
 
 - **Hybrid retrieval with a guaranteed entity slot.** Dense-only retrieval failed on questions that named a campus place. "Is Cornell open late?" embedded as a question about library hours, the reranker filled all eight slots with near-duplicate hours chunks, and the model answered from its prior. The fix ([`e06f55d`](https://github.com/swat-sccs/SwatGPT/commit/e06f55d23)) adds an IDF-weighted sparse lexical channel, reranks the deduplicated union of both channels, and reserves one slot for the best lexical hit. See `selectTopChunks` in [`retrieve.ts`](packages/api/src/rag/retrieve.ts).
-- **Retrieval that cannot take the chat down.** Every message runs three network hops (embed, search, rerank) under one 1.5 s `AbortController` budget. Any timeout, non-2xx, empty result, or missing config resolves to `undefined` and the message proceeds without context ([`retrieve.ts`](packages/api/src/rag/retrieve.ts), tests in [`retrieve.spec.ts`](packages/api/src/rag/retrieve.spec.ts)).
+- **Retrieval that cannot take the chat down.** Every message runs three network hops (embed, search, rerank) under one 1 s `AbortController` budget. Any timeout, non-2xx, empty result, or missing config resolves to `undefined` and the message proceeds without context ([`retrieve.ts`](packages/api/src/rag/retrieve.ts), tests in [`retrieve.spec.ts`](packages/api/src/rag/retrieve.spec.ts)).
 - **Two tokenizers that must agree byte for byte.** Sparse vectors are FNV-1a hashes of lowercase alphanumeric tokens, computed in Python at ingest time and in TypeScript at query time. If either side drifts, the lexical channel silently returns garbage, so the tokenizer is pinned in both [`ingest.py`](ingest/ingest.py) and [`lexical.ts`](packages/api/src/rag/lexical.ts) with the IDF modifier applied server-side by Qdrant.
-- **Zero-downtime corpus rebuilds.** Ingest writes a fresh `kb_<timestamp>` collection, embeds and upserts the whole corpus, then atomically repoints the `kb` alias and drops old collections. The app only ever queries the alias ([`ingest.py`](ingest/ingest.py), [`search.ts`](packages/api/src/rag/search.ts)).
+- **Zero-downtime corpus rebuilds.** Ingest writes a fresh `kb_<timestamp>` collection, embeds and upserts the whole corpus, then atomically repoints the `kb` alias after a point-count and smoke-query check, keeps the previous collection for `ingest.py --rollback`, and drops older ones. It refuses to swap on an empty or shrunken corpus (`MIN_POINTS` / `MIN_RATIO`, overridable with `--force`), deletes the half-built collection if anything fails before the swap, and exits before touching Qdrant if its tokenizer no longer matches the pinned golden hashes. The app only ever queries the alias ([`ingest.py`](ingest/ingest.py), [`search.ts`](packages/api/src/rag/search.ts)).
 
 ## Architecture
 
@@ -44,7 +44,7 @@ The split exists so the stateful tier can be deployed, rebuilt, and backed up wi
 Retrieval is custom TypeScript in [`packages/api/src/rag/`](packages/api/src/rag). It has no framework on the query path and is invoked once per message from the agent client, in parallel with the rest of message building ([`client.js`](api/server/controllers/agents/client.js), `buildMessages`).
 
 1. **Embed** the latest user message via TEI's OpenAI-compatible endpoint, 768-dim ([`embed.ts`](packages/api/src/rag/embed.ts)). In parallel, hash the query into a sparse term-frequency vector ([`lexical.ts`](packages/api/src/rag/lexical.ts)).
-2. **Hybrid search** Qdrant with both named vectors in parallel, top 20 per channel. Results are merged by point id, each candidate tagged with its rank in the lexical channel, and capped at 32 because that is TEI's default max rerank batch ([`search.ts`](packages/api/src/rag/search.ts)).
+2. **Hybrid search** Qdrant with both named vectors in parallel, top 20 per channel. Results are deduplicated by point id and filled into the candidate pool round-robin by rank across channels, each candidate tagged with its best lexical rank, and capped at 32 because that is TEI's default max rerank batch ([`search.ts`](packages/api/src/rag/search.ts)).
 3. **Rerank** all candidates against the query with a cross-encoder ([`rerank.ts`](packages/api/src/rag/rerank.ts)).
 4. **Select** the top 8 above a 0.3 score floor. If no lexical top-3 hit survived, the best one replaces the last slot ([`retrieve.ts`](packages/api/src/rag/retrieve.ts)).
 5. **Assemble context** as numbered entries with title, section breadcrumb, and source URL, prefixed with a cite-your-sources instruction ([`format.ts`](packages/api/src/rag/format.ts)). This lands in the agent's shared run context after the static system prompt so vLLM prefix caching still hits.
@@ -55,7 +55,7 @@ Offline, [`ingest/ingest.py`](ingest/ingest.py) chunks the markdown corpus with 
 
 [`retrieve.spec.ts`](packages/api/src/rag/retrieve.spec.ts) exercises the real pipeline with only `fetch` replaced: ordering by rerank score, exact wire payloads to all three services, cross-channel deduplication, the lexical guarantee and its interaction with the score floor, and every fail-open branch (unreachable embedder, Qdrant non-2xx, reranker failure, elapsed budget, no hits, feature unset, empty query). The regression it is built to catch is the one that motivated the hybrid rewrite: a change to candidate selection that lets topical chunks push the named entity's chunk out of context.
 
-`ingest.py --verify` runs a handful of smoke queries against the live `kb` alias and prints the top hits. There is no scored answer-accuracy harness yet.
+`ingest.py --verify` runs a handful of smoke queries against the live `kb` alias and prints the top hits, and `ingest.py --rollback` points the alias back at the previous non-empty collection. There is no scored answer-accuracy harness yet.
 
 ## Numbers
 
@@ -67,7 +67,7 @@ Only figures checkable from this repository.
 | Chunking | 512 tokens, 64 overlap |
 | Candidate pool | dense top 20 + sparse top 20, deduped, capped at 32 |
 | Context | top 8 chunks, rerank floor 0.3, one reserved lexical slot |
-| Retrieval budget | 1.5 s end to end, fail open |
+| Retrieval budget | 1 s end to end, fail open |
 | Fork delta | ~150 files, +8.2k / −0.8k lines vs upstream `v0.8.8-rc1`, excluding the corpus and lockfile |
 
 ## Divergence from LibreChat
