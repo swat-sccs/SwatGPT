@@ -27,7 +27,7 @@ export function createMcpServer(service: SwatService): McpServer {
   register(server, 'get_weather', 'Get current Swarthmore weather and a bounded forecast.',
     z.object({ days: z.number().int().min(1).max(7).default(3) }), ({ days }) => service.getWeather(days), toolTimeoutMs);
 
-  register(server, 'get_campus_hours', 'Get campus hours for a date. Place and category are optional fuzzy filters; omit them to discover available places.',
+  register(server, 'get_campus_hours', 'Get campus hours for a date (default today). Today is served from the synced snapshot; other dates are read live from the Dash and marked stale if that fails. Place and category are optional fuzzy filters; omit them to discover available places.',
     z.object({
       place: z.string().trim().min(1).max(100).optional(),
       category: z.string().trim().min(1).max(100).optional(),
@@ -44,7 +44,7 @@ export function createMcpServer(service: SwatService): McpServer {
       limit: limit(30),
     }), (input) => service.getDining(input), toolTimeoutMs);
 
-  register(server, 'search_campus_events', 'Search SwatCentral campus events over a date window.',
+  register(server, 'search_campus_events', 'Search SwatCentral campus events over a date window. Today through the next 30 days is served from the synced snapshot; later windows (up to a year ahead) are read live. Past events are only in search_archive.',
     z.object({
       query: z.string().trim().min(1).max(200).optional(),
       start: date,
@@ -61,7 +61,7 @@ export function createMcpServer(service: SwatService): McpServer {
       limit: limit(20),
     }), (input) => service.searchNews(input), toolTimeoutMs);
 
-  register(server, 'get_transit_departures', 'Get live SEPTA departures among Swarthmore, 30th Street Station, and Media.',
+  register(server, 'get_transit_departures', 'Get upcoming SEPTA departures among Swarthmore, 30th Street Station, and Media. Data may be a few minutes old (see data_as_of); trains that have already left are removed.',
     z.object({
       origin: z.enum(['swarthmore', '30th_street', 'media']),
       destination: z.enum(['swarthmore', '30th_street', 'media']),
