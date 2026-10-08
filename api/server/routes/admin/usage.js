@@ -32,6 +32,7 @@ const handlers = createAdminUsageHandlers({
   ...createUsageFlagReaders(Flag),
   getFlaggedConversationIds: db.getFlaggedConversationIds,
   isUserBanned: banService.isBanned,
+  areUsersBanned: banService.areBanned,
   hasCapability,
 });
 

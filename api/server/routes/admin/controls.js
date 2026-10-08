@@ -1,16 +1,16 @@
 const express = require('express');
-const { SystemCapabilities } = require('@librechat/data-schemas');
+const { logger, SystemCapabilities } = require('@librechat/data-schemas');
 const { CacheKeys, ViolationTypes } = require('librechat-data-provider');
 const {
   isEnabled,
-  keyvMongo,
-  createBanService,
-  createPauseService,
+  getPauseService,
+  getBalanceConfig,
+  createAdminBanService,
   invalidateCachedAuthUserDoc,
   createAdminControlsHandlers,
 } = require('@librechat/api');
-const { Keyv } = require('keyv');
 const { requireCapability } = require('~/server/middleware/roles/capabilities');
+const { getAppConfig } = require('~/server/services/Config');
 const { requireJwtAuth } = require('~/server/middleware');
 const { getLogStores } = require('~/cache');
 const db = require('~/models');
@@ -20,15 +20,18 @@ const router = express.Router();
 const requireAdminAccess = requireCapability(SystemCapabilities.ACCESS_ADMIN);
 const requireManageControls = requireCapability(SystemCapabilities.MANAGE_CONTROLS);
 
-/** Same store and namespace as the fast-path `banCache` inside `checkBan`. */
-const banEnforcementCache = new Keyv({ store: keyvMongo, namespace: ViolationTypes.BAN, ttl: 0 });
+const banEnforced = isEnabled(process.env.BAN_VIOLATIONS);
+if (!banEnforced) {
+  logger.warn(
+    '[adminControls] BAN_VIOLATIONS is not enabled: checkBan skips every ban check, so admin bans from /api/admin/controls will be recorded but NOT enforced. Set BAN_VIOLATIONS=true.',
+  );
+}
 
 const handlers = createAdminControlsHandlers({
-  banService: createBanService(getLogStores(ViolationTypes.BAN), {
-    enforcementCache: banEnforcementCache,
+  banService: createAdminBanService(getLogStores(ViolationTypes.BAN), {
     useRedis: isEnabled(process.env.USE_REDIS),
   }),
-  pauseService: createPauseService(getLogStores(CacheKeys.CONFIG_STORE)),
+  pauseService: getPauseService(),
   getUserById: db.getUserById,
   findBalanceByUser: db.findBalanceByUser,
   upsertBalanceFields: db.upsertBalanceFields,
@@ -38,6 +41,15 @@ const handlers = createAdminControlsHandlers({
   recordAuditEntry: db.recordAuditEntry,
   /** Opt-in: fail the control request if its audit entry can't be persisted. */
   auditFailClosed: process.env.AUDIT_LOG_FAIL_CLOSED === 'true',
+  banEnforced,
+  isBalanceEnabled: async (user) => {
+    const appConfig = await getAppConfig({
+      role: user.role,
+      userId: user._id?.toString(),
+      tenantId: user.tenantId,
+    });
+    return getBalanceConfig(appConfig)?.enabled === true;
+  },
 });
 
 router.use(requireJwtAuth, requireAdminAccess, requireManageControls);

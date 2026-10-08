@@ -1,6 +1,6 @@
 import { Keyv } from 'keyv';
 import type { BanEntry } from './bans';
-import { createBanService, ADMIN_BAN_TYPE } from './bans';
+import { ADMIN_BAN_TYPE, createBanService, MAX_BAN_DURATION_MS } from './bans';
 
 const HOUR = 60 * 60 * 1000;
 const START = new Date('2026-09-09T12:00:00.000Z').getTime();
@@ -153,6 +153,138 @@ describe('createBanService', () => {
     await expect(service.isBanned('user-1')).resolves.toBe(true);
     await service.unban('user-1');
     await expect(service.isBanned('user-1')).resolves.toBe(false);
+  });
+
+  it.each([MAX_BAN_DURATION_MS + 1, 1e16, Number.POSITIVE_INFINITY, -1])(
+    'rejects durationMs %p before writing anything',
+    async (durationMs) => {
+      const service = createBanService(store, { enforcementCache });
+
+      await expect(service.ban('user-1', { durationMs })).rejects.toThrow(RangeError);
+
+      await expect(store.get('user-1')).resolves.toBeUndefined();
+      await expect(enforcementCache.get('user-1')).resolves.toBeUndefined();
+    },
+  );
+
+  it('accepts the maximum duration', async () => {
+    const service = createBanService(store);
+
+    const record = await service.ban('user-1', { durationMs: MAX_BAN_DURATION_MS });
+
+    expect(record.expiresAt).toBe(new Date(START + MAX_BAN_DURATION_MS).toISOString());
+  });
+
+  it('reports an entry whose expiresAt is too large for a Date as permanent', async () => {
+    const service = createBanService(store);
+    await store.set('user-1', { type: ADMIN_BAN_TYPE, duration: 1e16, expiresAt: START + 1e16 });
+
+    await expect(service.getBan('user-1')).resolves.toMatchObject({ expiresAt: null });
+    await expect(service.isBanned('user-1')).resolves.toBe(true);
+  });
+
+  describe('areBanned', () => {
+    async function seedMixed(): Promise<void> {
+      await store.set('active', { type: ADMIN_BAN_TYPE, duration: HOUR, expiresAt: START + HOUR });
+      await store.set('permanent', { type: ADMIN_BAN_TYPE, duration: 0 }, 0);
+      await store.set('expired', { type: ADMIN_BAN_TYPE, duration: HOUR, expiresAt: START - 1 }, 0);
+      await enforcementCache.set('expired', { type: ADMIN_BAN_TYPE, expiresAt: START - 1 });
+    }
+
+    const ids = ['missing', 'active', 'expired', 'permanent', 'active'];
+    const expected = [false, true, false, true, true];
+
+    it('returns an empty list without touching the store', async () => {
+      const getMany = jest.spyOn(store, 'getMany');
+      const service = createBanService(store, { enforcementCache });
+
+      await expect(service.areBanned([])).resolves.toEqual([]);
+      expect(getMany).not.toHaveBeenCalled();
+    });
+
+    it('reads in one batch, keeps input order and clears expired entries', async () => {
+      await seedMixed();
+      const getMany = jest.spyOn(store, 'getMany');
+      const get = jest.spyOn(store, 'get');
+      const service = createBanService(store, { enforcementCache });
+
+      await expect(service.areBanned(ids)).resolves.toEqual(expected);
+
+      expect(getMany).toHaveBeenCalledTimes(1);
+      expect(getMany).toHaveBeenCalledWith(ids);
+      expect(get).not.toHaveBeenCalled();
+      await expect(store.get('expired')).resolves.toBeUndefined();
+      await expect(enforcementCache.get('expired')).resolves.toBeUndefined();
+      await expect(store.get('active')).resolves.toBeDefined();
+    });
+
+    it('falls back to per-key reads when the store has no getMany', async () => {
+      await seedMixed();
+      const plain = {
+        get: (key: string) => store.get(key),
+        set: (key: string, value: unknown, ttl?: number) => store.set(key, value, ttl),
+        delete: (key: string) => store.delete(key),
+      };
+      const service = createBanService(plain, { enforcementCache });
+
+      await expect(service.areBanned(ids)).resolves.toEqual(expected);
+      await expect(store.get('expired')).resolves.toBeUndefined();
+    });
+
+    it('agrees with isBanned for every id', async () => {
+      await seedMixed();
+      const service = createBanService(store, { enforcementCache });
+      const single = await Promise.all(
+        ['missing', 'active', 'permanent'].map((id) => service.isBanned(id)),
+      );
+
+      await expect(service.areBanned(['missing', 'active', 'permanent'])).resolves.toEqual(single);
+    });
+  });
+
+  describe('snapshot / restore', () => {
+    it('restores a timed ban with the time it had left', async () => {
+      const service = createBanService(store, { enforcementCache });
+      await service.ban('user-1', { durationMs: HOUR, reason: 'spam' });
+      const prior = await service.snapshot('user-1');
+
+      await service.ban('user-1', { durationMs: 0, reason: 'worse' });
+      await service.restore('user-1', prior);
+
+      await expect(service.getBan('user-1')).resolves.toMatchObject({
+        reason: 'spam',
+        expiresAt: new Date(START + HOUR).toISOString(),
+      });
+      await expect(enforcementCache.get('user-1')).resolves.toMatchObject({ reason: 'spam' });
+      jest.setSystemTime(START + HOUR + 1);
+      await expect(service.isBanned('user-1')).resolves.toBe(false);
+    });
+
+    it('restoring an empty snapshot lifts a ban placed after it', async () => {
+      const service = createBanService(store, { enforcementCache });
+      const prior = await service.snapshot('user-1');
+      expect(prior).toEqual({ entry: null, ipEntry: null });
+
+      await service.ban('user-1', { durationMs: HOUR });
+      await service.restore('user-1', prior);
+
+      await expect(service.isBanned('user-1')).resolves.toBe(false);
+      await expect(enforcementCache.get('user-1')).resolves.toBeUndefined();
+    });
+
+    it('puts back the IP ban an unban removed', async () => {
+      const service = createBanService(store, { enforcementCache });
+      const base = { type: 'message_limit', duration: HOUR, expiresAt: START + HOUR };
+      await store.set('user-2', { ...base, ip: '130.58.1.2' });
+      await store.set('130.58.1.2', { ...base, user_id: 'user-2' });
+      const prior = await service.snapshot('user-2');
+
+      await service.unban('user-2');
+      await service.restore('user-2', prior);
+
+      await expect(store.get('user-2')).resolves.toMatchObject({ ip: '130.58.1.2' });
+      await expect(store.get('130.58.1.2')).resolves.toMatchObject({ user_id: 'user-2' });
+    });
   });
 
   describe('violation bans that also banned the source IP', () => {

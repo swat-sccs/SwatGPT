@@ -20,8 +20,9 @@ import type {
 } from 'librechat-data-provider';
 import type { Response } from 'express';
 import type { ServerRequest } from '~/types/http';
+import type { BanService, BanSnapshot } from './bans';
 import type { PauseService } from './pause';
-import type { BanService } from './bans';
+import { MAX_BAN_DURATION_MS, isValidBanDuration, toBanRecord } from './bans';
 import { buildAuditContext } from './context';
 
 export interface AdminControlsDeps {
@@ -40,7 +41,20 @@ export interface AdminControlsDeps {
   ) => Promise<unknown>;
   /** See `AdminGrantsDeps.auditFailClosed`: surface a failed audit write as a 5xx. */
   auditFailClosed?: boolean;
+  /**
+   * Whether `checkBan` enforces bans at all (it skips every check unless
+   * `BAN_VIOLATIONS` is on). Defaults to `true`; reported to the admin UI so a
+   * ban that will not be enforced is not shown as effective.
+   */
+  banEnforced?: boolean;
+  /**
+   * Whether balance enforcement (`getBalanceConfig(appConfig).enabled`) applies to
+   * this user. Defaults to `true`; when `false`, setting token credits is refused.
+   */
+  isBalanceEnabled?: (user: IUser) => Promise<boolean>;
 }
+
+export type AdminUserControls = TAdminUserControls;
 
 type Handler = (req: ServerRequest, res: Response) => Promise<Response>;
 
@@ -62,6 +76,26 @@ interface Caller {
 const PAUSE_TARGET: AuditTarget = { type: 'system', id: 'controls.pause', name: 'Pause switch' };
 const MAX_REASON_LENGTH = 500;
 const MAX_PAUSE_MESSAGE_LENGTH = 500;
+const TARGET_USER_FIELDS = '_id name username email role tenantId';
+export const BALANCE_DISABLED_ERROR =
+  'Balance is not enabled on this server, so token credits are not enforced';
+
+/** A step after the state change failed; `undone` says whether the change was rolled back. */
+class RolledBackError extends Error {
+  constructor(readonly undone: boolean) {
+    super(undone ? 'change rolled back' : 'rollback failed');
+  }
+}
+
+function failureResponse(res: Response, error: unknown, failure: string): Response {
+  if (!(error instanceof RolledBackError)) {
+    return res.status(500).json({ error: failure });
+  }
+  const suffix = error.undone
+    ? 'the change was rolled back'
+    : 'the change could not be rolled back and may still be in effect';
+  return res.status(500).json({ error: `${failure}; ${suffix}` });
+}
 
 function resolveCaller(req: ServerRequest): Caller | null {
   const user = req.user;
@@ -98,10 +132,17 @@ function isNonNegativeNumber(value: unknown): value is number {
   return typeof value === 'number' && Number.isFinite(value) && value >= 0;
 }
 
+function isTokenCredits(value: unknown): value is number {
+  return typeof value === 'number' && Number.isSafeInteger(value) && value >= 0;
+}
+
 function validateBanBody(body: TAdminBanRequest | undefined): string | null {
   const { durationMs, reason } = body ?? {};
   if (durationMs !== undefined && !isNonNegativeNumber(durationMs)) {
     return 'durationMs must be a non-negative number of milliseconds';
+  }
+  if (durationMs !== undefined && !isValidBanDuration(durationMs)) {
+    return `durationMs must be at most ${MAX_BAN_DURATION_MS} (10 years); use 0 for a permanent ban`;
   }
   if (reason !== undefined && typeof reason !== 'string') {
     return 'reason must be a string';
@@ -138,6 +179,8 @@ export function createAdminControlsHandlers(deps: AdminControlsDeps): AdminContr
     deleteUserSessions,
     recordAuditEntry,
     auditFailClosed,
+    banEnforced = true,
+    isBalanceEnabled,
   } = deps;
 
   async function emitAudit(args: {
@@ -171,17 +214,54 @@ export function createAdminControlsHandlers(deps: AdminControlsDeps): AdminContr
     }
   }
 
-  async function loadUserControls(userId: string): Promise<TAdminUserControls> {
-    const [ban, balance] = await Promise.all([
+  /**
+   * Runs `steps` after a state change has been persisted. If any step throws
+   * (a fail-closed audit write, session revocation), `undo` puts the previous
+   * state back so a 5xx never leaves an unaudited change in effect.
+   */
+  async function completeOrUndo(
+    label: string,
+    steps: () => Promise<void>,
+    undo: () => Promise<unknown>,
+  ): Promise<void> {
+    try {
+      await steps();
+    } catch (error) {
+      logger.error(`[adminControls] ${label} failed after the change was applied`, error);
+      const undone = await undo().then(
+        () => true,
+        (undoError: unknown) => {
+          logger.error(`[adminControls] ${label} rollback failed`, undoError);
+          return false;
+        },
+      );
+      throw new RolledBackError(undone);
+    }
+  }
+
+  async function balanceEnabledFor(user: IUser): Promise<boolean> {
+    return isBalanceEnabled ? isBalanceEnabled(user) : true;
+  }
+
+  async function loadUserControls(user: IUser, userId: string): Promise<AdminUserControls> {
+    const [ban, balance, balanceEnabled] = await Promise.all([
       banService.getBan(userId),
       findBalanceByUser(userId),
+      balanceEnabledFor(user),
     ]);
     return {
       userId,
       banned: ban !== null,
       banExpiresAt: ban?.expiresAt ?? null,
       balance: toAdminBalance(balance),
+      banEnforced,
+      balanceEnabled,
     };
+  }
+
+  async function undoBan(userId: string, prior: BanSnapshot): Promise<void> {
+    await banService.restore(userId, prior);
+    await invalidateAuthUserCache?.(userId);
   }
 
   /** Resolves the caller and the addressed user, writing the error response on failure. */
@@ -199,7 +279,7 @@ export function createAdminControlsHandlers(deps: AdminControlsDeps): AdminContr
       res.status(400).json({ error: 'Invalid user id' });
       return null;
     }
-    const user = await getUserById(id, '_id name username email');
+    const user = await getUserById(id, TARGET_USER_FIELDS);
     if (!user) {
       res.status(404).json({ error: 'User not found' });
       return null;
@@ -241,18 +321,23 @@ export function createAdminControlsHandlers(deps: AdminControlsDeps): AdminContr
       const changed =
         previous.paused !== state.paused || (state.paused && previous.message !== state.message);
       if (changed) {
-        await emitAudit({
-          action: state.paused ? 'system.paused' : 'system.resumed',
-          caller,
-          target: PAUSE_TARGET,
-          metadata: { message: state.message },
-          context: buildAuditContext(req),
-        });
+        await completeOrUndo(
+          'setPause audit',
+          () =>
+            emitAudit({
+              action: state.paused ? 'system.paused' : 'system.resumed',
+              caller,
+              target: PAUSE_TARGET,
+              metadata: { message: state.message },
+              context: buildAuditContext(req),
+            }),
+          () => pauseService.restoreState(previous),
+        );
       }
       return res.status(200).json(state);
     } catch (error) {
       logger.error('[adminControls] setPause error:', error);
-      return res.status(500).json({ error: 'Failed to update pause state' });
+      return failureResponse(res, error, 'Failed to update pause state');
     }
   }
 
@@ -262,7 +347,7 @@ export function createAdminControlsHandlers(deps: AdminControlsDeps): AdminContr
       if (!resolved) {
         return res;
       }
-      return res.status(200).json(await loadUserControls(resolved.userId));
+      return res.status(200).json(await loadUserControls(resolved.user, resolved.userId));
     } catch (error) {
       logger.error('[adminControls] getUserControls error:', error);
       return res.status(500).json({ error: 'Failed to load user controls' });
@@ -285,23 +370,35 @@ export function createAdminControlsHandlers(deps: AdminControlsDeps): AdminContr
       }
       const { durationMs, reason } = (req.body ?? {}) as TAdminBanRequest;
       const trimmedReason = reason?.trim() || undefined;
+      const prior = await banService.snapshot(userId);
       const record = await banService.ban(userId, { durationMs, reason: trimmedReason });
-      await forgetUser(userId);
-      await emitAudit({
-        action: 'user.banned',
-        caller,
-        target: userTarget(user),
-        metadata: {
-          reason: record.reason,
-          durationMs: durationMs ?? null,
-          expiresAt: record.expiresAt,
+      await completeOrUndo(
+        'banUser session revocation/audit',
+        async () => {
+          await forgetUser(userId);
+          await emitAudit({
+            action: 'user.banned',
+            caller,
+            target: userTarget(user),
+            metadata: {
+              reason: record.reason,
+              durationMs: durationMs ?? null,
+              expiresAt: record.expiresAt,
+            },
+            context: buildAuditContext(req),
+          });
         },
-        context: buildAuditContext(req),
-      });
-      return res.status(200).json(await loadUserControls(userId));
+        () => undoBan(userId, prior),
+      );
+      if (!banEnforced) {
+        logger.warn(
+          `[adminControls] Banned user ${userId}, but BAN_VIOLATIONS is off so checkBan will not enforce it`,
+        );
+      }
+      return res.status(200).json(await loadUserControls(user, userId));
     } catch (error) {
       logger.error('[adminControls] banUser error:', error);
-      return res.status(500).json({ error: 'Failed to ban user' });
+      return failureResponse(res, error, 'Failed to ban user');
     }
   }
 
@@ -312,53 +409,72 @@ export function createAdminControlsHandlers(deps: AdminControlsDeps): AdminContr
         return res;
       }
       const { caller, user, userId } = resolved;
-      const existing = await banService.getBan(userId);
+      const prior = await banService.snapshot(userId);
       await banService.unban(userId);
-      await invalidateAuthUserCache?.(userId);
-      if (existing) {
-        await emitAudit({
-          action: 'user.unbanned',
-          caller,
-          target: userTarget(user),
-          metadata: {
-            reason: existing.reason,
-            expiresAt: existing.expiresAt,
-            ip: existing.ip,
-          },
-          context: buildAuditContext(req),
-        });
-      }
-      return res.status(200).json(await loadUserControls(userId));
+      await completeOrUndo(
+        'unbanUser audit',
+        async () => {
+          await invalidateAuthUserCache?.(userId);
+          if (!prior.entry) {
+            return;
+          }
+          const existing = toBanRecord(userId, prior.entry);
+          await emitAudit({
+            action: 'user.unbanned',
+            caller,
+            target: userTarget(user),
+            metadata: {
+              reason: existing.reason,
+              expiresAt: existing.expiresAt,
+              ip: existing.ip,
+            },
+            context: buildAuditContext(req),
+          });
+        },
+        () => undoBan(userId, prior),
+      );
+      return res.status(200).json(await loadUserControls(user, userId));
     } catch (error) {
       logger.error('[adminControls] unbanUser error:', error);
-      return res.status(500).json({ error: 'Failed to unban user' });
+      return failureResponse(res, error, 'Failed to unban user');
     }
   }
 
   async function setUserBalance(req: ServerRequest, res: Response): Promise<Response> {
     try {
       const { tokenCredits } = (req.body ?? {}) as Partial<TAdminBalanceRequest>;
-      if (!isNonNegativeNumber(tokenCredits)) {
-        return res.status(400).json({ error: 'tokenCredits must be a non-negative number' });
+      if (!isTokenCredits(tokenCredits)) {
+        return res.status(400).json({ error: 'tokenCredits must be a non-negative safe integer' });
       }
       const resolved = await resolveTargetUser(req, res);
       if (!resolved) {
         return res;
       }
       const { caller, user, userId } = resolved;
+      if (!(await balanceEnabledFor(user))) {
+        return res.status(409).json({ error: BALANCE_DISABLED_ERROR });
+      }
       const previous = await findBalanceByUser(userId);
       await upsertBalanceFields(userId, { tokenCredits });
-      await emitAudit({
-        action: 'user.balance_set',
-        caller,
-        target: userTarget(user),
-        metadata: { previousTokenCredits: previous?.tokenCredits ?? null, tokenCredits },
-        context: buildAuditContext(req),
-      });
-      return res.status(200).json(await loadUserControls(userId));
+      await completeOrUndo(
+        'setUserBalance audit',
+        () =>
+          emitAudit({
+            action: 'user.balance_set',
+            caller,
+            target: userTarget(user),
+            metadata: { previousTokenCredits: previous?.tokenCredits ?? null, tokenCredits },
+            context: buildAuditContext(req),
+          }),
+        () =>
+          previous
+            ? upsertBalanceFields(userId, { tokenCredits: previous.tokenCredits ?? 0 })
+            : Promise.reject(new Error('no earlier balance record to restore')),
+      );
+      return res.status(200).json(await loadUserControls(user, userId));
     } catch (error) {
       logger.error('[adminControls] setUserBalance error:', error);
-      return res.status(500).json({ error: 'Failed to set balance' });
+      return failureResponse(res, error, 'Failed to set balance');
     }
   }
 

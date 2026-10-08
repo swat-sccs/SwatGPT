@@ -224,6 +224,10 @@ export type TAdminUserControls = {
   banned: boolean;
   banExpiresAt: string | null;
   balance: TAdminBalance | null;
+  /** `false` when the server does not enforce bans (`BAN_VIOLATIONS` off). */
+  banEnforced: boolean;
+  /** `false` when balance is disabled, so token credits are neither enforced nor settable. */
+  balanceEnabled: boolean;
 };
 
 export type TAdminBanRequest = { durationMs?: number; reason?: string };

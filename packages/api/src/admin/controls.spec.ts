@@ -1,10 +1,11 @@
 import { Keyv } from 'keyv';
 import { Types } from 'mongoose';
+import { logger } from '@librechat/data-schemas';
 import type { IUser, IBalance } from '@librechat/data-schemas';
 import type { Response } from 'express';
 import type { ServerRequest } from '~/types/http';
 import type { AdminControlsDeps } from './controls';
-import { createAdminControlsHandlers } from './controls';
+import { BALANCE_DISABLED_ERROR, createAdminControlsHandlers } from './controls';
 import { DEFAULT_PAUSE_MESSAGE, createPauseService } from './pause';
 import { createBanService } from './bans';
 
@@ -14,6 +15,7 @@ jest.mock('@librechat/data-schemas', () => ({
 }));
 
 const HOUR = 60 * 60 * 1000;
+const auditDown = () => jest.fn().mockRejectedValue(new Error('audit down'));
 const adminId = new Types.ObjectId();
 const targetId = new Types.ObjectId();
 
@@ -73,6 +75,10 @@ function createDeps(overrides: Partial<AdminControlsDeps> = {}) {
 }
 
 describe('createAdminControlsHandlers', () => {
+  afterEach(() => {
+    jest.clearAllMocks();
+  });
+
   describe('pause', () => {
     it('returns the running state by default', async () => {
       const handlers = createAdminControlsHandlers(createDeps());
@@ -156,12 +162,11 @@ describe('createAdminControlsHandlers', () => {
       expect(second.status).toHaveBeenCalledWith(200);
     });
 
-    it('surfaces a failed audit write when fail-closed', async () => {
-      const recordAuditEntry = jest.fn().mockRejectedValue(new Error('audit down'));
-      const handlers = createAdminControlsHandlers(
-        createDeps({ recordAuditEntry, auditFailClosed: true }),
-      );
-      const { req, res, status } = createReqRes({ body: { paused: true } });
+    it('rolls the pause back when a fail-closed audit write fails', async () => {
+      const recordAuditEntry = auditDown();
+      const deps = createDeps({ recordAuditEntry, auditFailClosed: true });
+      const handlers = createAdminControlsHandlers(deps);
+      const { req, res, status, json } = createReqRes({ body: { paused: true } });
 
       await handlers.setPause(req, res);
 
@@ -170,6 +175,26 @@ describe('createAdminControlsHandlers', () => {
         { failClosed: true },
       );
       expect(status).toHaveBeenCalledWith(500);
+      expect(json).toHaveBeenCalledWith({
+        error: 'Failed to update pause state; the change was rolled back',
+      });
+      await expect(deps.pauseService.getState()).resolves.toMatchObject({ paused: false });
+    });
+
+    it('keeps the system paused when a fail-closed resume audit fails', async () => {
+      const deps = createDeps({ recordAuditEntry: auditDown(), auditFailClosed: true });
+      const previous = await deps.pauseService.setState({
+        paused: true,
+        message: 'Incident',
+        updatedBy: 'admin-0',
+      });
+      const handlers = createAdminControlsHandlers(deps);
+      const { req, res, status } = createReqRes({ body: { paused: false } });
+
+      await handlers.setPause(req, res);
+
+      expect(status).toHaveBeenCalledWith(500);
+      await expect(deps.pauseService.getState()).resolves.toEqual(previous);
     });
 
     it('swallows a failed audit write when fail-open', async () => {
@@ -217,6 +242,8 @@ describe('createAdminControlsHandlers', () => {
         banned: false,
         banExpiresAt: null,
         balance: null,
+        banEnforced: true,
+        balanceEnabled: true,
       });
     });
 
@@ -239,7 +266,29 @@ describe('createAdminControlsHandlers', () => {
           refillIntervalValue: 1,
           refillIntervalUnit: 'days',
         },
+        banEnforced: true,
+        balanceEnabled: true,
       });
+    });
+
+    it('reports levers that are not enforced', async () => {
+      const isBalanceEnabled = jest.fn().mockResolvedValue(false);
+      const getUserById = jest.fn().mockResolvedValue(mockUser(targetId, 'target@x'));
+      const handlers = createAdminControlsHandlers(
+        createDeps({ banEnforced: false, isBalanceEnabled, getUserById }),
+      );
+      const { req, res, json } = createReqRes({ params: { id: targetId.toString() } });
+
+      await handlers.getUserControls(req, res);
+
+      expect(json).toHaveBeenCalledWith(
+        expect.objectContaining({ banEnforced: false, balanceEnabled: false }),
+      );
+      expect(getUserById).toHaveBeenCalledWith(
+        targetId.toString(),
+        expect.stringContaining('role'),
+      );
+      expect(isBalanceEnabled).toHaveBeenCalledWith(expect.objectContaining({ _id: targetId }));
     });
   });
 
@@ -293,6 +342,8 @@ describe('createAdminControlsHandlers', () => {
         banned: true,
         banExpiresAt: ban?.expiresAt,
         balance: null,
+        banEnforced: true,
+        balanceEnabled: true,
       });
       expect(deps.invalidateAuthUserCache).toHaveBeenCalledWith(targetId.toString());
       expect(deps.deleteUserSessions).toHaveBeenCalledWith(targetId.toString());
@@ -304,6 +355,102 @@ describe('createAdminControlsHandlers', () => {
           metadata: { reason: 'spam', durationMs: HOUR, expiresAt: ban?.expiresAt },
         }),
       );
+    });
+
+    it.each([1e16, 11 * 365 * 24 * HOUR])(
+      'rejects durationMs %p before storing anything',
+      async (durationMs) => {
+        const deps = createDeps();
+        const ban = jest.spyOn(deps.banService, 'ban');
+        const handlers = createAdminControlsHandlers(deps);
+        const { req, res, status, json } = createReqRes({
+          params: { id: targetId.toString() },
+          body: { durationMs },
+        });
+
+        await handlers.banUser(req, res);
+
+        expect(status).toHaveBeenCalledWith(400);
+        expect(json).toHaveBeenCalledWith({ error: expect.stringContaining('permanent') });
+        expect(ban).not.toHaveBeenCalled();
+        await expect(deps.banService.isBanned(targetId.toString())).resolves.toBe(false);
+      },
+    );
+
+    it('still bans but warns when bans are not enforced', async () => {
+      const deps = createDeps({ banEnforced: false });
+      const handlers = createAdminControlsHandlers(deps);
+      const { req, res, json } = createReqRes({ params: { id: targetId.toString() } });
+
+      await handlers.banUser(req, res);
+
+      expect(json).toHaveBeenCalledWith(
+        expect.objectContaining({ banned: true, banEnforced: false }),
+      );
+      expect(logger.warn).toHaveBeenCalledWith(expect.stringContaining('BAN_VIOLATIONS'));
+    });
+
+    it('rolls a new ban back when the fail-closed audit write fails', async () => {
+      const deps = createDeps({ recordAuditEntry: auditDown(), auditFailClosed: true });
+      const handlers = createAdminControlsHandlers(deps);
+      const { req, res, status, json } = createReqRes({
+        params: { id: targetId.toString() },
+        body: { durationMs: HOUR },
+      });
+
+      await handlers.banUser(req, res);
+
+      expect(status).toHaveBeenCalledWith(500);
+      expect(json).toHaveBeenCalledWith({
+        error: 'Failed to ban user; the change was rolled back',
+      });
+      await expect(deps.banService.isBanned(targetId.toString())).resolves.toBe(false);
+      expect(deps.invalidateAuthUserCache).toHaveBeenCalledWith(targetId.toString());
+    });
+
+    it('puts the earlier ban back when the fail-closed audit of a re-ban fails', async () => {
+      const deps = createDeps({ recordAuditEntry: auditDown(), auditFailClosed: true });
+      const earlier = await deps.banService.ban(targetId.toString(), {
+        durationMs: HOUR,
+        reason: 'spam',
+      });
+      const handlers = createAdminControlsHandlers(deps);
+      const { req, res, status } = createReqRes({
+        params: { id: targetId.toString() },
+        body: { durationMs: 0, reason: 'worse' },
+      });
+
+      await handlers.banUser(req, res);
+
+      expect(status).toHaveBeenCalledWith(500);
+      await expect(deps.banService.getBan(targetId.toString())).resolves.toEqual(earlier);
+    });
+
+    it('rolls the ban back and skips the audit when session revocation fails', async () => {
+      const deps = createDeps({
+        deleteUserSessions: jest.fn().mockRejectedValue(new Error('sessions down')),
+      });
+      const handlers = createAdminControlsHandlers(deps);
+      const { req, res, status } = createReqRes({ params: { id: targetId.toString() } });
+
+      await handlers.banUser(req, res);
+
+      expect(status).toHaveBeenCalledWith(500);
+      await expect(deps.banService.isBanned(targetId.toString())).resolves.toBe(false);
+      expect(deps.recordAuditEntry).not.toHaveBeenCalled();
+    });
+
+    it('reports a rollback that itself failed', async () => {
+      const deps = createDeps({ recordAuditEntry: auditDown(), auditFailClosed: true });
+      jest.spyOn(deps.banService, 'restore').mockRejectedValue(new Error('store down'));
+      const handlers = createAdminControlsHandlers(deps);
+      const { req, res, json } = createReqRes({ params: { id: targetId.toString() } });
+
+      await handlers.banUser(req, res);
+
+      expect(json).toHaveBeenCalledWith({
+        error: 'Failed to ban user; the change could not be rolled back and may still be in effect',
+      });
     });
 
     it('uses the default duration when the body is empty', async () => {
@@ -365,6 +512,24 @@ describe('createAdminControlsHandlers', () => {
       );
     });
 
+    it('re-applies the ban when the fail-closed audit write fails', async () => {
+      const deps = createDeps({ recordAuditEntry: auditDown(), auditFailClosed: true });
+      const ban = await deps.banService.ban(targetId.toString(), {
+        durationMs: HOUR,
+        reason: 'spam',
+      });
+      const handlers = createAdminControlsHandlers(deps);
+      const { req, res, status, json } = createReqRes({ params: { id: targetId.toString() } });
+
+      await handlers.unbanUser(req, res);
+
+      expect(status).toHaveBeenCalledWith(500);
+      expect(json).toHaveBeenCalledWith({
+        error: 'Failed to unban user; the change was rolled back',
+      });
+      await expect(deps.banService.getBan(targetId.toString())).resolves.toEqual(ban);
+    });
+
     it('does not audit when the user was not banned', async () => {
       const deps = createDeps();
       const handlers = createAdminControlsHandlers(deps);
@@ -378,8 +543,18 @@ describe('createAdminControlsHandlers', () => {
   });
 
   describe('setUserBalance', () => {
-    it.each([undefined, -5, 'lots', Number.NaN])('rejects tokenCredits %p', async (value) => {
-      const handlers = createAdminControlsHandlers(createDeps());
+    it.each([
+      undefined,
+      -5,
+      'lots',
+      Number.NaN,
+      1.5,
+      Number.POSITIVE_INFINITY,
+      Number.MAX_SAFE_INTEGER + 1,
+      '100',
+    ])('rejects tokenCredits %p before writing', async (value) => {
+      const deps = createDeps();
+      const handlers = createAdminControlsHandlers(deps);
       const { req, res, status } = createReqRes({
         params: { id: targetId.toString() },
         body: { tokenCredits: value },
@@ -388,6 +563,23 @@ describe('createAdminControlsHandlers', () => {
       await handlers.setUserBalance(req, res);
 
       expect(status).toHaveBeenCalledWith(400);
+      expect(deps.upsertBalanceFields).not.toHaveBeenCalled();
+    });
+
+    it('accepts Number.MAX_SAFE_INTEGER', async () => {
+      const deps = createDeps();
+      const handlers = createAdminControlsHandlers(deps);
+      const { req, res, status } = createReqRes({
+        params: { id: targetId.toString() },
+        body: { tokenCredits: Number.MAX_SAFE_INTEGER },
+      });
+
+      await handlers.setUserBalance(req, res);
+
+      expect(status).toHaveBeenCalledWith(200);
+      expect(deps.upsertBalanceFields).toHaveBeenCalledWith(targetId.toString(), {
+        tokenCredits: Number.MAX_SAFE_INTEGER,
+      });
     });
 
     it('upserts the balance and audits the previous and new values', async () => {
@@ -418,6 +610,61 @@ describe('createAdminControlsHandlers', () => {
           metadata: { previousTokenCredits: 200, tokenCredits: 5000 },
         }),
       );
+    });
+
+    it('refuses with 409 when balance is not enabled', async () => {
+      const deps = createDeps({ isBalanceEnabled: jest.fn().mockResolvedValue(false) });
+      const handlers = createAdminControlsHandlers(deps);
+      const { req, res, status, json } = createReqRes({
+        params: { id: targetId.toString() },
+        body: { tokenCredits: 0 },
+      });
+
+      await handlers.setUserBalance(req, res);
+
+      expect(status).toHaveBeenCalledWith(409);
+      expect(json).toHaveBeenCalledWith({ error: BALANCE_DISABLED_ERROR });
+      expect(deps.upsertBalanceFields).not.toHaveBeenCalled();
+      expect(deps.recordAuditEntry).not.toHaveBeenCalled();
+    });
+
+    it('restores the previous credits when the fail-closed audit write fails', async () => {
+      const deps = createDeps({
+        findBalanceByUser: jest.fn().mockResolvedValue(mockBalance({ tokenCredits: 200 })),
+        recordAuditEntry: auditDown(),
+        auditFailClosed: true,
+      });
+      const handlers = createAdminControlsHandlers(deps);
+      const { req, res, status, json } = createReqRes({
+        params: { id: targetId.toString() },
+        body: { tokenCredits: 5000 },
+      });
+
+      await handlers.setUserBalance(req, res);
+
+      expect(status).toHaveBeenCalledWith(500);
+      expect(json).toHaveBeenCalledWith({
+        error: 'Failed to set balance; the change was rolled back',
+      });
+      expect(deps.upsertBalanceFields).toHaveBeenLastCalledWith(targetId.toString(), {
+        tokenCredits: 200,
+      });
+    });
+
+    it('says the change may still apply when there was no balance to restore', async () => {
+      const deps = createDeps({ recordAuditEntry: auditDown(), auditFailClosed: true });
+      const handlers = createAdminControlsHandlers(deps);
+      const { req, res, json } = createReqRes({
+        params: { id: targetId.toString() },
+        body: { tokenCredits: 5000 },
+      });
+
+      await handlers.setUserBalance(req, res);
+
+      expect(json).toHaveBeenCalledWith({
+        error:
+          'Failed to set balance; the change could not be rolled back and may still be in effect',
+      });
     });
 
     it('creates a balance record when none exists yet', async () => {
