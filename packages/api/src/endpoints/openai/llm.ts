@@ -183,6 +183,9 @@ function removeReasoningPayload(target: Record<string, unknown>) {
   delete target.reasoning_effort;
 }
 
+/** `dropParams: ['top_p']` must also remove the `topP` field `top_p` is now mapped to. */
+const langChainParamAliases: Record<string, string> = { top_p: 'topP' };
+
 function deleteConfigParam({
   param,
   llmConfig,
@@ -224,6 +227,10 @@ function deleteConfigParam({
 
   if (param in llmConfig) {
     delete llmConfig[param as keyof t.OAIClientOptions];
+  }
+  const alias = langChainParamAliases[param];
+  if (alias != null) {
+    delete llmConfig[alias as keyof t.OAIClientOptions];
   }
   if (param in modelKwargs) {
     delete modelKwargs[param];
@@ -542,6 +549,7 @@ export function getOpenAILLMConfig({
     promptCacheTtl,
     frequency_penalty,
     presence_penalty,
+    top_p,
     ...modelOptions
   } = cleanedModelOptions as Partial<
     t.OpenAIParameters & { promptCache?: boolean; promptCacheTtl?: '5m' | '1h' }
@@ -560,6 +568,10 @@ export function getOpenAILLMConfig({
   }
   if (presence_penalty != null) {
     llmConfig.presencePenalty = presence_penalty;
+  }
+  /** LangChain reads `topP`; a raw `top_p` field on the client is silently dropped. */
+  if (top_p != null) {
+    llmConfig.topP = top_p;
   }
 
   const modelKwargs: Record<string, unknown> = {};
@@ -844,6 +856,7 @@ export function getOpenAILLMConfig({
       'reasoning_effort',
       'temperature',
       'top_p',
+      'topP',
       'top_k',
       'stop',
       'logit_bias',
