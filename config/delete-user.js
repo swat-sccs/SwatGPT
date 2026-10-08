@@ -3,6 +3,7 @@
 // @ts-nocheck
 const path = require('path');
 const mongoose = require('mongoose');
+const { createModels, createMethods } = require('@librechat/data-schemas');
 const {
   Key,
   User,
@@ -27,7 +28,8 @@ const {
   Transaction,
   Conversation,
   ConversationTag,
-} = require('@librechat/data-schemas').createModels(mongoose);
+} = createModels(mongoose);
+const { purgeUserOversight } = createMethods(mongoose);
 require('module-alias')({ base: path.resolve(__dirname, '..', 'api') });
 const { askQuestion, silentExit } = require('./helpers');
 const connect = require('./connect');
@@ -41,7 +43,47 @@ async function gracefulExit(code = 0) {
   silentExit(code);
 }
 
-(async () => {
+/**
+ * Deletes every record owned by `user`. SwatGPT oversight data follows the
+ * self-delete flow: flags about the user are removed and their Generation
+ * ledger rows are re-owned by the deleted-user placeholder.
+ */
+async function deleteUserData(user, { deleteTx = false } = {}) {
+  const uid = user._id.toString();
+  const tasks = [
+    Action.deleteMany({ user: uid }),
+    Agent.deleteMany({ author: uid }),
+    AgentApiKey.deleteMany({ user: uid }),
+    Assistant.deleteMany({ user: uid }),
+    Balance.deleteMany({ user: uid }),
+    ConversationTag.deleteMany({ user: uid }),
+    Conversation.deleteMany({ user: uid }),
+    Message.deleteMany({ user: uid }),
+    File.deleteMany({ user: uid }),
+    Key.deleteMany({ userId: uid }),
+    MemoryEntry.deleteMany({ userId: uid }),
+    PluginAuth.deleteMany({ userId: uid }),
+    Prompt.deleteMany({ author: uid }),
+    PromptGroup.deleteMany({ author: uid }),
+    Preset.deleteMany({ user: uid }),
+    Session.deleteMany({ user: uid }),
+    SharedLink.deleteMany({ user: uid }),
+    ToolCall.deleteMany({ user: uid }),
+    Token.deleteMany({ userId: uid }),
+    AclEntry.deleteMany({ principalId: user._id }),
+    purgeUserOversight(user._id),
+  ];
+
+  if (deleteTx) {
+    tasks.push(Transaction.deleteMany({ user: uid }));
+  }
+
+  await Promise.all(tasks);
+  await Group.updateMany({ memberIds: uid }, { $pullAll: { memberIds: [uid] } });
+  await User.deleteOne({ _id: uid });
+}
+
+async function main() {
   await connect();
 
   console.purple('---------------');
@@ -74,43 +116,7 @@ async function gracefulExit(code = 0) {
   const confirmTx = await askQuestion('Also delete all transaction history for this user? (y/N)');
   const deleteTx = confirmTx.toLowerCase() === 'y';
 
-  const uid = user._id.toString();
-
-  // 5) Build and run deletion tasks
-  const tasks = [
-    Action.deleteMany({ user: uid }),
-    Agent.deleteMany({ author: uid }),
-    AgentApiKey.deleteMany({ user: uid }),
-    Assistant.deleteMany({ user: uid }),
-    Balance.deleteMany({ user: uid }),
-    ConversationTag.deleteMany({ user: uid }),
-    Conversation.deleteMany({ user: uid }),
-    Message.deleteMany({ user: uid }),
-    File.deleteMany({ user: uid }),
-    Key.deleteMany({ userId: uid }),
-    MemoryEntry.deleteMany({ userId: uid }),
-    PluginAuth.deleteMany({ userId: uid }),
-    Prompt.deleteMany({ author: uid }),
-    PromptGroup.deleteMany({ author: uid }),
-    Preset.deleteMany({ user: uid }),
-    Session.deleteMany({ user: uid }),
-    SharedLink.deleteMany({ user: uid }),
-    ToolCall.deleteMany({ user: uid }),
-    Token.deleteMany({ userId: uid }),
-    AclEntry.deleteMany({ principalId: user._id }),
-  ];
-
-  if (deleteTx) {
-    tasks.push(Transaction.deleteMany({ user: uid }));
-  }
-
-  await Promise.all(tasks);
-
-  // 6) Remove user from all groups
-  await Group.updateMany({ memberIds: uid }, { $pullAll: { memberIds: [uid] } });
-
-  // 7) Finally delete the user document itself
-  await User.deleteOne({ _id: uid });
+  await deleteUserData(user, { deleteTx });
 
   console.green(`✔ Successfully deleted user ${email} and all associated data.`);
   if (!deleteTx) {
@@ -118,11 +124,17 @@ async function gracefulExit(code = 0) {
   }
 
   return gracefulExit(0);
-})().catch(async (err) => {
-  if (!err.message.includes('fetch failed')) {
-    console.error('There was an uncaught error:');
-    console.error(err);
-    await mongoose.disconnect();
-    process.exit(1);
-  }
-});
+}
+
+module.exports = { deleteUserData };
+
+if (require.main === module) {
+  main().catch(async (err) => {
+    if (!err.message.includes('fetch failed')) {
+      console.error('There was an uncaught error:');
+      console.error(err);
+      await mongoose.disconnect();
+      process.exit(1);
+    }
+  });
+}

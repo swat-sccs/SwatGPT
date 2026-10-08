@@ -58,6 +58,7 @@ function createDeps(overrides: Partial<AdminUsersDeps> = {}): AdminUsersDeps {
       .mockResolvedValue({ deletedCount: 1, message: 'User was deleted successfully.' }),
     deleteConfig: jest.fn().mockResolvedValue(null),
     deleteAclEntries: jest.fn().mockResolvedValue(undefined),
+    purgeUserOversight: jest.fn().mockResolvedValue({ flagsDeleted: 0, generationsAnonymized: 0 }),
     ...overrides,
   };
 }
@@ -416,7 +417,7 @@ describe('createAdminUsersHandlers', () => {
       expect(deps.countUsers).not.toHaveBeenCalled();
     });
 
-    it('cascades cleanup of Config and AclEntries', async () => {
+    it('cascades cleanup of Config, AclEntries and oversight records', async () => {
       const result: UserDeleteResult = {
         deletedCount: 1,
         message: 'User was deleted successfully.',
@@ -433,6 +434,22 @@ describe('createAdminUsersHandlers', () => {
         principalType: PrincipalType.USER,
         principalId: expect.any(Types.ObjectId),
       });
+      expect(deps.purgeUserOversight).toHaveBeenCalledTimes(1);
+      expect(String((deps.purgeUserOversight as jest.Mock).mock.calls[0][0])).toBe(validUserId);
+    });
+
+    it('returns success when the oversight purge fails', async () => {
+      const deps = createDeps({
+        purgeUserOversight: jest.fn().mockRejectedValue(new Error('purge failed')),
+      });
+      const handlers = createAdminUsersHandlers(deps);
+      const { req, res, status } = createReqRes({ params: { id: validUserId } });
+
+      await handlers.deleteUser(req, res);
+
+      expect(status).toHaveBeenCalledWith(200);
+      expect(deps.deleteConfig).toHaveBeenCalled();
+      expect(deps.deleteAclEntries).toHaveBeenCalled();
     });
 
     it('returns success even when cascade cleanup partially fails', async () => {
@@ -464,6 +481,7 @@ describe('createAdminUsersHandlers', () => {
       expect(status).toHaveBeenCalledWith(404);
       expect(deps.deleteConfig).not.toHaveBeenCalled();
       expect(deps.deleteAclEntries).not.toHaveBeenCalled();
+      expect(deps.purgeUserOversight).not.toHaveBeenCalled();
     });
 
     it('returns 400 for invalid ObjectId', async () => {

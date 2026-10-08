@@ -4,9 +4,10 @@ import { logger, isValidObjectIdString } from '@librechat/data-schemas';
 import type {
   IUser,
   IConfig,
+  RetentionMethods,
   AdminUserListItem,
-  AdminUserSearchResult,
   UserDeleteResult,
+  AdminUserSearchResult,
 } from '@librechat/data-schemas';
 import type { FilterQuery } from 'mongoose';
 import type { Response } from 'express';
@@ -28,7 +29,8 @@ export interface AdminUsersDeps {
    * Thin data-layer delete — removes the User document only.
    * Full cascade of user-owned resources (conversations, messages, files, tokens, etc.)
    * is handled by `UserController.deleteUserController` in the self-delete flow.
-   * This admin endpoint currently cascades Config and AclEntries.
+   * This admin endpoint currently cascades Config, AclEntries and the oversight
+   * collections (Flags deleted, Generation ledger rows anonymized).
    * A future iteration should consolidate the full cascade into a shared service function.
    */
   deleteUserById: (userId: string) => Promise<UserDeleteResult>;
@@ -40,6 +42,7 @@ export interface AdminUsersDeps {
     principalType: PrincipalType;
     principalId: string | Types.ObjectId;
   }) => Promise<void>;
+  purgeUserOversight: RetentionMethods['purgeUserOversight'];
 }
 
 export function createAdminUsersHandlers(deps: AdminUsersDeps): {
@@ -47,7 +50,14 @@ export function createAdminUsersHandlers(deps: AdminUsersDeps): {
   searchUsers: (req: ServerRequest, res: Response) => Promise<Response>;
   deleteUser: (req: ServerRequest, res: Response) => Promise<Response>;
 } {
-  const { findUsers, countUsers, deleteUserById, deleteConfig, deleteAclEntries } = deps;
+  const {
+    findUsers,
+    countUsers,
+    deleteUserById,
+    deleteConfig,
+    deleteAclEntries,
+    purgeUserOversight,
+  } = deps;
 
   async function listUsersHandler(req: ServerRequest, res: Response) {
     try {
@@ -166,6 +176,7 @@ export function createAdminUsersHandlers(deps: AdminUsersDeps): {
       const cleanupResults = await Promise.allSettled([
         deleteConfig(PrincipalType.USER, id),
         deleteAclEntries({ principalType: PrincipalType.USER, principalId: objectId }),
+        purgeUserOversight(objectId),
       ]);
       for (const r of cleanupResults) {
         if (r.status === 'rejected') {
