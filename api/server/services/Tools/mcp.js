@@ -1,7 +1,6 @@
 const { logger } = require('@librechat/data-schemas');
 const {
   getMissingCustomUserVars,
-  getMCPAppToolsPublicationGeneration,
   requiresEphemeralUserConnection,
   getMissingRuntimeBodyPlaceholderFields,
 } = require('@librechat/api');
@@ -13,7 +12,7 @@ const { exchangeOboToken } = require('~/server/services/OboTokenService');
 const { createOboTrustChecker } = require('~/server/services/OboPolicyService');
 const {
   getMCPToolsCacheGeneration,
-  getNextAppToolsPublicationRevision,
+  reserveAppToolsPublicationRevision,
   updateMCPServerTools,
 } = require('~/server/services/Config');
 const { getLogStores } = require('~/cache');
@@ -275,6 +274,13 @@ async function reinitMCPServer({
     if (connection && !oauthRequired) {
       publicationGeneration =
         mcpManager.getToolPublicationGeneration(connection) ?? publicationGeneration;
+      if (serverConfig && !ephemeralServer) {
+        publicationRevision = await reserveAppToolsPublicationRevision({
+          serverName,
+          serverConfig,
+          userId: user.id,
+        });
+      }
       let snapshot;
       if (typeof connection.fetchOrderedToolsSnapshot === 'function') {
         snapshot = await connection.fetchOrderedToolsSnapshot();
@@ -302,16 +308,6 @@ async function reinitMCPServer({
           `[MCP Reinitialize] Discarding stale tools for ${serverName} because its publication generation changed during discovery`,
         );
         tools = null;
-      }
-    }
-
-    if (tools && serverConfig && !ephemeralServer) {
-      const appSharedServer = await registry.isAppServerConfig(serverName, serverConfig);
-      if (appSharedServer) {
-        publicationRevision = await getNextAppToolsPublicationRevision(
-          serverName,
-          getMCPAppToolsPublicationGeneration(serverConfig),
-        );
       }
     }
 

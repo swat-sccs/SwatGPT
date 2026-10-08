@@ -6,8 +6,7 @@ const mockGetGraphApiToken = jest.fn();
 const mockUpdateMCPServerTools = jest.fn();
 const mockGetMCPToolsCacheGeneration = jest.fn().mockResolvedValue('generation-current');
 const mockGetToolPublicationGeneration = jest.fn().mockReturnValue('generation-current');
-const mockGetNextAppToolsPublicationRevision = jest.fn();
-const mockIsAppServerConfig = jest.fn().mockResolvedValue(false);
+const mockReserveAppToolsPublicationRevision = jest.fn();
 
 jest.mock('~/config', () => ({
   getMCPManager: jest.fn(() => ({
@@ -17,7 +16,6 @@ jest.mock('~/config', () => ({
   })),
   getMCPServersRegistry: jest.fn(() => ({
     getServerConfig: jest.fn(),
-    isAppServerConfig: mockIsAppServerConfig,
   })),
   getFlowStateManager: jest.fn(() => ({})),
 }));
@@ -30,7 +28,7 @@ jest.mock('~/models', () => ({
 jest.mock('~/server/services/Config', () => ({
   updateMCPServerTools: mockUpdateMCPServerTools,
   getMCPToolsCacheGeneration: mockGetMCPToolsCacheGeneration,
-  getNextAppToolsPublicationRevision: mockGetNextAppToolsPublicationRevision,
+  reserveAppToolsPublicationRevision: mockReserveAppToolsPublicationRevision,
 }));
 jest.mock('~/server/services/GraphTokenService', () => ({
   getGraphApiToken: mockGetGraphApiToken,
@@ -55,7 +53,7 @@ describe('reinitMCPServer — customUserVars gating (issue #10969)', () => {
   beforeEach(() => {
     jest.clearAllMocks();
     mockUpdateMCPServerTools.mockResolvedValue({});
-    mockIsAppServerConfig.mockResolvedValue(false);
+    mockReserveAppToolsPublicationRevision.mockResolvedValue(undefined);
   });
 
   it('does not connect and exposes no tools when a required customUserVar is unset', async () => {
@@ -132,11 +130,11 @@ describe('reinitMCPServer — customUserVars gating (issue #10969)', () => {
     });
   });
 
-  it('reserves and publishes an ordered revision when republishing an app-shared server', async () => {
+  it('reserves an ordered revision before fetching tools for an app-shared server', async () => {
     const appServerConfig = { type: 'streamable-http', url: 'https://thingy.example.com/mcp' };
-    mockIsAppServerConfig.mockResolvedValue(true);
-    mockGetNextAppToolsPublicationRevision.mockResolvedValue('42');
-    mockGetConnection.mockResolvedValue({ fetchTools: jest.fn().mockResolvedValue([]) });
+    const fetchTools = jest.fn().mockResolvedValue([]);
+    mockReserveAppToolsPublicationRevision.mockResolvedValue('42');
+    mockGetConnection.mockResolvedValue({ fetchTools });
 
     await reinitMCPServer({
       user,
@@ -145,9 +143,14 @@ describe('reinitMCPServer — customUserVars gating (issue #10969)', () => {
       userMCPAuthMap: undefined,
     });
 
-    expect(mockGetNextAppToolsPublicationRevision).toHaveBeenCalledWith(
+    expect(mockReserveAppToolsPublicationRevision).toHaveBeenCalledTimes(1);
+    expect(mockReserveAppToolsPublicationRevision).toHaveBeenCalledWith({
       serverName,
-      expect.any(String),
+      serverConfig: appServerConfig,
+      userId: user.id,
+    });
+    expect(mockReserveAppToolsPublicationRevision.mock.invocationCallOrder[0]).toBeLessThan(
+      fetchTools.mock.invocationCallOrder[0],
     );
     expect(mockUpdateMCPServerTools).toHaveBeenCalledWith({
       userId: user.id,
@@ -157,6 +160,20 @@ describe('reinitMCPServer — customUserVars gating (issue #10969)', () => {
       publicationGeneration: 'generation-current',
       publicationRevision: '42',
     });
+  });
+
+  it('does not reserve a revision when no tools/list fetch will run', async () => {
+    mockGetConnection.mockRejectedValue(new Error('connect failed'));
+
+    await reinitMCPServer({
+      user,
+      serverName,
+      serverConfig: { type: 'streamable-http', url: 'https://thingy.example.com/mcp' },
+      userMCPAuthMap: undefined,
+    });
+
+    expect(mockReserveAppToolsPublicationRevision).not.toHaveBeenCalled();
+    expect(mockUpdateMCPServerTools).not.toHaveBeenCalled();
   });
 
   it('preserves cached tools when live recovery returns an incomplete snapshot', async () => {

@@ -17,6 +17,7 @@ const {
   cacheMCPServerTools,
   updateMCPServerTools,
   getMCPServerTools,
+  reserveAppToolsPublicationRevision,
 } = createMCPToolCacheService({
   getCachedTools,
   updateCachedGlobalTools,
@@ -41,4 +42,5 @@ module.exports = {
   getMCPToolsCacheGeneration,
   renewMCPToolsCacheGeneration,
   getNextAppToolsPublicationRevision,
+  reserveAppToolsPublicationRevision,
 };
