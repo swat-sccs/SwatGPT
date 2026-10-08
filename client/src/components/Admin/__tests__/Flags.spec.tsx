@@ -1,4 +1,4 @@
-import { screen, fireEvent, waitFor } from '@testing-library/react';
+import { screen, within, fireEvent, waitFor } from '@testing-library/react';
 import { renderAdmin, mockCapabilities, pending, mocks } from '../testing/utils';
 import { flag } from '../testing/fixtures';
 import Flags from '../Flags';
@@ -26,6 +26,30 @@ describe('admin flags', () => {
     await waitFor(() =>
       expect(mocks.getAdminFlags).toHaveBeenCalledWith(expect.objectContaining({ resolved: true })),
     );
+  });
+
+  it('reports a failed resolve on the flag that failed', async () => {
+    const showToast = jest.fn();
+    mockCapabilities();
+    mocks.getAdminFlags.mockResolvedValue({
+      flags: [flag, { ...flag, id: 'flag-2', reason: 'Second flag' }],
+      nextCursor: null,
+    });
+    mocks.resolveAdminFlag.mockRejectedValue(new Error('500'));
+    renderAdmin(<Flags />, { showToast });
+
+    const row = (await screen.findByText('Contains a phone number')).closest('li') as HTMLElement;
+    expect(within(row).getByRole('link', { name: 'Open conversation' })).toBeInTheDocument();
+    fireEvent.click(within(row).getByRole('button', { name: 'Resolve' }));
+
+    expect(await within(row).findByRole('alert')).toHaveTextContent(
+      'The action failed. Please try again.',
+    );
+    expect(screen.getAllByRole('alert')).toHaveLength(1);
+    expect(showToast).toHaveBeenCalledWith({
+      message: 'The action failed. Please try again.',
+      status: 'error',
+    });
   });
 
   it('shows an empty queue', async () => {

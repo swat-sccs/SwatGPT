@@ -2,15 +2,14 @@ import { useState } from 'react';
 import { Link, useParams } from 'react-router-dom';
 import { Flag, Download } from 'lucide-react';
 import { Button, useToastContext } from '@librechat/client';
-import type { TAdminFlag } from 'librechat-data-provider';
 import type { TAdminConversationExport } from '~/data-provider';
-import { useAdminConversation, useExportConversation, useResolveFlag } from '~/data-provider';
+import { useAdminConversation, useExportConversation } from '~/data-provider';
 import { AdminCapability, Require, useAdminAccess } from './access';
 import { formatDate, formatInt } from './format';
 import { Loading, ErrorState } from './States';
+import FlagDialog, { FlagList } from './Flag';
 import { triggerDownload } from '~/utils';
 import { useLocalize } from '~/hooks';
-import FlagDialog from './Flag';
 import { userPath } from './Rows';
 import Message from './Message';
 import Pill from './Pill';
@@ -43,47 +42,6 @@ function ExportButton({ conversationId }: { conversationId: string }) {
       <Download className="size-4" aria-hidden="true" />
       {localize('com_admin_export')}
     </Button>
-  );
-}
-
-export function FlagList({ flags }: { flags: TAdminFlag[] }) {
-  const localize = useLocalize();
-  const resolve = useResolveFlag();
-
-  if (flags.length === 0) {
-    return null;
-  }
-  return (
-    <ul aria-label={localize('com_admin_nav_flags')} className="space-y-2">
-      {flags.map((flag) => (
-        <li
-          key={flag.id}
-          className="flex flex-wrap items-center gap-3 rounded-lg border border-border-medium p-3 text-sm"
-        >
-          <Pill tone={flag.resolvedAt ? 'neutral' : 'warning'}>
-            {localize(
-              flag.source === 'manual' ? 'com_admin_flag_manual' : 'com_admin_flag_keyword',
-            )}
-          </Pill>
-          <span className="flex-1 text-text-primary">{flag.reason}</span>
-          <span className="text-xs text-text-tertiary">{formatDate(flag.createdAt)}</span>
-          {flag.resolvedAt ? (
-            <span className="text-xs text-text-secondary">
-              {localize('com_admin_flag_resolved_at', { 0: formatDate(flag.resolvedAt) })}
-            </span>
-          ) : (
-            <Button
-              variant="outline"
-              size="sm"
-              disabled={resolve.isLoading}
-              onClick={() => resolve.mutate(flag.id)}
-            >
-              {localize('com_admin_flag_resolve')}
-            </Button>
-          )}
-        </li>
-      ))}
-    </ul>
   );
 }
 

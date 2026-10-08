@@ -3,12 +3,13 @@ import { Label, Input, Button } from '@librechat/client';
 import type { FormEvent } from 'react';
 import type { TAdminUserControls } from 'librechat-data-provider';
 import { useBanUser, useUnbanUser, useSetUserBalance, useAdminUserControls } from '~/data-provider';
-import { Loading, ErrorState } from './States';
+import { Loading, ErrorState, ActionError, useActionFailedToast } from './States';
 import { formatDate, formatInt } from './format';
 import { useLocalize } from '~/hooks';
 import Pill from './Pill';
 
 const HOUR_MS = 60 * 60 * 1000;
+const BALANCE_NOTE_ID = 'admin-balance-disabled';
 
 const durations = [
   { value: '1h', ms: HOUR_MS, labelKey: 'com_admin_ban_1h' },
@@ -19,21 +20,49 @@ const durations = [
 
 type DurationValue = (typeof durations)[number]['value'];
 
+/** A blank field is not zero: only a whole, non-negative number of credits may be saved. */
+export const parseCredits = (value: string): number | null => {
+  if (value.trim() === '') {
+    return null;
+  }
+  const credits = Number(value);
+  return Number.isSafeInteger(credits) && credits >= 0 ? credits : null;
+};
+
+/** Shown under a lever the server reports as not enforced; an older server omits the flag. */
+function NotEnforcedNote({ id, text }: { id?: string; text: string }) {
+  return (
+    <p id={id} role="note" className="w-full text-xs text-text-warning">
+      {text}
+    </p>
+  );
+}
+
 function BanPanel({ controls }: { controls: TAdminUserControls }) {
   const localize = useLocalize();
   const ban = useBanUser();
   const unban = useUnbanUser();
+  const actionFailed = useActionFailedToast();
   const [duration, setDuration] = useState<DurationValue>('24h');
   const [reason, setReason] = useState('');
+  const notEnforced = controls.banEnforced === false && (
+    <NotEnforcedNote text={localize('com_admin_ban_not_enforced')} />
+  );
 
   const submit = (event: FormEvent<HTMLFormElement>) => {
     event.preventDefault();
     const durationMs = durations.find((option) => option.value === duration)?.ms;
-    ban.mutate({
-      userId: controls.userId,
-      payload: { durationMs, reason: reason.trim() || undefined },
-    });
+    ban.mutate(
+      { userId: controls.userId, payload: { durationMs, reason: reason.trim() || undefined } },
+      { onSuccess: () => unban.reset() },
+    );
   };
+
+  const lift = () =>
+    unban.mutate(
+      { userId: controls.userId },
+      { onSuccess: () => ban.reset(), onError: actionFailed },
+    );
 
   if (controls.banned) {
     return (
@@ -46,13 +75,11 @@ function BanPanel({ controls }: { controls: TAdminUserControls }) {
               : localize('com_admin_ban_permanent')}
           </p>
         </div>
-        <Button
-          variant="outline"
-          disabled={unban.isLoading}
-          onClick={() => unban.mutate({ userId: controls.userId })}
-        >
+        <Button variant="outline" disabled={unban.isLoading} onClick={lift}>
           {localize('com_admin_unban')}
         </Button>
+        {unban.isError && <ActionError />}
+        {notEnforced}
       </div>
     );
   }
@@ -86,11 +113,8 @@ function BanPanel({ controls }: { controls: TAdminUserControls }) {
       <Button type="submit" variant="destructive" disabled={ban.isLoading}>
         {localize('com_admin_ban')}
       </Button>
-      {ban.isError && (
-        <p role="alert" className="w-full text-sm text-text-destructive">
-          {localize('com_admin_action_failed')}
-        </p>
-      )}
+      {ban.isError && <ActionError />}
+      {notEnforced}
     </form>
   );
 }
@@ -100,6 +124,7 @@ function BalancePanel({ controls }: { controls: TAdminUserControls }) {
   const setBalance = useSetUserBalance();
   const current = controls.balance?.tokenCredits ?? 0;
   const [credits, setCredits] = useState(String(current));
+  const disabled = controls.balanceEnabled === false;
 
   useEffect(() => {
     setCredits(String(current));
@@ -107,8 +132,8 @@ function BalancePanel({ controls }: { controls: TAdminUserControls }) {
 
   const submit = (event: FormEvent<HTMLFormElement>) => {
     event.preventDefault();
-    const tokenCredits = Number(credits);
-    if (!Number.isFinite(tokenCredits) || tokenCredits < 0) {
+    const tokenCredits = parseCredits(credits);
+    if (disabled || tokenCredits == null) {
       return;
     }
     setBalance.mutate({ userId: controls.userId, payload: { tokenCredits } });
@@ -123,12 +148,19 @@ function BalancePanel({ controls }: { controls: TAdminUserControls }) {
           type="number"
           min={0}
           step={1}
+          required={true}
+          disabled={disabled}
+          aria-describedby={disabled ? BALANCE_NOTE_ID : undefined}
           value={credits}
           onChange={(event) => setCredits(event.target.value)}
           className="w-40 tabular-nums"
         />
       </div>
-      <Button type="submit" variant="outline" disabled={setBalance.isLoading}>
+      <Button
+        type="submit"
+        variant="outline"
+        disabled={disabled || setBalance.isLoading || parseCredits(credits) == null}
+      >
         {localize('com_ui_save')}
       </Button>
       <p className="w-full text-xs text-text-secondary">
@@ -144,10 +176,9 @@ function BalancePanel({ controls }: { controls: TAdminUserControls }) {
             })
           : localize('com_admin_balance_none')}
       </p>
-      {setBalance.isError && (
-        <p role="alert" className="w-full text-sm text-text-destructive">
-          {localize('com_admin_action_failed')}
-        </p>
+      {setBalance.isError && <ActionError />}
+      {disabled && (
+        <NotEnforcedNote id={BALANCE_NOTE_ID} text={localize('com_admin_balance_disabled')} />
       )}
     </form>
   );

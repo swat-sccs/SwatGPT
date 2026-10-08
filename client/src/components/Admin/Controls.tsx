@@ -1,8 +1,8 @@
 import { useState, useEffect } from 'react';
 import { OGDialog, OGDialogTemplate, Label, Button, Switch, Textarea } from '@librechat/client';
 import type { TAdminPauseState } from 'librechat-data-provider';
+import { Loading, ErrorState, ActionError, useActionFailedToast } from './States';
 import { useAdminPause, useSetPause } from '~/data-provider';
-import { Loading, ErrorState } from './States';
 import { AdminCapability, Require } from './access';
 import { formatDate } from './format';
 import { useLocalize } from '~/hooks';
@@ -13,6 +13,7 @@ function Pause({ state }: { state: TAdminPauseState }) {
   const setPause = useSetPause();
   const [message, setMessage] = useState(state.message);
   const [confirmOpen, setConfirmOpen] = useState(false);
+  const actionFailed = useActionFailedToast();
 
   useEffect(() => {
     setMessage(state.message);
@@ -20,6 +21,7 @@ function Pause({ state }: { state: TAdminPauseState }) {
 
   const toggle = (checked: boolean) => {
     if (checked) {
+      setPause.reset();
       setConfirmOpen(true);
       return;
     }
@@ -27,7 +29,17 @@ function Pause({ state }: { state: TAdminPauseState }) {
   };
 
   const confirmPause = () => {
-    setPause.mutate({ paused: true, message }, { onSuccess: () => setConfirmOpen(false) });
+    setPause.mutate(
+      { paused: true, message },
+      { onSuccess: () => setConfirmOpen(false), onError: actionFailed },
+    );
+  };
+
+  const changeConfirmOpen = (open: boolean) => {
+    setConfirmOpen(open);
+    if (!open) {
+      setPause.reset();
+    }
   };
 
   return (
@@ -79,18 +91,15 @@ function Pause({ state }: { state: TAdminPauseState }) {
             {localize('com_admin_pause_save_message')}
           </Button>
         </div>
-        {setPause.isError && (
-          <p role="alert" className="text-sm text-text-destructive">
-            {localize('com_admin_action_failed')}
-          </p>
-        )}
+        {setPause.isError && !confirmOpen && <ActionError />}
       </div>
 
-      <OGDialog open={confirmOpen} onOpenChange={setConfirmOpen}>
+      <OGDialog open={confirmOpen} onOpenChange={changeConfirmOpen}>
         <OGDialogTemplate
           title={localize('com_admin_pause_confirm_title')}
           description={localize('com_admin_pause_confirm_description')}
           className="max-w-lg"
+          main={setPause.isError ? <ActionError /> : undefined}
           selection={
             <Button variant="destructive" disabled={setPause.isLoading} onClick={confirmPause}>
               {localize('com_admin_pause_confirm')}

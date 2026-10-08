@@ -1,5 +1,5 @@
 import { ToastContext } from '@librechat/client';
-import { screen, fireEvent, waitFor } from '@testing-library/react';
+import { screen, within, fireEvent, waitFor } from '@testing-library/react';
 import type { TAdminConversationExport } from '~/data-provider';
 import { renderAdmin, mockCapabilities, pending, mocks } from '../testing/utils';
 import { conversationDetail, flag } from '../testing/fixtures';
@@ -45,6 +45,56 @@ describe('admin conversation reader', () => {
         reason: 'needs review',
       }),
     );
+  });
+
+  it('labels generation metadata and localizes a failed status', async () => {
+    mockCapabilities();
+    const [prompt, reply] = conversationDetail.messages;
+    const generation = reply.generation && {
+      ...reply.generation,
+      status: 'aborted' as const,
+      errorType: 'rate_limit',
+    };
+    mocks.getAdminConversation.mockResolvedValue({
+      ...conversationDetail,
+      messages: [prompt, { ...reply, generation }],
+    });
+    renderAdmin(<Conversation />, routeOptions);
+
+    const details = await screen.findByLabelText('Generation details');
+    expect(details.tagName).toBe('DL');
+    const terms = within(details)
+      .getAllByRole('term')
+      .map((term) => term.textContent);
+    expect(terms).toEqual([
+      'Model',
+      'Tokens',
+      'Time to first token',
+      'Duration',
+      'Tool calls',
+      'Knowledge base chunks',
+      'Status',
+    ]);
+    expect(within(details).getAllByRole('definition')).toHaveLength(terms.length);
+    expect(within(details).getByText('Aborted: rate_limit')).toBeInTheDocument();
+  });
+
+  it('clears a failed flag attempt when the dialog is closed', async () => {
+    mockCapabilities();
+    mocks.getAdminConversation.mockResolvedValue(conversationDetail);
+    mocks.flagAdminConversation.mockRejectedValueOnce(new Error('500'));
+    renderAdmin(<Conversation />, routeOptions);
+
+    fireEvent.click(await screen.findByRole('button', { name: /^Flag$/ }));
+    fireEvent.change(await screen.findByLabelText('Reason'), { target: { value: 'spam' } });
+    fireEvent.click(screen.getByRole('button', { name: 'Flag conversation' }));
+    const dialog = screen.getByRole('dialog');
+    expect(await within(dialog).findByRole('alert')).toBeInTheDocument();
+
+    fireEvent.click(within(dialog).getByRole('button', { name: 'Cancel' }));
+    await waitFor(() => expect(screen.queryByRole('dialog')).not.toBeInTheDocument());
+    fireEvent.click(screen.getByRole('button', { name: /^Flag$/ }));
+    expect(within(await screen.findByRole('dialog')).queryByRole('alert')).not.toBeInTheDocument();
   });
 
   it('hides the export button without export:conversations', async () => {

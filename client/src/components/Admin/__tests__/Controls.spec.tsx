@@ -1,4 +1,4 @@
-import { screen, fireEvent, waitFor } from '@testing-library/react';
+import { screen, within, fireEvent, waitFor } from '@testing-library/react';
 import { renderAdmin, mockCapabilities, pending, mocks } from '../testing/utils';
 import { pause } from '../testing/fixtures';
 import Controls from '../Controls';
@@ -41,6 +41,34 @@ describe('admin controls', () => {
     await waitFor(() =>
       expect(mocks.setAdminPause).toHaveBeenLastCalledWith({ paused: true, message: 'Back soon' }),
     );
+  });
+
+  it('shows a pause failure inside the confirm dialog and clears it on reopen', async () => {
+    const showToast = jest.fn();
+    mockCapabilities();
+    mocks.getAdminPause.mockResolvedValue(pause);
+    mocks.setAdminPause.mockRejectedValueOnce(new Error('500'));
+    renderAdmin(<Controls />, { showToast });
+
+    fireEvent.click(await screen.findByRole('switch'));
+    const dialog = await screen.findByRole('dialog');
+    fireEvent.click(within(dialog).getByRole('button', { name: 'Pause SwatGPT' }));
+
+    expect(await within(dialog).findByRole('alert')).toHaveTextContent(
+      'The action failed. Please try again.',
+    );
+    expect(showToast).toHaveBeenCalledWith({
+      message: 'The action failed. Please try again.',
+      status: 'error',
+    });
+    expect(screen.getByRole('dialog')).toBeInTheDocument();
+
+    fireEvent.click(within(dialog).getByRole('button', { name: 'Cancel' }));
+    await waitFor(() => expect(screen.queryByRole('dialog')).not.toBeInTheDocument());
+    expect(screen.queryByRole('alert')).not.toBeInTheDocument();
+
+    fireEvent.click(screen.getByRole('switch'));
+    expect(within(await screen.findByRole('dialog')).queryByRole('alert')).not.toBeInTheDocument();
   });
 
   it('hides controls without manage:controls', async () => {

@@ -180,6 +180,8 @@ export const controls: TAdminUserControls = {
   userId: user.id,
   banned: false,
   banExpiresAt: null,
+  banEnforced: true,
+  balanceEnabled: true,
   balance: {
     tokenCredits: 50_000,
     autoRefillEnabled: true,
