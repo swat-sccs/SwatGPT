@@ -128,6 +128,7 @@ describe('LibreChat streamable-http handshake', () => {
 async function listen(
   getHours = vi.fn().mockResolvedValue(hoursResult('Sharples Dining Hall')),
   allowedHosts = '127.0.0.1,localhost',
+  env: Record<string, string> = {},
 ) {
   const port = await freePort();
   const service = {
@@ -143,10 +144,88 @@ async function listen(
     MCP_ALLOWED_HOSTS: allowedHosts,
     POLLING_ENABLED: 'false',
     DATABASE_URL: 'postgres://unused',
+    ...env,
   }), service);
   await server.listen();
   servers.push(server);
-  return { port, getHours };
+  return { port, getHours, server };
+}
+
+describe('MCP session lifecycle', () => {
+  it('expires sessions a client abandoned without sending DELETE', async () => {
+    const { port, server } = await listen(undefined, undefined, { MCP_SESSION_IDLE_SECONDS: '60' });
+    const sessionId = (await initialize(port)).headers.get('mcp-session-id');
+    expect(server.sessionCount).toBe(1);
+
+    expect(await server.sweepIdleSessions(Date.now() + 30_000)).toBe(0);
+    expect(await server.sweepIdleSessions(Date.now() + 61_000)).toBe(1);
+
+    expect(server.sessionCount).toBe(0);
+    const swept = await mcpRequest(port, { jsonrpc: '2.0', id: 2, method: 'tools/list' }, sessionId);
+    expect(swept.status).toBe(404);
+  });
+
+  it('never sweeps a session whose event stream is still open', async () => {
+    const { port, server } = await listen(undefined, undefined, { MCP_SESSION_IDLE_SECONDS: '60' });
+    const client = new Client({ name: 'librechat', version: '1.30.0' });
+    await client.connect(new StreamableHTTPClientTransport(new URL(`http://127.0.0.1:${port}/mcp`)));
+    await waitFor(() => openStreams(server) > 0);
+
+    expect(await server.sweepIdleSessions(Date.now() + 3_600_000)).toBe(0);
+    expect(server.sessionCount).toBe(1);
+    await client.close();
+  });
+
+  it('does not keep a session for an initialize the transport rejected', async () => {
+    const { port, server } = await listen();
+    const rejected = await fetch(`http://127.0.0.1:${port}/mcp`, {
+      method: 'POST',
+      headers: { 'content-type': 'application/json', accept: 'text/plain' },
+      body: JSON.stringify(initializeBody()),
+    });
+
+    expect(rejected.status).toBeGreaterThanOrEqual(400);
+    expect(rejected.status).toBeLessThan(500);
+    expect(server.sessionCount).toBe(0);
+  });
+
+  it('evicts the least recently used idle session at the cap', async () => {
+    const { port, server } = await listen(undefined, undefined, { MCP_MAX_SESSIONS: '1' });
+    const first = (await initialize(port)).headers.get('mcp-session-id');
+    const second = (await initialize(port)).headers.get('mcp-session-id');
+
+    expect(second).toBeTruthy();
+    expect(server.sessionCount).toBe(1);
+    expect((await mcpRequest(port, { jsonrpc: '2.0', id: 2, method: 'tools/list' }, first)).status).toBe(404);
+  });
+});
+
+function initializeBody() {
+  return {
+    jsonrpc: '2.0',
+    id: 1,
+    method: 'initialize',
+    params: { protocolVersion: '2025-03-26', capabilities: {}, clientInfo: { name: 'librechat', version: '0' } },
+  };
+}
+
+async function initialize(port: number) {
+  const response = await mcpRequest(port, initializeBody());
+  expect(response.status).toBe(200);
+  return response;
+}
+
+function openStreams(server: SwatHttpServer): number {
+  const sessions = (server as unknown as { sessions: Map<string, { openRequests: number }> }).sessions;
+  return [...sessions.values()].reduce((total, session) => total + session.openRequests, 0);
+}
+
+async function waitFor(condition: () => boolean, timeoutMs = 2_000): Promise<void> {
+  const deadline = Date.now() + timeoutMs;
+  while (!condition()) {
+    if (Date.now() > deadline) throw new Error('condition not met in time');
+    await new Promise((resolve) => setTimeout(resolve, 10));
+  }
 }
 
 async function mcpRequest(port: number, body: unknown, sessionId?: string | null) {

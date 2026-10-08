@@ -1,5 +1,5 @@
 import { randomUUID } from 'node:crypto';
-import type { Server as HttpServer } from 'node:http';
+import type { Server as HttpServer, ServerResponse } from 'node:http';
 import { createMcpExpressApp } from '@modelcontextprotocol/express';
 import { NodeStreamableHTTPServerTransport } from '@modelcontextprotocol/node';
 import { isInitializeRequest, type McpServer } from '@modelcontextprotocol/server';
@@ -12,11 +12,17 @@ import { log } from './util.js';
 interface Session {
   transport: NodeStreamableHTTPServerTransport;
   server: McpServer;
+  lastSeen: number;
+  /** Requests still open on this session, such as LibreChat's long-lived GET event stream. */
+  openRequests: number;
 }
+
+const SESSION_SWEEP_INTERVAL_MS = 60_000;
 
 export class SwatHttpServer {
   private readonly sessions = new Map<string, Session>();
   private httpServer?: HttpServer;
+  private sweeper?: NodeJS.Timeout;
 
   constructor(private readonly config: Config, private readonly service: SwatService) {}
 
@@ -53,11 +59,16 @@ export class SwatHttpServer {
             res.status(404).json({ jsonrpc: '2.0', error: { code: -32001, message: 'Unknown MCP session' }, id: null });
             return;
           }
+          this.track(session, res);
           await session.transport.handleRequest(req, res, req.body);
           return;
         }
         if (req.method !== 'POST' || !isMcpInitializeRequest(req.body)) {
           res.status(400).json({ jsonrpc: '2.0', error: { code: -32000, message: 'MCP initialization required' }, id: null });
+          return;
+        }
+        if (!this.makeRoomForSession()) {
+          res.status(503).json({ jsonrpc: '2.0', error: { code: -32000, message: 'Too many active MCP sessions' }, id: null });
           return;
         }
 
@@ -66,25 +77,25 @@ export class SwatHttpServer {
         const transport = new NodeStreamableHTTPServerTransport({
           sessionIdGenerator: () => nextSessionId,
           onsessioninitialized: (id) => {
-            this.sessions.set(id, { transport, server: mcpServer });
+            const session: Session = { transport, server: mcpServer, lastSeen: Date.now(), openRequests: 0 };
+            this.sessions.set(id, session);
+            this.track(session, res);
             log('info', 'MCP session initialized', { sessionId: id });
           },
           onsessionclosed: async (id) => {
-            this.sessions.delete(id);
-            await mcpServer.close().catch(() => undefined);
+            await this.closeSession(id);
             log('info', 'MCP session closed', { sessionId: id });
           },
         });
-        this.sessions.set(nextSessionId, { transport, server: mcpServer });
         try {
           await mcpServer.connect(transport);
           await transport.handleRequest(req, res, req.body);
         } catch (error) {
           this.sessions.delete(nextSessionId);
-          await transport.close().catch(() => undefined);
-          await mcpServer.close().catch(() => undefined);
+          await closeQuietly(transport, mcpServer);
           throw error;
         }
+        if (!this.sessions.has(nextSessionId)) await closeQuietly(transport, mcpServer);
       } catch (error) {
         log('error', 'MCP HTTP request failed', { error: error instanceof Error ? error.message : String(error) });
         if (!res.headersSent) res.status(500).json({ jsonrpc: '2.0', error: { code: -32603, message: 'Internal server error' }, id: null });
@@ -95,17 +106,68 @@ export class SwatHttpServer {
       this.httpServer = app.listen(this.config.port, this.config.host, (error?: Error) => error ? reject(error) : resolve());
       this.httpServer.once('error', reject);
     });
+    this.sweeper = setInterval(() => void this.sweepIdleSessions(), SESSION_SWEEP_INTERVAL_MS);
+    this.sweeper.unref();
     log('info', 'SwatGPT MCP server listening', { host: this.config.host, port: this.config.port });
   }
 
+  get sessionCount(): number {
+    return this.sessions.size;
+  }
+
+  /**
+   * Closes sessions with no open request that have been idle longer than the configured TTL.
+   * Clients that vanish without a DELETE (crash, network loss) are reclaimed this way; a swept
+   * client that comes back gets 404, which tells it to re-initialize.
+   */
+  async sweepIdleSessions(now = Date.now()): Promise<number> {
+    const idle = [...this.sessions.entries()]
+      .filter(([, session]) => session.openRequests === 0 && now - session.lastSeen > this.config.mcpSessionIdleMs)
+      .map(([id]) => id);
+    await Promise.all(idle.map((id) => this.closeSession(id)));
+    if (idle.length) log('info', 'Closed idle MCP sessions', { closed: idle.length, remaining: this.sessions.size });
+    return idle.length;
+  }
+
+  private track(session: Session, res: ServerResponse): void {
+    session.lastSeen = Date.now();
+    session.openRequests += 1;
+    res.once('close', () => {
+      session.openRequests -= 1;
+      session.lastSeen = Date.now();
+    });
+  }
+
+  /** Keeps the map under the cap by evicting the least recently seen idle session. */
+  private makeRoomForSession(): boolean {
+    if (this.sessions.size < this.config.mcpMaxSessions) return true;
+    const oldest = [...this.sessions.entries()]
+      .filter(([, session]) => session.openRequests === 0)
+      .reduce<[string, Session] | undefined>((best, entry) => !best || entry[1].lastSeen < best[1].lastSeen ? entry : best, undefined);
+    if (!oldest) return false;
+    void this.closeSession(oldest[0]);
+    log('warn', 'Evicted the least recently used MCP session to stay under the session cap', { sessionId: oldest[0] });
+    return true;
+  }
+
+  private async closeSession(id: string): Promise<void> {
+    const session = this.sessions.get(id);
+    if (!session) return;
+    this.sessions.delete(id);
+    await closeQuietly(session.transport, session.server);
+  }
+
   async close(): Promise<void> {
-    await Promise.all([...this.sessions.values()].map(async ({ transport, server }) => {
-      await transport.close().catch(() => undefined);
-      await server.close().catch(() => undefined);
-    }));
-    this.sessions.clear();
+    if (this.sweeper) clearInterval(this.sweeper);
+    this.sweeper = undefined;
+    await Promise.all([...this.sessions.keys()].map((id) => this.closeSession(id)));
     if (this.httpServer) await new Promise<void>((resolve, reject) => this.httpServer!.close((error) => error ? reject(error) : resolve()));
   }
+}
+
+async function closeQuietly(transport: NodeStreamableHTTPServerTransport, server: McpServer): Promise<void> {
+  await transport.close().catch(() => undefined);
+  await server.close().catch(() => undefined);
 }
 
 function headerString(value: string | string[] | undefined): string | undefined {
