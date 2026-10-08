@@ -1,4 +1,4 @@
-import { screen } from '@testing-library/react';
+import { screen, fireEvent } from '@testing-library/react';
 import { renderAdmin, mockCapabilities, pending, mocks, CHAT_HOME } from '../testing/utils';
 import { Gate } from '../access';
 
@@ -27,14 +27,23 @@ describe('admin access gate', () => {
     expect(screen.queryByText(SECRET)).not.toBeInTheDocument();
   });
 
-  it('redirects to the chat when the capabilities request fails', async () => {
-    mocks.getAdminCapabilities.mockRejectedValue(new Error('forbidden'));
+  it('offers a retry instead of redirecting when the capabilities request fails', async () => {
+    mocks.getAdminCapabilities.mockRejectedValueOnce(new Error('Service Unavailable'));
     renderAdmin(
       <Gate>
         <div>{SECRET}</div>
       </Gate>,
     );
-    expect(await screen.findByText(CHAT_HOME)).toBeInTheDocument();
+    expect(await screen.findByRole('alert')).toHaveTextContent(
+      'Could not check your admin access.',
+    );
+    expect(screen.queryByText(CHAT_HOME)).not.toBeInTheDocument();
+    expect(screen.queryByText(SECRET)).not.toBeInTheDocument();
+
+    mockCapabilities(['access:admin']);
+    fireEvent.click(screen.getByRole('button', { name: 'Retry' }));
+    expect(await screen.findByText(SECRET)).toBeInTheDocument();
+    expect(mocks.getAdminCapabilities).toHaveBeenCalledTimes(2);
   });
 
   it('renders children when access:admin is granted', async () => {

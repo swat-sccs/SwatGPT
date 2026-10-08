@@ -9,6 +9,7 @@
   "com_a11y_summarize_completed": "Context summarized.",
   "com_a11y_summarize_failed": "Summarization failed, continuing with available context.",
   "com_a11y_summarize_started": "Summarizing context.",
+  "com_admin_access_error": "Could not check your admin access.",
   "com_admin_action_failed": "The action failed. Please try again.",
   "com_admin_back_to_chat": "Back to chat",
   "com_admin_balance_credits": "Token credits",
