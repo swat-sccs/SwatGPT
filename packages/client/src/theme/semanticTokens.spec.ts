@@ -102,6 +102,46 @@ describe('dark destructive text', () => {
   });
 });
 
+describe('dark submit fill and focus ring', () => {
+  it('match between the CSS variables and the runtime theme', () => {
+    const appStyles = readFileSync(
+      join(__dirname, '..', '..', '..', '..', 'client', 'src', 'style.css'),
+      'utf8',
+    );
+    const darkStart = appStyles.indexOf('\n.dark {');
+    const darkBlock = appStyles.slice(darkStart, appStyles.indexOf('\n}', darkStart));
+
+    expect(darkBlock).toMatch(/--surface-submit:\s*168 74 18;/);
+    expect(darkBlock).toMatch(/--surface-submit-hover:\s*143 62 14;/);
+    expect(darkBlock).toMatch(/--gray-400:\s*146 154 166;/);
+    expect(darkBlock).toMatch(/--ring-primary:\s*var\(--gray-400\);/);
+    expect(darkTheme['rgb-surface-submit']).toBe('168 74 18');
+    expect(darkTheme['rgb-surface-submit-hover']).toBe('143 62 14');
+    expect(darkTheme['rgb-ring-primary']).toBe('146 154 166');
+  });
+});
+
+describe('browser chrome color', () => {
+  it('uses the SCCS paper and navy grounds instead of the retired garnet', () => {
+    const indexHtml = readFileSync(
+      join(__dirname, '..', '..', '..', '..', 'client', 'index.html'),
+      'utf8',
+    );
+    const themeColors = Array.from(
+      indexHtml.matchAll(/<meta name="theme-color" media="([^"]+)" content="([^"]+)"/g),
+      ([, media, content]) => [media, content],
+    );
+
+    expect(indexHtml).not.toMatch(/#a11833/i);
+    expect(themeColors).toEqual([
+      ['(prefers-color-scheme: light)', '#faf6ef'],
+      ['(prefers-color-scheme: dark)', '#0c1019'],
+    ]);
+    expect(defaultTheme['rgb-surface-secondary']).toBe('250 246 239');
+    expect(darkTheme['rgb-surface-primary']).toBe('12 16 25');
+  });
+});
+
 describe('light brand text', () => {
   it('uses the contrasting purple foreground in the default theme', () => {
     expect(defaultTheme['rgb-brand-purple']).toBe('126 34 206');
@@ -168,6 +208,23 @@ const statusTextTokens: Array<keyof IThemeRGB> = ['rgb-text-warning', 'rgb-text-
 const statusHues = ['success', 'info', 'warning', 'error', 'neutral'] as const;
 
 const WCAG_AA_NORMAL = 4.5;
+const WCAG_NON_TEXT = 3;
+
+/** Fills that carry `text-on-status` labels (Button `submit`/`destructive` variants). */
+const onStatusFills: Array<keyof IThemeRGB> = [
+  'rgb-surface-submit',
+  'rgb-surface-submit-hover',
+  'rgb-surface-destructive',
+  'rgb-surface-destructive-hover',
+];
+
+/** Surfaces `focus-visible:ring-ring-primary` controls sit on. */
+const ringSurfaces: Array<keyof IThemeRGB> = [
+  'rgb-surface-primary',
+  'rgb-surface-primary-alt',
+  'rgb-surface-secondary',
+  'rgb-surface-tertiary',
+];
 
 function toRgb(theme: IThemeRGB, token: keyof IThemeRGB): Rgb {
   const parts = theme[token]?.trim().split(/\s+/).map(Number);
@@ -195,11 +252,12 @@ function belowAA(
   theme: IThemeRGB,
   textTokens: Array<keyof IThemeRGB>,
   surfaces: Array<keyof IThemeRGB>,
+  minimum = WCAG_AA_NORMAL,
 ): string[] {
   return textTokens.flatMap((text) =>
     surfaces.flatMap((surface) => {
       const ratio = contrast(toRgb(theme, text), toRgb(theme, surface));
-      return ratio < WCAG_AA_NORMAL ? [`${text} on ${surface}: ${ratio.toFixed(2)}:1`] : [];
+      return ratio < minimum ? [`${text} on ${surface}: ${ratio.toFixed(2)}:1`] : [];
     }),
   );
 }
@@ -216,6 +274,14 @@ describe.each([
 
   it('keeps warning and destructive text at WCAG AA on canvas surfaces', () => {
     expect(belowAA(theme, statusTextTokens, canvasSurfaces)).toEqual([]);
+  });
+
+  it('keeps on-status text at WCAG AA on submit and destructive fills', () => {
+    expect(belowAA(theme, ['rgb-text-on-status'], onStatusFills)).toEqual([]);
+  });
+
+  it('keeps the focus ring at the 3:1 non-text minimum on every control surface', () => {
+    expect(belowAA(theme, ['rgb-ring-primary'], ringSurfaces, WCAG_NON_TEXT)).toEqual([]);
   });
 
   it('keeps every status hue at WCAG AA against its own subtle fill', () => {

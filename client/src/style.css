@@ -267,6 +267,7 @@ html {
   --link-visited: 192 132 252;
   --accent-primary: 244 101 35;
   --accent-primary-hover: 246 128 74;
+  --ring-primary: var(--gray-400);
   --header-primary: var(--gray-700);
   --header-hover: var(--gray-600);
   --header-button-hover: var(--gray-700);
@@ -284,8 +285,8 @@ html {
   --surface-tertiary-alt: var(--gray-700);
   --surface-dialog: var(--gray-875);
   --surface-overlay: 0 0 0;
-  --surface-submit: 244 101 35;
-  --surface-submit-hover: 232 84 18;
+  --surface-submit: 168 74 18;
+  --surface-submit-hover: 143 62 14;
   --surface-destructive: var(--red-800);
   --surface-destructive-hover: var(--red-900);
   --surface-chat: var(--gray-700);
