@@ -90,6 +90,8 @@ export interface RecordGenerationInput {
   aborted: boolean;
   error?: unknown;
   tenantId?: string;
+  /** A temporary conversation's `expiredAt`; the ledger row and any flags expire with it. */
+  expiredAt?: Date | null;
 }
 
 function isPrimaryUsage(usage: CollectedUsage | null | undefined): usage is CollectedUsage {
@@ -312,6 +314,7 @@ async function screenForFlags(
         reason,
         source: 'keyword',
         tenantId: input.tenantId,
+        expiredAt: input.expiredAt ?? undefined,
       }),
     ),
   );
@@ -379,6 +382,7 @@ export async function recordGeneration(
       status: resolveStatus(input.aborted, errorType != null),
       errorType,
       tenantId: input.tenantId,
+      expiredAt: input.expiredAt ?? undefined,
     });
   } catch (error) {
     logger.error('[recordGeneration] Failed to build generation record', error);

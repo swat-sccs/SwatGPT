@@ -91,6 +91,27 @@ describe('createFlag / createFlagAdmin', () => {
     expect(typeof mapped.id).toBe('string');
     expect(new Date(mapped.createdAt).getTime()).not.toBeNaN();
   });
+
+  it('stores a temporary conversation expiry under the TTL index', async () => {
+    const expiredAt = new Date(Date.UTC(2026, 10, 1));
+    const doc = await methods.createFlag({
+      conversationId: 'c-temp',
+      user: alice,
+      reason: 'threat',
+      source: 'keyword',
+      expiredAt,
+    });
+    const stored = await models.Flag.findById(doc._id).lean();
+    expect(stored?.expiredAt?.toISOString()).toBe(expiredAt.toISOString());
+
+    await models.Flag.syncIndexes();
+    const indexes = await models.Flag.collection.indexes();
+    expect(indexes).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({ key: { expiredAt: 1 }, expireAfterSeconds: 0 }),
+      ]),
+    );
+  });
 });
 
 describe('listFlags', () => {

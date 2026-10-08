@@ -20,6 +20,8 @@ export interface CreateFlagInput {
   source: FlagSource;
   createdBy?: string | Types.ObjectId;
   tenantId?: string;
+  /** Set for flags on a temporary conversation; the TTL index removes the flag with it. */
+  expiredAt?: Date | null;
 }
 
 /**

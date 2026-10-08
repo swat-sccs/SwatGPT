@@ -283,6 +283,23 @@ describe('recordGeneration', () => {
     });
   });
 
+  it('forwards a temporary conversation expiry to the ledger row and its flags', async () => {
+    const expiredAt = new Date('2026-11-01T00:00:00Z');
+    const deps = createDeps({ findKeywordFlags: jest.fn().mockReturnValue(['self-harm']) });
+    await recordGeneration(deps, createInput({ expiredAt }));
+    expect(deps.createGeneration).toHaveBeenCalledWith(expect.objectContaining({ expiredAt }));
+    expect(deps.createFlag).toHaveBeenCalledWith(expect.objectContaining({ expiredAt }));
+  });
+
+  it('omits expiry for a permanent conversation', async () => {
+    const deps = createDeps({ findKeywordFlags: jest.fn().mockReturnValue(['self-harm']) });
+    await recordGeneration(deps, createInput({ expiredAt: null }));
+    const [ledgerRow] = (deps.createGeneration as jest.Mock).mock.calls[0];
+    const [flag] = (deps.createFlag as jest.Mock).mock.calls[0];
+    expect(ledgerRow.expiredAt).toBeUndefined();
+    expect(flag.expiredAt).toBeUndefined();
+  });
+
   it('skips when identifiers are missing and never throws on failures', async () => {
     const skipped = createDeps();
     await recordGeneration(skipped, createInput({ messageId: undefined }));
