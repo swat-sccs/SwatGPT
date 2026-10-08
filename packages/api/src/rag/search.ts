@@ -54,44 +54,81 @@ async function queryChannel(
   return response.result?.points ?? [];
 }
 
-function mergeChannels(dense: QdrantPoint[], sparse: QdrantPoint[]): KbCandidate[] {
-  const byId = new Map<string | number, KbCandidate>();
-  for (const point of dense) {
-    if (isKbPayload(point.payload)) {
-      byId.set(point.id, { payload: point.payload });
+/** One retrieval query's inputs: its dense vector and, when it has lexical tokens, its sparse vector. */
+export interface KbSearchQuery {
+  vector: number[];
+  sparse?: SparseQuery;
+}
+
+interface ChannelResult {
+  lexical: boolean;
+  points: QdrantPoint[];
+}
+
+/** Best (lowest) 1-based rank of each point across the lexical channels. */
+function lexicalRanks(channels: ChannelResult[]): Map<string | number, number> {
+  const ranks = new Map<string | number, number>();
+  for (const { lexical, points } of channels) {
+    if (!lexical) {
+      continue;
     }
+    points.forEach((point, index) => {
+      const best = ranks.get(point.id);
+      if (best === undefined || index + 1 < best) {
+        ranks.set(point.id, index + 1);
+      }
+    });
   }
-  sparse.forEach((point, index) => {
-    if (!isKbPayload(point.payload)) {
-      return;
-    }
-    const existing = byId.get(point.id);
-    if (existing) {
-      existing.lexicalRank = index + 1;
-      return;
-    }
-    byId.set(point.id, { payload: point.payload, lexicalRank: index + 1 });
-  });
-  return [...byId.values()].slice(0, CANDIDATE_LIMIT);
+  return ranks;
 }
 
 /**
- * Hybrid KB search: a dense (semantic) and a sparse (lexical, IDF-weighted)
- * channel queried in parallel, deduplicated into one candidate pool for the
- * reranker. The lexical channel surfaces chunks whose titles or text literally
- * mention query terms (campus entities like "Cornell") even when the dense
- * channel is dominated by the topical part of the query; `lexicalRank` records
- * each candidate's position in that channel.
+ * Deduplicated union of every channel, filled round-robin by rank so each channel
+ * contributes equally to the capped pool — a lexical-only hit at rank 14 is not
+ * crowded out by a full page of dense hits.
+ */
+function mergeChannels(channels: ChannelResult[]): KbCandidate[] {
+  const ranks = lexicalRanks(channels);
+  const byId = new Map<string | number, KbCandidate>();
+  const depth = Math.max(0, ...channels.map(({ points }) => points.length));
+  for (let rank = 0; rank < depth; rank++) {
+    for (const { points } of channels) {
+      if (byId.size >= CANDIDATE_LIMIT) {
+        return [...byId.values()];
+      }
+      const point = points[rank];
+      if (point && !byId.has(point.id) && isKbPayload(point.payload)) {
+        byId.set(point.id, { payload: point.payload, lexicalRank: ranks.get(point.id) });
+      }
+    }
+  }
+  return [...byId.values()];
+}
+
+/**
+ * Hybrid KB search: for each query, a dense (semantic) and a sparse (lexical,
+ * IDF-weighted) channel, all queried in parallel and deduplicated into one
+ * candidate pool for the reranker. There is no score fusion — the reranker
+ * orders the pool. The lexical channel surfaces chunks whose titles or text
+ * literally mention query terms (campus entities like "Cornell") even when the
+ * dense channel is dominated by the topical part of the query; `lexicalRank`
+ * records each candidate's best position in a lexical channel.
  */
 export async function searchKb(
   baseUrl: string,
-  vector: number[],
-  sparse: SparseQuery | undefined,
+  queries: KbSearchQuery[],
   signal: AbortSignal,
 ): Promise<KbCandidate[]> {
-  const [dense, lexical] = await Promise.all([
-    queryChannel(baseUrl, 'dense', vector, signal),
-    sparse ? queryChannel(baseUrl, 'sparse', sparse, signal) : Promise.resolve([]),
-  ]);
-  return mergeChannels(dense, lexical);
+  const channels = await Promise.all(
+    queries.flatMap(({ vector, sparse }): Promise<ChannelResult>[] => [
+      queryChannel(baseUrl, 'dense', vector, signal).then((points) => ({ lexical: false, points })),
+      sparse
+        ? queryChannel(baseUrl, 'sparse', sparse, signal).then((points) => ({
+            lexical: true,
+            points,
+          }))
+        : Promise.resolve({ lexical: true, points: [] }),
+    ]),
+  );
+  return mergeChannels(channels);
 }

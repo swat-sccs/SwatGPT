@@ -11,19 +11,22 @@ interface TeiEmbeddingsResponse {
 const EMBEDDINGS_MODEL = 'gte-modernbert-base';
 const EMBEDDINGS_PATH = '/v1/embeddings';
 
-export async function embedQuery(
+/** Embeds every query in one TEI batch request; vectors are returned in input order. */
+export async function embedQueries(
   baseUrl: string,
-  query: string,
+  queries: string[],
   signal: AbortSignal,
-): Promise<number[]> {
+): Promise<number[][]> {
   const response = await postJson<TeiEmbeddingsResponse>(
     resolveEndpoint(baseUrl, EMBEDDINGS_PATH),
-    { model: EMBEDDINGS_MODEL, input: query },
+    { model: EMBEDDINGS_MODEL, input: queries },
     signal,
   );
-  const embedding = response.data?.[0]?.embedding;
-  if (!embedding?.length) {
-    throw new Error('TEI embeddings response contained no embedding');
+  const embeddings = (response.data ?? []).map((entry) => entry.embedding);
+  if (embeddings.length !== queries.length || embeddings.some((vector) => !vector?.length)) {
+    throw new Error(
+      `TEI embeddings response did not contain one embedding per query (${embeddings.length} for ${queries.length})`,
+    );
   }
-  return embedding;
+  return embeddings;
 }

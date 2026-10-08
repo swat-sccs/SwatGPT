@@ -1,12 +1,14 @@
 import { logger } from '@librechat/data-schemas';
 import type { KbRetrievalResult } from '~/app/metrics';
+import type { KbQueries, KbRetrievalQueries } from './query';
 import type { KbCandidate, KbPayload } from './search';
 import type { RerankResult } from './rerank';
 import { embedText, formatContext } from './format';
 import { recordRagRetrieval } from '~/app/metrics';
+import { resolveRetrievalQueries } from './query';
 import { buildSparseQuery } from './lexical';
 import { rerankChunks } from './rerank';
-import { embedQuery } from './embed';
+import { embedQueries } from './embed';
 import { searchKb } from './search';
 
 const RERANK_SCORE_FLOOR = 0.3;
@@ -75,17 +77,21 @@ const elapsedSince = (startedAt: bigint): number =>
 
 async function runPipeline(
   config: RagConfig,
-  query: string,
+  queries: KbRetrievalQueries,
   signal: AbortSignal,
 ): Promise<KbPayload[]> {
-  const vector = await embedQuery(config.embeddingsUrl, query, signal);
-  const candidates = await searchKb(config.qdrantUrl, vector, buildSparseQuery(query), signal);
+  const vectors = await embedQueries(config.embeddingsUrl, queries.search, signal);
+  const searches = queries.search.map((query, index) => ({
+    vector: vectors[index],
+    sparse: buildSparseQuery(query),
+  }));
+  const candidates = await searchKb(config.qdrantUrl, searches, signal);
   if (!candidates.length) {
     return [];
   }
   const scores = await rerankChunks(
     config.rerankUrl,
-    query,
+    queries.rerank,
     candidates.map((candidate) => embedText(candidate.payload)),
     signal,
   );
@@ -94,14 +100,17 @@ async function runPipeline(
 
 /**
  * Retrieves Swarthmore KB context for a user query and reports what happened:
- * embed → Qdrant hybrid (dense + lexical, RRF) → rerank → top chunks.
+ * embed → Qdrant dense + lexical channels per query (deduplicated union, no score
+ * fusion) → rerank (with a lexical-slot guarantee) → top chunks.
+ * Accepts a bare query or {@link KbQueries}; see {@link resolveRetrievalQueries}
+ * for how follow-ups search and how queries are length-capped.
  * Fail-open by design — any error, timeout, or missing configuration yields no
  * `context` (with `result` explaining why) so a RAG failure never fails the chat message.
  * Every attempt is recorded in the Prometheus RAG metrics.
  */
-export async function retrieveKbContextDetailed(query: string): Promise<KbRetrieval> {
-  const trimmed = query.trim();
-  if (!trimmed) {
+export async function retrieveKbContextDetailed(query: string | KbQueries): Promise<KbRetrieval> {
+  const queries = resolveRetrievalQueries(query);
+  if (!queries.rerank) {
     return { ...NO_RETRIEVAL, result: 'empty' };
   }
   const config = readConfig();
@@ -123,7 +132,7 @@ export async function retrieveKbContextDetailed(query: string): Promise<KbRetrie
     };
   };
   try {
-    const top = await runPipeline(config, trimmed, controller.signal);
+    const top = await runPipeline(config, queries, controller.signal);
     return finish(top.length ? 'hit' : 'empty', top);
   } catch (error) {
     const message = error instanceof Error ? error.message : String(error);
@@ -139,7 +148,7 @@ export async function retrieveKbContextDetailed(query: string): Promise<KbRetrie
  * or missing configuration yields `undefined`. See {@link retrieveKbContextDetailed}
  * for the structured variant.
  */
-export async function retrieveKbContext(query: string): Promise<string | undefined> {
+export async function retrieveKbContext(query: string | KbQueries): Promise<string | undefined> {
   const { context } = await retrieveKbContextDetailed(query);
   return context;
 }

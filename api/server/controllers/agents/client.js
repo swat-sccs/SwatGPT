@@ -1247,11 +1247,11 @@ class AgentClient extends BaseClient {
     });
 
     /** KB retrieval overlaps the rest of message building; fails open to `undefined`. */
-    const { userText, retrievalQuery } = buildKbQueries(orderedMessages);
-    this.kbQueryText = userText;
-    const kbContextPromise = retrieveKbContextDetailed(retrievalQuery).then((retrieval) => {
+    const kbQueries = buildKbQueries(orderedMessages);
+    this.kbQueryText = kbQueries.userText;
+    const kbContextPromise = retrieveKbContextDetailed(kbQueries).then((retrieval) => {
       this.kbRetrieval = retrieval;
-      return retrieval.context ?? formatRetrievalNote(retrieval.result, retrievalQuery);
+      return retrieval.context ?? formatRetrievalNote(retrieval.result, kbQueries.retrievalQuery);
     });
     /** Student directory lookup ("where does X live"); in-memory, fails open to `undefined`. */
     const directoryContextPromise = resolveDirectoryContext(this.kbQueryText, db.listDirectory, {

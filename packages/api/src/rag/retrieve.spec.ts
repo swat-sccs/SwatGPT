@@ -4,7 +4,6 @@ import { logger } from '@librechat/data-schemas';
 import type { RerankResult } from './rerank';
 import type { KbPayload } from './search';
 import { retrieveKbContext, retrieveKbContextDetailed } from './retrieve';
-import { buildSparseQuery } from './lexical';
 import { createMetrics } from '~/app/metrics';
 import { embedText } from './format';
 
@@ -12,6 +11,11 @@ const EMBEDDINGS_URL = 'http://tei-embed.test';
 const RERANK_URL = 'http://tei-rerank.test';
 const QDRANT_URL = 'http://qdrant.test';
 const QUERY = 'how do I connect to eduroam?';
+
+interface QdrantRequest {
+  using: 'dense' | 'sparse';
+  query: number[] | { indices: number[]; values: number[] };
+}
 
 interface QdrantHit {
   id: number;
@@ -65,6 +69,8 @@ describe('retrieveKbContext', () => {
     embedding?: number[];
     hits?: QdrantHit[];
     sparseHits?: QdrantHit[];
+    /** Per-request Qdrant hits; overrides `hits`/`sparseHits` when set. */
+    qdrant?: (body: QdrantRequest) => QdrantHit[];
     scores?: RerankResult[];
     searchResponse?: Response;
     rerankResponse?: Response;
@@ -73,16 +79,23 @@ describe('retrieveKbContext', () => {
     fetchMock.mockImplementation(async (input: string | URL | Request, init?: RequestInit) => {
       const url = String(input);
       if (url.includes('/v1/embeddings')) {
-        return (
-          options.embeddingsResponse ??
-          jsonResponse({ data: [{ embedding: options.embedding ?? [0.1, 0.2, 0.3] }] })
-        );
+        if (options.embeddingsResponse) {
+          return options.embeddingsResponse;
+        }
+        const { input } = JSON.parse(init?.body as string) as { input: string[] };
+        const base = options.embedding ?? [0.1, 0.2, 0.3];
+        return jsonResponse({
+          data: input.map((_text, index) => ({ embedding: base.map((value) => value + index) })),
+        });
       }
       if (url.includes('/points/query')) {
         if (options.searchResponse) {
           return options.searchResponse;
         }
-        const body = JSON.parse(init?.body as string) as { using: string };
+        const body = JSON.parse(init?.body as string) as QdrantRequest;
+        if (options.qdrant) {
+          return jsonResponse({ result: { points: options.qdrant(body) } });
+        }
         const points = body.using === 'sparse' ? (options.sparseHits ?? []) : (options.hits ?? []);
         return jsonResponse({ result: { points } });
       }
@@ -135,7 +148,7 @@ describe('retrieveKbContext', () => {
 
       expect(fetchMock).toHaveBeenCalledTimes(4);
       expect(String(fetchMock.mock.calls[0][0])).toBe(`${EMBEDDINGS_URL}/v1/embeddings`);
-      expect(requestBody(0)).toEqual({ model: 'gte-modernbert-base', input: QUERY });
+      expect(requestBody(0)).toEqual({ model: 'gte-modernbert-base', input: [QUERY] });
 
       expect(String(fetchMock.mock.calls[1][0])).toBe(`${QDRANT_URL}/collections/kb/points/query`);
       expect(requestBody(1)).toEqual({
@@ -147,7 +160,10 @@ describe('retrieveKbContext', () => {
 
       expect(String(fetchMock.mock.calls[2][0])).toBe(`${QDRANT_URL}/collections/kb/points/query`);
       expect(requestBody(2)).toEqual({
-        query: buildSparseQuery(QUERY),
+        query: {
+          indices: [29600909, 1646057492, 2866859257, 1111836708, 617671246],
+          values: [1, 1, 1, 1, 1],
+        },
         using: 'sparse',
         limit: 20,
         with_payload: true,
@@ -182,7 +198,7 @@ describe('retrieveKbContext', () => {
 
       expect(requestBody(3)).toEqual({
         query: QUERY,
-        texts: hits.map((hit) => embedText(hit.payload as KbPayload)),
+        texts: [0, 2, 1, 3, 4, 5, 6].map((index) => embedText(hits[index].payload as KbPayload)),
         truncate: true,
       });
     });
@@ -203,8 +219,11 @@ describe('retrieveKbContext', () => {
       const dense = [0, 1, 2, 3, 4, 5, 6, 7, 8].map(kbHit);
       const lexical = kbHit(100);
       const scores: RerankResult[] = [
-        ...dense.map((_hit, index) => ({ index, score: 0.9 - index * 0.01 })),
-        { index: 9, score: 0.4 },
+        { index: 0, score: 0.9 },
+        { index: 1, score: 0.4 },
+        ...dense
+          .slice(1)
+          .map((_hit, offset) => ({ index: offset + 2, score: 0.89 - offset * 0.01 })),
       ];
       mockServices({ hits: dense, sparseHits: [lexical], scores });
       const context = await retrieveKbContext(QUERY);
@@ -218,8 +237,11 @@ describe('retrieveKbContext', () => {
     it('drops the lexical hit when it is below the rerank score floor', async () => {
       const dense = [0, 1, 2, 3, 4, 5, 6, 7, 8].map(kbHit);
       const scores: RerankResult[] = [
-        ...dense.map((_hit, index) => ({ index, score: 0.9 - index * 0.01 })),
-        { index: 9, score: 0.2 },
+        { index: 0, score: 0.9 },
+        { index: 1, score: 0.2 },
+        ...dense
+          .slice(1)
+          .map((_hit, offset) => ({ index: offset + 2, score: 0.89 - offset * 0.01 })),
       ];
       mockServices({ hits: dense, sparseHits: [kbHit(100)], scores });
       const context = await retrieveKbContext(QUERY);
@@ -236,6 +258,112 @@ describe('retrieveKbContext', () => {
       expect(fetchMock).toHaveBeenCalledTimes(3);
       expect(requestBody(1)).toMatchObject({ using: 'dense' });
       expect(String(fetchMock.mock.calls[2][0])).toBe(`${RERANK_URL}/rerank`);
+    });
+  });
+
+  describe('candidate pool', () => {
+    it('fills the capped pool from both channels instead of dense hits first', async () => {
+      const dense = Array.from({ length: 20 }, (_hit, index) => kbHit(index));
+      const sparse = Array.from({ length: 20 }, (_hit, index) => kbHit(100 + index));
+      mockServices({ hits: dense, sparseHits: sparse, scores: [] });
+      await retrieveKbContext(QUERY);
+
+      const { texts } = requestBody(3) as { texts: string[] };
+      expect(texts).toHaveLength(32);
+      expect(texts).toContain(embedText(sparse[15].payload as KbPayload));
+      expect(texts).toContain(embedText(dense[15].payload as KbPayload));
+      expect(texts).not.toContain(embedText(sparse[16].payload as KbPayload));
+    });
+
+    it('keeps the lexical rank of a dense hit whose sparse duplicate ranks later', async () => {
+      const dense = [0, 1, 2, 3, 4, 5, 6, 7, 8].map(kbHit);
+      const unusable = (id: number): QdrantHit => ({ id, score: 1, payload: {} });
+      const scores: RerankResult[] = dense.map((_hit, index) => ({
+        index,
+        score: index === 0 ? 0.4 : 0.9 - index * 0.01,
+      }));
+      mockServices({ hits: dense, sparseHits: [unusable(200), unusable(201), dense[0]], scores });
+      const context = await retrieveKbContext(QUERY);
+
+      expect(context).toContain('Title 0');
+      expect(context).not.toContain('Title 8');
+    });
+  });
+
+  describe('query bounds', () => {
+    it('sends only the tail of a long message to every service', async () => {
+      const question = 'does this essay meet the W requirement?';
+      const message = `${'The syllabus says many things about writing. '.repeat(100)}${question}`;
+      mockServices({ hits: [kbHit(0)], scores: [{ index: 0, score: 0.9 }] });
+      await retrieveKbContext(message);
+
+      const embedded = (requestBody(0) as { input: string[] }).input;
+      expect(embedded).toHaveLength(1);
+      expect(embedded[0].length).toBeLessThanOrEqual(1000);
+      expect(embedded[0].endsWith(question)).toBe(true);
+      expect(message.endsWith(embedded[0])).toBe(true);
+      const sparse = requestBody(2).query as { values: number[] };
+      expect(sparse.values.reduce((sum, value) => sum + value, 0)).toBeLessThan(200);
+      expect(requestBody(3)).toMatchObject({ query: embedded[0] });
+    });
+  });
+
+  describe('follow-up queries', () => {
+    const current = 'how do I set up eduroam?';
+    const combined = `When is Sharples open?\n${current}`;
+    const sharples = [0, 1, 2].map(kbHit);
+    const eduroam = [10, 11].map(kbHit);
+
+    it('searches with the current turn and the combined query and reranks the union', async () => {
+      mockServices({
+        embedding: [0.5],
+        qdrant: ({ using, query }) => {
+          if (using === 'sparse') {
+            return [];
+          }
+          return (query as number[])[0] === 0.5 ? eduroam : [...sharples, eduroam[0]];
+        },
+        scores: [
+          { index: 0, score: 0.9 },
+          { index: 1, score: 0.4 },
+        ],
+      });
+      const context = await retrieveKbContext({ userText: current, retrievalQuery: combined });
+
+      expect(requestBody(0)).toEqual({ model: 'gte-modernbert-base', input: [current, combined] });
+      const searches = [1, 2, 3, 4].map((call) => requestBody(call));
+      expect(searches.map(({ using }) => using)).toEqual(['dense', 'sparse', 'dense', 'sparse']);
+      expect(searches[0].query).toEqual([0.5]);
+      expect(searches[2].query).toEqual([1.5]);
+      expect(requestBody(5)).toEqual({
+        query: combined,
+        texts: [10, 0, 11, 1, 2].map((index) => embedText(kbHit(index).payload as KbPayload)),
+        truncate: true,
+      });
+      expect(context).toContain('[1] Title 10');
+      expect(context).toContain('[2] Title 0');
+    });
+
+    it('runs a single search when the query is not a follow-up', async () => {
+      mockServices({ hits: sharples, scores: [{ index: 0, score: 0.9 }] });
+      await retrieveKbContext({ userText: current, retrievalQuery: current });
+
+      expect(requestBody(0)).toEqual({ model: 'gte-modernbert-base', input: [current] });
+      expect(fetchMock).toHaveBeenCalledTimes(4);
+    });
+
+    it('fails open when TEI returns fewer embeddings than queries', async () => {
+      mockServices({
+        embeddingsResponse: jsonResponse({ data: [{ embedding: [0.1] }] }),
+        hits: sharples,
+      });
+      const detailed = await retrieveKbContextDetailed({
+        userText: current,
+        retrievalQuery: combined,
+      });
+
+      expect(detailed).toMatchObject({ result: 'error', chunks: 0, context: undefined });
+      expect(warnSpy).toHaveBeenCalledWith(expect.stringContaining('one embedding per query'));
     });
   });
 

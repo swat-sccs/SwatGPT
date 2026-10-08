@@ -1,5 +1,5 @@
 import type { KbQueryMessage } from './query';
-import { buildKbQueries } from './query';
+import { buildKbQueries, capQuery, resolveRetrievalQueries } from './query';
 
 const user = (text: string): KbQueryMessage => ({ text, isCreatedByUser: true });
 const assistant = (text: string): KbQueryMessage => ({ text, isCreatedByUser: false });
@@ -81,5 +81,74 @@ describe('buildKbQueries', () => {
       userText: '',
       retrievalQuery: '',
     });
+  });
+});
+
+describe('capQuery', () => {
+  it('returns short queries trimmed and otherwise unchanged', () => {
+    expect(capQuery('  When is Sharples open?  ')).toBe('When is Sharples open?');
+    expect(capQuery('x'.repeat(1000))).toHaveLength(1000);
+  });
+
+  it('keeps the tail of a long paste, starting on a word boundary', () => {
+    const question = 'Does this essay meet the W requirement?';
+    const capped = capQuery(`${'lorem ipsum dolor '.repeat(200)}\n${question}`);
+    expect(capped.length).toBeLessThanOrEqual(1000);
+    expect(capped.length).toBeGreaterThan(950);
+    expect(capped.endsWith(question)).toBe(true);
+    expect(capped).toMatch(/^(lorem|ipsum|dolor) /);
+  });
+
+  it('does not drop a whole word when the cut lands exactly on a boundary', () => {
+    const words = `${'a'.repeat(999)} ${'b'.repeat(999)}`;
+    expect(capQuery(words)).toBe('b'.repeat(999));
+    const exact = `${'a'.repeat(500)} ${'b'.repeat(500)} ${'c'.repeat(499)}`;
+    expect(capQuery(exact)).toBe(`${'b'.repeat(500)} ${'c'.repeat(499)}`);
+  });
+
+  it('hard-cuts long unbroken runs instead of discarding them', () => {
+    const run = 'https://example.edu/'.repeat(100);
+    expect(capQuery(run)).toBe(run.slice(-1000));
+  });
+});
+
+describe('resolveRetrievalQueries', () => {
+  it('searches and reranks with a bare query alone', () => {
+    expect(resolveRetrievalQueries('  eduroam  ')).toEqual({
+      search: ['eduroam'],
+      rerank: 'eduroam',
+    });
+  });
+
+  it('runs one search when the query was not combined with a previous turn', () => {
+    const queries = buildKbQueries([user('When is Sharples open?')]);
+    expect(resolveRetrievalQueries(queries)).toEqual({
+      search: ['When is Sharples open?'],
+      rerank: 'When is Sharples open?',
+    });
+  });
+
+  it('searches with the current turn and the combined follow-up, reranking with the combined one', () => {
+    const queries = buildKbQueries([
+      user('When is Sharples open?'),
+      assistant('7:30am to 8pm.'),
+      user('how do I set up eduroam?'),
+    ]);
+    expect(resolveRetrievalQueries(queries)).toEqual({
+      search: ['how do I set up eduroam?', 'When is Sharples open?\nhow do I set up eduroam?'],
+      rerank: 'When is Sharples open?\nhow do I set up eduroam?',
+    });
+  });
+
+  it('caps both queries while preserving the current turn', () => {
+    const current = `${'x'.repeat(600)} essay ${'y'.repeat(600)} ok?`;
+    const { search, rerank } = resolveRetrievalQueries({
+      userText: current,
+      retrievalQuery: `previous turn\n${current}`,
+    });
+    expect(search).toEqual([capQuery(current)]);
+    expect(rerank).toBe(capQuery(current));
+    expect(rerank.length).toBeLessThanOrEqual(1000);
+    expect(rerank.endsWith('ok?')).toBe(true);
   });
 });
