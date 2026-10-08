@@ -34,6 +34,7 @@ export interface CreateGenerationInput {
   status?: GenerationStatus;
   errorType?: string;
   tenantId?: string;
+  expiredAt?: Date | null;
   createdAt?: Date;
 }
 

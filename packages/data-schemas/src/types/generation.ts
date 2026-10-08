@@ -19,6 +19,8 @@ export interface IGeneration extends Omit<Document, 'model'> {
   status: GenerationStatus;
   errorType?: string;
   tenantId?: string;
+  /** Mirrors a temporary conversation's `expiredAt`; MongoDB's TTL monitor removes the row then. */
+  expiredAt?: Date | null;
   createdAt?: Date;
   updatedAt?: Date;
 }

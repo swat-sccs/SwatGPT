@@ -14,6 +14,8 @@ export interface IFlag extends Document {
   resolvedAt?: Date;
   resolvedBy?: Types.ObjectId;
   tenantId?: string;
+  /** Mirrors a temporary conversation's `expiredAt`; MongoDB's TTL monitor removes the row then. */
+  expiredAt?: Date | null;
   createdAt?: Date;
   updatedAt?: Date;
 }

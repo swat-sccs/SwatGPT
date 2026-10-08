@@ -18,11 +18,13 @@ const generationSchema: Schema<IGeneration> = new Schema(
     status: { type: String, enum: ['ok', 'error', 'aborted'], required: true, default: 'ok' },
     errorType: { type: String },
     tenantId: { type: String, index: true },
+    expiredAt: { type: Date },
   },
   { timestamps: true },
 );
 
 generationSchema.index({ createdAt: 1 });
 generationSchema.index({ user: 1, createdAt: -1 });
+generationSchema.index({ expiredAt: 1 }, { expireAfterSeconds: 0 });
 
 export default generationSchema;
