@@ -57,7 +57,7 @@ export function getAdminUsageUsers(
 
 export function getAdminUsageUser(
   userId: string,
-  params: adm.TAdminUsageRange = {},
+  params: adm.TAdminUsageTimeseriesQuery = {},
 ): Promise<adm.TAdminUsageUserDetail> {
   return request.get(endpoints.adminUsageUser(userId, params));
 }

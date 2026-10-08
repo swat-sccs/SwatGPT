@@ -70,12 +70,12 @@ export const useAdminUsageUsers = (
 
 export const useAdminUsageUser = (
   userId: string,
-  range: TAdminUsageRange,
+  params: TAdminUsageTimeseriesQuery,
   config?: UseQueryOptions<TAdminUsageUserDetail>,
 ): QueryObserverResult<TAdminUsageUserDetail> =>
   useQuery<TAdminUsageUserDetail>(
-    [QueryKeys.adminUsageUser, userId, keyOf(range)],
-    () => dataService.getAdminUsageUser(userId, range),
+    [QueryKeys.adminUsageUser, userId, keyOf(params)],
+    () => dataService.getAdminUsageUser(userId, params),
     { ...adminQueryDefaults, keepPreviousData: true, enabled: userId.length > 0, ...config },
   );
 

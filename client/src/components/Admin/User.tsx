@@ -14,8 +14,8 @@ import Pill from './Pill';
 function Content({ userId }: { userId: string }) {
   const localize = useLocalize();
   const { has } = useAdminAccess();
-  const { preset, setPreset, range, bucket } = useRange('7d');
-  const query = useAdminUsageUser(userId, range);
+  const { preset, setPreset, range, bucket, retry } = useRange('7d');
+  const query = useAdminUsageUser(userId, { ...range, bucket });
   const detail = query.data;
 
   return (
@@ -40,11 +40,11 @@ function Content({ userId }: { userId: string }) {
       </header>
 
       {query.isLoading && <Loading />}
-      {query.isError && <ErrorState onRetry={() => query.refetch()} />}
+      {query.isError && <ErrorState onRetry={() => retry(query.refetch)} />}
       {detail && (
         <div className="space-y-6" aria-busy={query.isFetching}>
           <Tiles summary={detail.summary} />
-          <Chart points={detail.timeseries.points} bucket={bucket} />
+          <Chart points={detail.timeseries.points} bucket={detail.timeseries.bucket} />
           {!detail.conversationsHidden && (
             <section aria-labelledby="admin-user-conversations">
               <h3
