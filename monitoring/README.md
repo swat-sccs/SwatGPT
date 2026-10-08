@@ -42,7 +42,7 @@ Host-level setup that is not monitoring (runner unit, `.env` permissions) is in 
    ```sh
    cd /srv/SwatGPT
    grep -q '^METRICS_SECRET=' .env || printf 'METRICS_SECRET=%s\n' "$(openssl rand -hex 32)" >> .env
-   grep '^METRICS_SECRET=' .env      # hand this value to dcrepublic for step B.2
+   # hand the value to whoever runs B.2 out of band (not in chat logs or on a command line)
    ```
 
    Optional: `SWATGPT_METRICS_BIND=130.58.218.151` is the default bind address for the exporter
@@ -118,9 +118,15 @@ service update.
    place, so it is never world-readable. By hand, the same without the secret on a command line:
 
    ```sh
-   printf '%s' 'PASTE_METRICS_SECRET_HERE' > /srv/monitor/prometheus/config/swatgpt_metrics_token
-   chmod 640 /srv/monitor/prometheus/config/swatgpt_metrics_token
+   cd /srv/monitor/prometheus/config
+   T=$(sudo mktemp .swatgpt_metrics_token.XXXXXX)
+   read -rs S && printf '%s' "$S" | sudo tee "$T" >/dev/null; unset S   # paste at the silent prompt
+   sudo chown root:docker "$T" && sudo chmod 640 "$T" && sudo mv -f "$T" swatgpt_metrics_token
    ```
+
+   The first install (2026-09-09) took the secret as an argument, so it is in gull's sudo log.
+   Rotate it: new `METRICS_SECRET` in eagle's `.env`, recreate `api`, rerun this step, then
+   `docker service update --force prometheus_prometheus`.
 
    The container must see it at `/etc/prometheus/swatgpt_metrics_token`; if only `prometheus.yml` is
    bind-mounted rather than the whole `config/` directory, add a mount for the token and the rules file.
