@@ -18,10 +18,7 @@ export class PollScheduler {
     this.schedule('realtime', this.config.realtimePollMs, () => this.service.syncRealtime());
     this.schedule('content', this.config.contentPollMs, () => this.service.syncContent());
     this.schedule('configuration', this.config.configPollMs, async () => { await this.service.refreshRegistry(); });
-    this.schedule('retention', 86_400_000, async () => {
-      const deleted = await this.service.store.pruneObservations(this.config.observationRetentionDays);
-      log('info', 'Pruned old high-frequency observations', { deleted });
-    });
+    this.schedule('retention', 86_400_000, () => this.service.pruneHistory());
   }
 
   stop() {

@@ -182,6 +182,18 @@ export class PgStore {
     }
   }
 
+  /**
+   * Retires every active row of `domain` whose source is not in `keep`. Only a poll that read
+   * the whole domain may call this, so sources that vanished upstream stop being served.
+   */
+  async deactivateMissingSources(domain: Domain, keep: readonly string[]): Promise<number> {
+    const result = await this.pool.query(
+      'UPDATE source_records SET active=false WHERE domain=$1 AND active=true AND NOT (source = ANY($2::text[]))',
+      [domain, keep],
+    );
+    return result.rowCount ?? 0;
+  }
+
   async addObservation(domain: Extract<Domain, 'weather' | 'transit'>, source: string, payload: JsonObject, observedAt = new Date()): Promise<void> {
     await this.pool.query(
       'INSERT INTO observations(domain,source,observed_at,payload_hash,payload) VALUES ($1,$2,$3,$4,$5::jsonb)',
@@ -257,6 +269,31 @@ export class PgStore {
   async pruneObservations(days: number): Promise<number> {
     const result = await this.pool.query('DELETE FROM observations WHERE observed_at < now() - ($1 * interval \'1 day\')', [days]);
     return result.rowCount ?? 0;
+  }
+
+  async pruneSyncRuns(days: number): Promise<number> {
+    const result = await this.pool.query('DELETE FROM sync_runs WHERE started_at < now() - ($1 * interval \'1 day\')', [days]);
+    return result.rowCount ?? 0;
+  }
+
+  /**
+   * Deletes record history older than `days`: retired records (their versions cascade) and
+   * superseded versions of live records. Each surviving record keeps its newest version.
+   */
+  async pruneArchive(days: number): Promise<{ records: number; versions: number }> {
+    const records = await this.pool.query(
+      'DELETE FROM source_records WHERE active=false AND last_seen_at < now() - ($1 * interval \'1 day\')',
+      [days],
+    );
+    const versions = await this.pool.query(`
+      DELETE FROM record_versions rv
+      WHERE rv.observed_at < now() - ($1 * interval '1 day')
+        AND EXISTS (
+          SELECT 1 FROM record_versions newer
+          WHERE newer.record_id = rv.record_id AND newer.observed_at > rv.observed_at
+        )
+    `, [days]);
+    return { records: records.rowCount ?? 0, versions: versions.rowCount ?? 0 };
   }
 
   async status(): Promise<JsonObject[]> {

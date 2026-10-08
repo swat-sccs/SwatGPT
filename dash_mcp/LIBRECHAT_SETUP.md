@@ -21,7 +21,7 @@ SWATGPT_POSTGRES_USER=swatgpt
 SWATGPT_POSTGRES_PASSWORD=replace-with-a-long-random-password
 ```
 
-Optional polling overrides are `SWATGPT_ALERT_POLL_INTERVAL_SECONDS`, `SWATGPT_REALTIME_POLL_INTERVAL_SECONDS`, `SWATGPT_CONTENT_POLL_INTERVAL_SECONDS`, `SWATGPT_CONFIG_POLL_INTERVAL_SECONDS`, and `SWATGPT_OBSERVATION_RETENTION_DAYS`. `SWATGPT_MCP_TOOL_TIMEOUT_MS` bounds every tool call at 5 seconds by default; normal snapshot reads should complete much faster. The container watchdog restarts an unresponsive MCP after three failed 30-second health probes; tune it with `SWATGPT_HEALTHCHECK_PROBE_TIMEOUT_MS` and `SWATGPT_HEALTHCHECK_FAILURE_THRESHOLD` if needed.
+Optional polling overrides are `SWATGPT_ALERT_POLL_INTERVAL_SECONDS`, `SWATGPT_REALTIME_POLL_INTERVAL_SECONDS`, `SWATGPT_CONTENT_POLL_INTERVAL_SECONDS`, `SWATGPT_CONFIG_POLL_INTERVAL_SECONDS`, and `SWATGPT_OBSERVATION_RETENTION_DAYS`. Record history (`record_versions` and retired `source_records`) is archived forever by default; set `SWATGPT_ARCHIVE_RETENTION_DAYS` to a positive number of days to prune it daily (each record keeps its newest version). Sync-run history is trimmed after `SWATGPT_SYNC_RUN_RETENTION_DAYS` (default 30). MCP sessions with no open stream are closed after `SWATGPT_MCP_SESSION_IDLE_SECONDS` (default 1800) of inactivity, and at most `SWATGPT_MCP_MAX_SESSIONS` (default 256) are kept. `SWATGPT_MCP_TOOL_TIMEOUT_MS` bounds every tool call at 5 seconds by default; normal snapshot reads should complete much faster. The container watchdog restarts an unresponsive MCP after three failed 30-second health probes; tune it with `SWATGPT_HEALTHCHECK_PROBE_TIMEOUT_MS` and `SWATGPT_HEALTHCHECK_FAILURE_THRESHOLD` if needed.
 
 ## 2. Add the Compose sidecars
 

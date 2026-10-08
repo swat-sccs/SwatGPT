@@ -24,7 +24,7 @@ describe.skipIf(!databaseUrl)('PostgreSQL-backed service cache', () => {
   });
 
   beforeEach(async () => {
-    await store.pool.query('TRUNCATE source_records, observations RESTART IDENTITY CASCADE');
+    await store.pool.query('TRUNCATE source_records, observations, sync_runs RESTART IDENTITY CASCADE');
   });
 
   afterAll(async () => {
@@ -75,7 +75,95 @@ describe.skipIf(!databaseUrl)('PostgreSQL-backed service cache', () => {
     }
     expect(client.query).not.toHaveBeenCalled();
   });
+
+  it('keeps today\'s polled hours after a read-through for another day', async () => {
+    const client = { query: vi.fn().mockImplementation(diningResponse) } as unknown as DashClient;
+    const service = new SwatService(config(), client, hoursDiscovery(), store);
+
+    await service.getHours({ date: today, limit: 100 }, true);
+    await service.getHours({ place: 'McCabe', date: tomorrow });
+    vi.mocked(client.query).mockClear();
+
+    const todayResult = await service.getHours({ place: 'McCabe', date: today });
+
+    expect(todayResult.items).toEqual([expect.objectContaining({ id: `lunch-${today}` })]);
+    expect(client.query).not.toHaveBeenCalled();
+  });
+
+  it('retires alerts from an announcement calendar that disappeared upstream', async () => {
+    let calendarName = 'Old Announcements';
+    const client = {
+      query: vi.fn().mockImplementation((operation: string) => Promise.resolve(operation === 'CriticalAnnouncement'
+        ? { data: { showMessage: 0 } }
+        : { calendarName, data: [{ id: `${calendarName}-1`, title: `${calendarName} notice` }] })),
+    } as unknown as DashClient;
+    const discovery = { current: () => ({ announcementCalendars: ['cal'], appAnnouncements: [] }) } as unknown as RegistryDiscovery;
+    const service = new SwatService(config(), client, discovery, store);
+    vi.spyOn(process.stderr, 'write').mockReturnValue(true);
+
+    await service.getAlerts(20, true);
+    calendarName = 'Campus Announcements';
+    vi.mocked(client.query).mockClear();
+    await service.getAlerts(20, true);
+
+    const alerts = await service.getAlerts(20);
+    expect(alerts.items).toEqual([expect.objectContaining({ title: 'Campus Announcements notice' })]);
+  });
+
+  it('keeps the snapshot active when a poll sees a malformed upstream payload', async () => {
+    const client = { query: vi.fn().mockImplementation(diningResponse) } as unknown as DashClient;
+    const service = new SwatService(config(), client, diningDiscovery(), store);
+    await service.getDining({ date: today, limit: 100 }, true);
+    vi.mocked(client.query).mockResolvedValue({ data: null });
+
+    await expect(service.getDining({ date: today, limit: 100 }, true)).rejects.toThrow('not an array');
+
+    expect(await store.currentRecords('dining')).toEqual([expect.objectContaining({ id: `lunch-${today}` })]);
+  });
+
+  it('prunes old history but keeps every record\'s newest version and active rows', async () => {
+    const record = (id: string, title: string) => ({
+      domain: 'news' as const, source: 'News', externalId: id, title, searchText: title, payload: { title },
+    });
+    const long = new Date(Date.now() - 400 * 86_400_000);
+    const recent = new Date(Date.now() - 300 * 86_400_000);
+    await store.replaceSourceRecords('news', 'News', [record('kept', 'v1'), record('gone', 'old')], long);
+    await store.replaceSourceRecords('news', 'News', [record('kept', 'v2')], recent);
+    await store.replaceSourceRecords('news', 'Other', [record('fresh', 'only')], long);
+    await store.pool.query("INSERT INTO sync_runs(job, started_at) VALUES ('alerts', now() - interval '45 days'), ('alerts', now())");
+
+    const archive = await store.pruneArchive(180);
+    const syncRuns = await store.pruneSyncRuns(30);
+
+    expect(archive).toEqual({ records: 1, versions: 1 });
+    expect(syncRuns).toBe(1);
+    const versions = await store.pool.query<{ external_id: string; title: string }>(`
+      SELECT sr.external_id, rv.payload->>'title' AS title FROM record_versions rv
+      JOIN source_records sr ON sr.id = rv.record_id ORDER BY sr.external_id
+    `);
+    expect(versions.rows).toEqual([{ external_id: 'fresh', title: 'only' }, { external_id: 'kept', title: 'v2' }]);
+  });
+
+  it('retires only the named domain\'s missing sources', async () => {
+    const record = (id: string) => ({ domain: 'news' as const, source: 'News', externalId: id, title: id, searchText: id, payload: {} });
+    await store.replaceSourceRecords('news', 'Kept', [record('a')]);
+    await store.replaceSourceRecords('news', 'Vanished', [record('b')]);
+    await store.replaceSourceRecords('events', 'SwatCentral', [{ ...record('c'), domain: 'events' }]);
+
+    expect(await store.deactivateMissingSources('news', ['Kept'])).toBe(1);
+
+    expect((await store.currentRecords('news')).map((item) => item.id)).toEqual(['a']);
+    expect(await store.currentRecords('events')).toHaveLength(1);
+  });
 });
+
+function hoursDiscovery(): RegistryDiscovery {
+  return {
+    current: () => ({
+      hours: [{ place: 'McCabe Library', category: 'Libraries', kind: 'libcal', sourceId: 'mccabe' }],
+    }),
+  } as unknown as RegistryDiscovery;
+}
 
 function diningResponse(_operation: string, _query: string, variables: DashVariables = {}) {
   const date = currentCampusDate(new Date(variables.timeMin ?? Date.now()));
