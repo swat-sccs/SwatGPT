@@ -2,6 +2,7 @@ import { GraphEvents } from '@librechat/agents';
 import { logger } from '@librechat/data-schemas';
 import type { EventHandler, MessageContentComplex } from '@librechat/agents';
 import type { RecordGenerationDeps, RecordGenerationInput } from './generation';
+import { formatContext, formatRetrievalNote } from '~/rag/format';
 import { countTokens } from '~/utils/tokenizer';
 import {
   countKbChunks,
@@ -76,16 +77,16 @@ describe('createFirstTokenTimingHandlers', () => {
 });
 
 describe('countKbChunks', () => {
-  it('counts numbered KB entries', () => {
-    const context = [
-      '# Swarthmore College knowledge base context',
-      '[1] Dining — Sharples (https://a)\nText [2] not an entry',
-      '[2] Library (https://b)\nMore',
-      '[10] Registrar (https://c)\nMore',
-    ].join('\n\n');
+  it('counts the entries of a formatted KB context', () => {
+    const chunk = { title: 'Dining', section: 'Sharples', source: 'https://a', text: '## not\nan entry' };
+    const context = formatContext([chunk, { ...chunk, source: 'https://b' }, chunk]);
     expect(countKbChunks(context)).toBe(3);
     expect(countKbChunks(undefined)).toBe(0);
     expect(countKbChunks('')).toBe(0);
+  });
+
+  it('counts nothing in a retrieval note', () => {
+    expect(countKbChunks(formatRetrievalNote('empty', 'question'))).toBe(0);
   });
 });
 
@@ -100,7 +101,10 @@ describe('recordGeneration', () => {
           { input_tokens: 10, output_tokens: 5, usage_type: 'summarization' },
         ],
         contentParts: [toolPart('dash_menu'), textPart('Pizza'), toolPart('dash_menu')],
-        kbContext: '[1] A (https://a)\nx\n\n[2] B (https://b)\ny',
+        kbContext: formatContext([
+          { title: 'A', source: 'https://a', text: 'x' },
+          { title: 'B', source: 'https://b', text: 'y' },
+        ]),
         ragMs: 120.4,
         tenantId: 't1',
       }),
@@ -128,7 +132,7 @@ describe('recordGeneration', () => {
 
   it('prefers the retrieval chunk count over the context fallback', async () => {
     const deps = createDeps();
-    await recordGeneration(deps, createInput({ ragChunks: 5, kbContext: '[1] A (https://a)' }));
+    await recordGeneration(deps, createInput({ ragChunks: 5, kbContext: formatContext([{ title: 'A', source: 'https://a', text: 'x' }]) }));
     expect(deps.createGeneration).toHaveBeenCalledWith(
       expect.objectContaining({ ragChunks: 5, ragMs: undefined }),
     );

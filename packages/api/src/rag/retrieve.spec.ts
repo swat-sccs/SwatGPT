@@ -5,7 +5,7 @@ import type { RerankResult } from './rerank';
 import type { KbPayload } from './search';
 import { retrieveKbContext, retrieveKbContextDetailed } from './retrieve';
 import { createMetrics } from '~/app/metrics';
-import { embedText } from './format';
+import { embedText, contextEntrySources } from './format';
 
 const EMBEDDINGS_URL = 'http://tei-embed.test';
 const RERANK_URL = 'http://tei-rerank.test';
@@ -131,13 +131,11 @@ describe('retrieveKbContext', () => {
       expect(context).toContain('# Swarthmore College knowledge base context');
       expect(context).toContain('cite the source URLs');
       expect(context).toContain(
-        '[1] Title 6 — Section 6 (https://kb.swarthmore.edu/wiki/Article_6)\nChunk text 6',
+        '## Title 6 — Section 6\nSource: https://kb.swarthmore.edu/wiki/Article_6\nChunk text 6',
       );
-      expect(context).toContain('[2] Title 2 — Section 2');
-      expect(context).toContain('[3] Title 0 — Section 0');
-      expect(context).toContain('[4] Title 4 — Section 4');
-      expect(context).toContain('[5] Title 1 — Section 1');
-      expect(context).toContain('[6] Title 3 — Section 3');
+      expect(contextEntrySources(context).slice(0, 6)).toEqual(
+        [6, 2, 0, 4, 1, 3].map((index) => `https://kb.swarthmore.edu/wiki/Article_${index}`),
+      );
       expect(context).not.toContain('Title 5');
       expect(warnSpy).not.toHaveBeenCalled();
     });
@@ -340,8 +338,10 @@ describe('retrieveKbContext', () => {
         texts: [10, 0, 11, 1, 2].map((index) => embedText(kbHit(index).payload as KbPayload)),
         truncate: true,
       });
-      expect(context).toContain('[1] Title 10');
-      expect(context).toContain('[2] Title 0');
+      expect(contextEntrySources(context).slice(0, 2)).toEqual([
+        'https://kb.swarthmore.edu/wiki/Article_10',
+        'https://kb.swarthmore.edu/wiki/Article_0',
+      ]);
     });
 
     it('runs a single search when the query is not a follow-up', async () => {
@@ -491,7 +491,7 @@ describe('retrieveKbContext', () => {
       expect(detailed.chunks).toBe(3);
       expect(detailed.elapsedMs).toBeGreaterThanOrEqual(0);
       expect(detailed.context).toBe(context);
-      expect(detailed.context).toContain('[1] Title 0');
+      expect(detailed.context).toContain('## Title 0');
 
       const metrics = await scrapeMetrics();
       expect(metrics).toMatch(/rag_retrieval_total\{result="hit"\} 2/);

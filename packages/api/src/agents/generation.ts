@@ -4,11 +4,11 @@ import { ContentTypes, inputTokensIncludesCache } from 'librechat-data-provider'
 import type { EventHandler, MessageContentComplex } from '@librechat/agents';
 import type { GenerationMethods, FlagMethods, GenerationStatus } from '@librechat/data-schemas';
 import type { UsageMetadata } from '~/stream/interfaces/IJobStore';
+import { contextEntrySources } from '~/rag/format';
 import { countTokens } from '~/utils/tokenizer';
 
 const MAX_ERROR_TYPE_LENGTH = 64;
 const FALLBACK_MODEL = 'unknown';
-const KB_ENTRY_PATTERN = /^\[\d+\] /gm;
 const FIRST_TOKEN_EVENTS = [GraphEvents.ON_MESSAGE_DELTA, GraphEvents.ON_REASONING_DELTA];
 
 /** Wall-clock marks (epoch ms) for one agent run; `null` until the event happens. */
@@ -48,9 +48,9 @@ export function createFirstTokenTimingHandlers(
   return wrapped;
 }
 
-/** Number of numbered KB entries in a context block built by `formatContext`. */
+/** Number of KB entries in a context block built by `formatContext`. */
 export function countKbChunks(context: string | undefined): number {
-  return context ? (context.match(KB_ENTRY_PATTERN)?.length ?? 0) : 0;
+  return contextEntrySources(context).length;
 }
 
 export interface RecordGenerationDeps {
