@@ -67,6 +67,11 @@ export interface MCPToolCacheService {
     publicationGeneration?: string;
     publicationRevision?: string;
   }) => Promise<boolean>;
+  reserveAppToolsPublicationRevision: (params: {
+    serverName: string;
+    serverConfig?: ParsedServerConfig;
+    userId?: string;
+  }) => Promise<string | undefined>;
   cacheMCPServerTools: (params: {
     userId: string;
     serverName: string;
@@ -377,18 +382,11 @@ export function createMCPToolCacheService(deps: MCPToolCacheDeps): MCPToolCacheS
         logger.debug(`[MCP Cache] Skipped unaddressed app-level publication for ${serverName}`);
         return false;
       }
-      /** Recovery paths (e.g. reinitialize after the cache TTL lapses) fetch a live
-       *  tool list but carry no ordered revision. The snapshot they hold is the
-       *  newest by construction, so mint the next revision for it — otherwise the
-       *  write is refused and an expired app-level cache can never repopulate
-       *  until the process restarts. */
-      let orderedRevision = publicationRevision;
-      if (!orderedRevision && getNextAppToolsPublicationRevision) {
-        orderedRevision = await getNextAppToolsPublicationRevision(serverName, configGeneration);
-      }
+      const orderedRevision =
+        publicationRevision ?? (await recoveryRevision(serverName, configGeneration));
       if (!orderedRevision) {
         logger.warn(
-          `[MCP Cache] Skipped unordered app-level publication for ${serverName}; its cached tools cannot be refreshed until restart`,
+          `[MCP Cache] Skipped unordered app-level publication for ${serverName}; reserve a revision before fetching tools to refresh a populated cache`,
         );
         return false;
       }
@@ -412,6 +410,51 @@ export function createMCPToolCacheService(deps: MCPToolCacheDeps): MCPToolCacheS
       logger.error(`[MCP Cache] Failed to replace app-level tools for ${serverName}:`, error);
       throw error;
     }
+  }
+
+  /** The only place an app-level publication revision is minted. */
+  async function mintRevision(
+    serverName: string,
+    configGeneration: string,
+  ): Promise<string | undefined> {
+    return getNextAppToolsPublicationRevision?.(serverName, configGeneration);
+  }
+
+  /**
+   * Reserves the next app-level revision BEFORE a caller fetches tools/list, so revision order
+   * follows fetch order: a list_changed publication that lands mid-fetch reserves a higher
+   * revision and the slower snapshot is rejected as superseded. Returns undefined for servers
+   * that are not app-shared.
+   */
+  async function reserveAppToolsPublicationRevision(params: {
+    serverName: string;
+    serverConfig?: ParsedServerConfig;
+    userId?: string;
+  }): Promise<string | undefined> {
+    const { serverName, serverConfig, userId } = params;
+    const resolvedConfig = await resolveCacheConfig(userId, serverName, serverConfig);
+    if (!resolvedConfig || requiresEphemeralUserConnection(resolvedConfig)) {
+      return undefined;
+    }
+    if (!(await isAppSharedConfig(serverName, resolvedConfig))) {
+      return undefined;
+    }
+    return mintRevision(serverName, getMCPAppToolsPublicationGeneration(resolvedConfig));
+  }
+
+  /**
+   * An unordered publication (no revision reserved before its fetch) may only repopulate an
+   * empty slot, e.g. after the app-level TTL lapsed. Over a populated slot it could overwrite
+   * a newer list_changed snapshot, so it is refused.
+   */
+  async function recoveryRevision(
+    serverName: string,
+    configGeneration: string,
+  ): Promise<string | undefined> {
+    if ((await getCachedAppServerTools(serverName, configGeneration)) != null) {
+      return undefined;
+    }
+    return mintRevision(serverName, configGeneration);
   }
 
   async function cacheMCPServerTools(params: {
@@ -566,6 +609,7 @@ export function createMCPToolCacheService(deps: MCPToolCacheDeps): MCPToolCacheS
     syncStaticTools,
     mergeAppTools,
     replaceAppServerTools,
+    reserveAppToolsPublicationRevision,
     cacheMCPServerTools,
     getMCPServerTools,
   };

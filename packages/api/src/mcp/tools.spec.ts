@@ -215,6 +215,126 @@ describe('createMCPToolCacheService', () => {
       expect(setCachedAppServerTools).toHaveBeenCalledWith('dynamic', generation, result, '3');
     });
 
+    it('refuses an unordered publication over a populated app-level slot', async () => {
+      const current = { [toolName('fresh', 'dynamic')]: makeTool(toolName('fresh', 'dynamic')) };
+      const getNextAppToolsPublicationRevision = jest.fn().mockResolvedValue('9');
+      const deps = createMockDeps({
+        getCachedAppServerTools: jest.fn().mockResolvedValue(current),
+        getNextAppToolsPublicationRevision,
+      });
+
+      await expect(
+        createMCPToolCacheService(deps).replaceAppServerTools({
+          serverName: 'dynamic',
+          serverTools: {},
+          publicationGeneration: 'config-generation',
+        }),
+      ).resolves.toBe(false);
+
+      expect(getNextAppToolsPublicationRevision).not.toHaveBeenCalled();
+      expect(deps.setCachedAppServerTools).not.toHaveBeenCalled();
+    });
+
+    it('reserves revisions only for app-shared servers', async () => {
+      let revision = 0;
+      const getNextAppToolsPublicationRevision = jest.fn(async () => String(++revision));
+      const appService = createMCPToolCacheService(
+        createMockDeps({
+          isAppServerConfig: jest.fn().mockResolvedValue(true),
+          getNextAppToolsPublicationRevision,
+        }),
+      );
+      const userService = createMCPToolCacheService(
+        createMockDeps({
+          isAppServerConfig: jest.fn().mockResolvedValue(false),
+          getNextAppToolsPublicationRevision,
+        }),
+      );
+
+      await expect(
+        appService.reserveAppToolsPublicationRevision({
+          serverName: 'dynamic',
+          serverConfig: cacheableConfig,
+        }),
+      ).resolves.toBe('1');
+      await expect(
+        appService.reserveAppToolsPublicationRevision({
+          serverName: 'dynamic',
+          serverConfig: requestScopedConfig,
+        }),
+      ).resolves.toBeUndefined();
+      await expect(
+        userService.reserveAppToolsPublicationRevision({
+          serverName: 'dynamic',
+          serverConfig: cacheableConfig,
+        }),
+      ).resolves.toBeUndefined();
+      expect(getNextAppToolsPublicationRevision).toHaveBeenCalledTimes(1);
+      expect(getNextAppToolsPublicationRevision).toHaveBeenCalledWith(
+        'dynamic',
+        getMCPAppToolsPublicationGeneration(cacheableConfig),
+      );
+    });
+
+    it('rejects a reinitialize snapshot superseded by a list_changed reserved mid-fetch', async () => {
+      const slots = new Map<string, { revision: number; tools: LCAvailableTools }>();
+      let revision = 0;
+      const service = createMCPToolCacheService(
+        createMockDeps({
+          isAppServerConfig: jest.fn().mockResolvedValue(true),
+          getNextAppToolsPublicationRevision: jest.fn(async () => String(++revision)),
+          getCachedAppServerTools: jest.fn(
+            async (serverName, generation) =>
+              slots.get(`${serverName}:${generation}`)?.tools ?? null,
+          ),
+          setCachedAppServerTools: jest.fn(async (serverName, generation, tools, published) => {
+            const key = `${serverName}:${generation}`;
+            const next = Number(published);
+            if ((slots.get(key)?.revision ?? 0) > next) {
+              return false;
+            }
+            slots.set(key, { revision: next, tools });
+            return true;
+          }),
+        }),
+      );
+      const generation = getMCPAppToolsPublicationGeneration(cacheableConfig);
+      const stale = { [toolName('stale', 'dynamic')]: makeTool(toolName('stale', 'dynamic')) };
+      const fresh = { [toolName('fresh', 'dynamic')]: makeTool(toolName('fresh', 'dynamic')) };
+
+      const reinitRevision = await service.reserveAppToolsPublicationRevision({
+        serverName: 'dynamic',
+        serverConfig: cacheableConfig,
+      });
+      const listChangedRevision = await service.reserveAppToolsPublicationRevision({
+        serverName: 'dynamic',
+        serverConfig: cacheableConfig,
+      });
+      await service.replaceAppServerTools({
+        serverName: 'dynamic',
+        serverTools: fresh,
+        publicationGeneration: generation,
+        publicationRevision: listChangedRevision,
+      });
+
+      await expect(
+        service.replaceAppServerTools({
+          serverName: 'dynamic',
+          serverTools: stale,
+          publicationGeneration: generation,
+          publicationRevision: reinitRevision,
+        }),
+      ).resolves.toBe(false);
+      await expect(
+        service.replaceAppServerTools({
+          serverName: 'dynamic',
+          serverTools: stale,
+          publicationGeneration: generation,
+        }),
+      ).resolves.toBe(false);
+      expect(slots.get(`dynamic:${generation}`)?.tools).toBe(fresh);
+    });
+
     it('rejects a tool boundary owned by another app server', async () => {
       const shadowed = toolName('search', 'foo_bar');
       const deps = createMockDeps({
