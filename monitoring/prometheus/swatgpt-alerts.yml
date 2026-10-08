@@ -6,7 +6,9 @@
 #
 # Metric names: vLLM (vllm:*), the LibreChat exporter (http_requests_total,
 # rag_retrieval_total, mcp_tool_calls_total, ...), Dash MCP (swatgpt_mcp_*), node_exporter on
-# eagle (node_*), blackbox (probe_success).
+# eagle (node_*), blackbox (probe_success), and the backup textfile metrics (swatgpt_backup_*)
+# that ops/backup/{backup,verify}.sh write to /var/lib/node_exporter/textfile_collector on eagle,
+# exported by node_exporter's textfile collector through the same eagle :9100 job.
 #
 # Dash MCP staleness thresholds are 3x the default poll intervals from docker-compose.override.yml
 # (alerts 60s, realtime 300s, content 900s, configuration 3600s). Scale them if
@@ -240,3 +242,55 @@ groups:
         annotations:
           summary: "eagle has less than 10% memory available"
           description: "{{ $value | humanizePercentage }} of RAM is available on eagle. MongoDB, Meilisearch, or the app container is growing."
+
+  - name: swatgpt-backup
+    rules:
+      - alert: SwatGPTBackupStale
+        expr: time() - max(swatgpt_backup_last_success_timestamp{job="eagle"}) > 36 * 3600
+        for: 15m
+        labels:
+          severity: critical
+          service: swatgpt
+        annotations:
+          summary: "No successful SwatGPT backup in over 36 hours"
+          description: "The newest complete backup on eagle finished {{ $value | humanizeDuration }} ago (decades means none exists). Check `systemctl status swatgpt-backup.service` and `journalctl -u swatgpt-backup.service` on eagle."
+
+      - alert: SwatGPTBackupMetricsMissing
+        expr: absent(swatgpt_backup_last_success_timestamp{job="eagle"}) and on() max(up{job="eagle", instance=~".*:9100"}) == 1
+        for: 2h
+        labels:
+          severity: warning
+          service: swatgpt
+        annotations:
+          summary: "eagle's node_exporter is up but exports no backup metrics"
+          description: "Either the backup timer has never run, the textfile collector flag is missing from node-exporter, or /var/lib/node_exporter/textfile_collector is not readable by it."
+
+      - alert: SwatGPTBackupRunFailed
+        expr: max(swatgpt_backup_last_run_success{job="eagle"}) == 0
+        for: 5m
+        labels:
+          severity: warning
+          service: swatgpt
+        annotations:
+          summary: "The last SwatGPT backup run failed"
+          description: "Older backups are intact, but tonight's did not complete. See `journalctl -u swatgpt-backup.service` on eagle. Goes critical as SwatGPTBackupStale after 36h."
+
+      - alert: SwatGPTBackupRestoreTestStale
+        expr: time() - max(swatgpt_backup_last_verify_success_timestamp{job="eagle"}) > 8 * 86400
+        for: 1h
+        labels:
+          severity: warning
+          service: swatgpt
+        annotations:
+          summary: "No passing SwatGPT backup restore test in 8 days"
+          description: "verify.sh last passed {{ $value | humanizeDuration }} ago. Backups that have not been restored are not known to be good. See `journalctl -u swatgpt-backup-verify.service` on eagle."
+
+      - alert: SwatGPTBackupRestoreTestMissing
+        expr: absent(swatgpt_backup_last_verify_success_timestamp{job="eagle"}) and on() max(swatgpt_backup_retained_count{job="eagle"}) >= 8
+        for: 1h
+        labels:
+          severity: warning
+          service: swatgpt
+        annotations:
+          summary: "The SwatGPT backup restore test has never run"
+          description: "At least 8 daily backups exist on eagle but verify.sh has never written its metrics. Check that swatgpt-backup-verify.timer is enabled (`systemctl list-timers swatgpt-backup-verify.timer`)."

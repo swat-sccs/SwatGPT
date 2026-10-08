@@ -1,0 +1,18 @@
+[Unit]
+Description=SwatGPT backup restore test (throwaway containers)
+Documentation=file:///srv/SwatGPT/ops/backup/README.md
+Requires=docker.service
+After=docker.service swatgpt-backup.service
+RequiresMountsFor=/srv/backup
+
+[Service]
+Type=oneshot
+EnvironmentFile=/etc/swatgpt-backup.env
+ExecStart=/srv/SwatGPT/ops/backup/verify.sh
+TimeoutStartSec=2h
+Nice=15
+IOSchedulingClass=idle
+PrivateTmp=yes
+NoNewPrivileges=yes
+ProtectSystem=full
+UMask=0077

@@ -1,0 +1,119 @@
+# promtool unit tests for the swatgpt-backup group, which lives in
+# monitoring/prometheus/swatgpt-alerts.yml (the file gull loads). Run from the repo root:
+#   docker run --rm -v "$PWD:/r:ro" --entrypoint promtool prom/prometheus:v3.5.0 \
+#     test rules /r/ops/backup/test/alerts.test.yml
+rule_files:
+  - ../../../monitoring/prometheus/swatgpt-alerts.yml
+
+evaluation_interval: 1m
+
+tests:
+  - name: fresh backups and restore test raise nothing
+    interval: 1m
+    input_series:
+      - series: 'swatgpt_backup_last_success_timestamp{job="eagle", instance="eagle:9100"}'
+        values: '0+60x2880'
+      - series: 'swatgpt_backup_last_run_success{job="eagle", instance="eagle:9100"}'
+        values: '1x2880'
+      - series: 'swatgpt_backup_last_verify_success_timestamp{job="eagle", instance="eagle:9100"}'
+        values: '0+60x2880'
+      - series: 'swatgpt_backup_retained_count{job="eagle", instance="eagle:9100"}'
+        values: '20x2880'
+      - series: 'up{job="eagle", instance="eagle:9100"}'
+        values: '1x2880'
+    alert_rule_test:
+      - eval_time: 48h
+        alertname: SwatGPTBackupStale
+        exp_alerts: []
+      - eval_time: 48h
+        alertname: SwatGPTBackupRunFailed
+        exp_alerts: []
+      - eval_time: 48h
+        alertname: SwatGPTBackupMetricsMissing
+        exp_alerts: []
+      - eval_time: 48h
+        alertname: SwatGPTBackupRestoreTestStale
+        exp_alerts: []
+      - eval_time: 48h
+        alertname: SwatGPTBackupRestoreTestMissing
+        exp_alerts: []
+
+  - name: a backup frozen since hour 1 goes stale after 36h; a failed run warns
+    interval: 1m
+    input_series:
+      - series: 'swatgpt_backup_last_success_timestamp{job="eagle", instance="eagle:9100"}'
+        values: '3600x2880'
+      - series: 'swatgpt_backup_last_run_success{job="eagle", instance="eagle:9100"}'
+        values: '1x1440 0x1440'
+    alert_rule_test:
+      - eval_time: 36h
+        alertname: SwatGPTBackupStale
+        exp_alerts: []
+      - eval_time: 38h
+        alertname: SwatGPTBackupStale
+        exp_alerts:
+          - exp_labels: { severity: critical, service: swatgpt }
+            exp_annotations:
+              summary: "No successful SwatGPT backup in over 36 hours"
+              description: "The newest complete backup on eagle finished 1d 13h 0m 0s ago (decades means none exists). Check `systemctl status swatgpt-backup.service` and `journalctl -u swatgpt-backup.service` on eagle."
+      - eval_time: 23h
+        alertname: SwatGPTBackupRunFailed
+        exp_alerts: []
+      - eval_time: 30h
+        alertname: SwatGPTBackupRunFailed
+        exp_alerts:
+          - exp_labels: { severity: warning, service: swatgpt }
+            exp_annotations:
+              summary: "The last SwatGPT backup run failed"
+              description: "Older backups are intact, but tonight's did not complete. See `journalctl -u swatgpt-backup.service` on eagle. Goes critical as SwatGPTBackupStale after 36h."
+
+  - name: node_exporter up without backup metrics
+    interval: 1m
+    input_series:
+      - series: 'up{job="eagle", instance="eagle:9100"}'
+        values: '1x240'
+    alert_rule_test:
+      - eval_time: 1h
+        alertname: SwatGPTBackupMetricsMissing
+        exp_alerts: []
+      - eval_time: 3h
+        alertname: SwatGPTBackupMetricsMissing
+        exp_alerts:
+          - exp_labels: { job: eagle, severity: warning, service: swatgpt }
+            exp_annotations:
+              summary: "eagle's node_exporter is up but exports no backup metrics"
+              description: "Either the backup timer has never run, the textfile collector flag is missing from node-exporter, or /var/lib/node_exporter/textfile_collector is not readable by it."
+
+  - name: restore test never ran although eight daily backups exist
+    interval: 1m
+    input_series:
+      - series: 'swatgpt_backup_retained_count{job="eagle", instance="eagle:9100"}'
+        values: '7x120 8x240'
+    alert_rule_test:
+      - eval_time: 2h
+        alertname: SwatGPTBackupRestoreTestMissing
+        exp_alerts: []
+      - eval_time: 5h
+        alertname: SwatGPTBackupRestoreTestMissing
+        exp_alerts:
+          - exp_labels: { job: eagle, severity: warning, service: swatgpt }
+            exp_annotations:
+              summary: "The SwatGPT backup restore test has never run"
+              description: "At least 8 daily backups exist on eagle but verify.sh has never written its metrics. Check that swatgpt-backup-verify.timer is enabled (`systemctl list-timers swatgpt-backup-verify.timer`)."
+
+  - name: restore test last passed nine days ago
+    interval: 1m
+    input_series:
+      - series: 'swatgpt_backup_last_verify_success_timestamp{job="eagle", instance="eagle:9100"}'
+        values: '0x13000'
+    alert_rule_test:
+      - eval_time: 7d
+        alertname: SwatGPTBackupRestoreTestStale
+        exp_alerts: []
+      - eval_time: 9d
+        alertname: SwatGPTBackupRestoreTestStale
+        exp_alerts:
+          - exp_labels: { severity: warning, service: swatgpt }
+            exp_annotations:
+              summary: "No passing SwatGPT backup restore test in 8 days"
+              description: "verify.sh last passed 9d 0h 0m 0s ago. Backups that have not been restored are not known to be good. See `journalctl -u swatgpt-backup-verify.service` on eagle."

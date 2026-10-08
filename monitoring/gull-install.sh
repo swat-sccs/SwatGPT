@@ -78,6 +78,10 @@ if grep -q 'SwatGPTRetrievalNonHitRatioHigh' "$AM/alertmanager.yml"; then
   echo "WARNING: $AM/alertmanager.yml still inhibits SwatGPTRetrievalNonHitRatioHigh, which is now"
   echo "SwatGPTRetrievalFailureRatioHigh; update that inhibit rule (see alertmanager/alertmanager.yml)"
 fi
+if ! grep -q 'SwatGPTBackupStale' "$AM/alertmanager.yml"; then
+  echo "WARNING: $AM/alertmanager.yml predates the backup alerts; copy the SwatGPTBackupStale ->"
+  echo "SwatGPTBackupRunFailed inhibit rule from alertmanager/alertmanager.yml into it"
+fi
 
 if ! grep -q '^  alertmanager:' "$STACK"; then
   python3 - "$STACK" <<'PY'

@@ -6,7 +6,7 @@ plus the exporters that run on `eagle`. See `context/observability.md` for the p
 | File | Purpose |
 |---|---|
 | `prometheus/swatgpt-jobs.yml` | Scrape jobs to append to gull's `prometheus.yml` (vLLM, TEI, eagle, LibreChat exporter, Dash MCP) |
-| `prometheus/swatgpt-alerts.yml` | Alerting rules (vLLM down/queueing/TTFT/KV cache, TEI down, retrieval ratio, app 5xx, eagle disk/RAM, readyz, Dash MCP down/poll failures/staleness/tool errors) |
+| `prometheus/swatgpt-alerts.yml` | Alerting rules (vLLM down/queueing/TTFT/KV cache, TEI down, retrieval ratio, app 5xx, eagle disk/RAM, readyz, Dash MCP down/poll failures/staleness/tool errors, nightly backups and restore tests) |
 | `grafana/swatgpt.json` | Grafana 11 dashboard, uid `swatgpt`, `datasource` and `router` variables |
 | `alertmanager/alertmanager.yml` | Alertmanager config with Discord/Slack/email receivers and inhibit rules |
 | `alertmanager/stack-fragment.yml` | `alertmanager` service block for the gull swarm stack |
@@ -17,9 +17,20 @@ What gets scraped:
 |---|---|---|
 | `vllm` | `loon:8000/metrics` | `vllm:num_requests_running/waiting`, `vllm:kv_cache_usage_perc`, `vllm:time_to_first_token_seconds`, `vllm:e2e_request_latency_seconds`, `vllm:prompt_tokens_total`, `vllm:generation_tokens_total`, `vllm:prefix_cache_{hits,queries}_total` |
 | `tei` | `loon:8001`, `loon:8002` | `te_request_duration`, `te_request_count` |
-| `eagle` | `eagle:9100`, `eagle:8080` | node_exporter (`node_*`) and cadvisor (`container_*`) |
+| `eagle` | `eagle:9100`, `eagle:8080` | node_exporter (`node_*`, plus `swatgpt_backup_*` from its textfile collector) and cadvisor (`container_*`) |
 | `swatgpt_app` | `eagle:3080/metrics` (bearer token) | `http_requests_total`, `http_request_duration_seconds`, `sse_streams_*`, `mongoose_query_duration_seconds`, `agent_startup_*`, `rag_retrieval_total{result}`, `rag_retrieval_duration_seconds`, `rag_chunks_returned`, `mcp_tool_calls_total{server,tool,result}`, `mcp_tool_call_duration_seconds` |
 | `swatgpt_mcp` | `eagle:3001/metrics` (gull-only firewall, no auth) | `swatgpt_mcp_tool_calls_total{tool,result}`, `swatgpt_mcp_upstream_polls_total{kind,result}`, `swatgpt_mcp_upstream_last_success_timestamp_seconds{kind}`, `swatgpt_mcp_snapshot_age_seconds{domain}` |
+
+Backup metrics need no scrape job of their own. `ops/backup/backup.sh` and `verify.sh` write
+`swatgpt_backup.prom` and `swatgpt_backup_verify.prom` to `/var/lib/node_exporter/textfile_collector`
+on eagle, and the `node-exporter` service in `docker-compose.override.yml` reads that directory
+through its `/rootfs` mount (`--collector.textfile.directory`). Until the backup units are installed
+(`ops/backup/README.md`) the directory is missing or empty: node_exporter keeps running and reports
+`node_textfile_scrape_error`, and `SwatGPTBackupMetricsMissing` fires after 2h once gull has the
+rules. Install the backup units on eagle before copying the updated rules to gull, or expect that
+warning in the meantime. gull's existing `alertmanager.yml` is never overwritten, so add the
+`SwatGPTBackupStale` -> `SwatGPTBackupRunFailed` inhibit rule to it by hand (`gull-install.sh` warns
+while it is missing).
 
 Dash MCP (`dash_mcp/src/metrics.ts`) serves `GET /metrics` on container port 3000 without
 authentication. `docker-compose.override.yml` publishes it as `${SWATGPT_METRICS_BIND}:3001:3000` on
@@ -211,7 +222,27 @@ The staleness thresholds assume the default `SWATGPT_*_POLL_INTERVAL_SECONDS` in
 | `SwatGPTEagleExporterDown` | `up{job="eagle"} == 0` for 5m | warning |
 | `SwatGPTEagleDiskHigh` | `/` usage > 85% for 10m | warning |
 | `SwatGPTEagleMemoryLow` | available RAM < 10% for 10m | warning |
+| `SwatGPTBackupStale` | newest complete backup on eagle older than 36h for 15m | critical |
+| `SwatGPTBackupRunFailed` | last `backup.sh` run failed, for 5m (inhibited once `SwatGPTBackupStale` fires) | warning |
+| `SwatGPTBackupMetricsMissing` | eagle's node_exporter is up but exports no `swatgpt_backup_*` metrics, for 2h | warning |
+| `SwatGPTBackupRestoreTestStale` | no passing `verify.sh` restore test in 8 days, for 1h | warning |
+| `SwatGPTBackupRestoreTestMissing` | at least 8 backups retained but `verify.sh` has never written metrics, for 1h | warning |
 
 Without a blackbox exporter, `/readyz` is covered indirectly: the compose `healthcheck` on the `api`
 service hits `/readyz` every 30 s (visible in `docker compose ps`), the deploy workflow polls it, and
 `SwatGPTAppDown` fires when the process stops answering scrapes.
+
+## Tests
+
+`monitoring/tests/` checks this directory and the compose hardening before anything reaches eagle
+or gull:
+
+```sh
+# compose hardening, firewall/script behavior (runs the scripts against stubbed iptables/docker/sudo)
+node --test monitoring/tests/hardening.test.mjs          # needs js-yaml from the repo's node_modules
+# alert rule unit tests and config syntax
+docker run --rm -v "$PWD/monitoring:/m:ro" --entrypoint promtool prom/prometheus:v3.5.0 test rules /m/tests/swatgpt-alerts.test.yml
+docker run --rm -v "$PWD:/r:ro" --entrypoint promtool prom/prometheus:v3.5.0 test rules /r/ops/backup/test/alerts.test.yml   # swatgpt-backup group
+docker run --rm -v "$PWD/monitoring:/m:ro" --entrypoint promtool prom/prometheus:v3.5.0 check rules /m/prometheus/swatgpt-alerts.yml
+docker run --rm -v "$PWD/monitoring:/m:ro" --entrypoint amtool prom/alertmanager:v0.28.1 check-config /m/alertmanager/alertmanager.yml
+```

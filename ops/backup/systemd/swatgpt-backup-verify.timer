@@ -1,0 +1,10 @@
+[Unit]
+Description=Weekly SwatGPT backup restore test
+
+[Timer]
+OnCalendar=Sun *-*-* 05:00:00 America/New_York
+RandomizedDelaySec=15m
+Persistent=true
+
+[Install]
+WantedBy=timers.target

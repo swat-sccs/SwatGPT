@@ -25,6 +25,10 @@ inhibit_rules:
   - source_matchers: ["alertname = SwatGPTTeiDown"]
     target_matchers: ["alertname = SwatGPTRetrievalFailureRatioHigh"]
     equal: ["service"]
+  # After 36h without a backup the critical Stale alert already covers the failing runs.
+  - source_matchers: ["alertname = SwatGPTBackupStale"]
+    target_matchers: ["alertname = SwatGPTBackupRunFailed"]
+    equal: ["service"]
 
 receivers:
   - name: sccs-discord
