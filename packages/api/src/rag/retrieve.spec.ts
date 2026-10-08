@@ -288,7 +288,7 @@ describe('retrieveKbContext', () => {
           }),
       );
       const pending = retrieveKbContext(QUERY);
-      await jest.advanceTimersByTimeAsync(1500);
+      await jest.advanceTimersByTimeAsync(1000);
       await expect(pending).resolves.toBeUndefined();
       expect(warnSpy).toHaveBeenCalledTimes(1);
     });
@@ -402,7 +402,7 @@ describe('retrieveKbContext', () => {
           }),
       );
       const pending = retrieveKbContextDetailed(QUERY);
-      await jest.advanceTimersByTimeAsync(1500);
+      await jest.advanceTimersByTimeAsync(1000);
       const detailed = await pending;
       jest.useRealTimers();
 

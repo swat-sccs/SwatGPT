@@ -10,7 +10,7 @@ import { embedQuery } from './embed';
 import { searchKb } from './search';
 
 const RERANK_SCORE_FLOOR = 0.3;
-const TOTAL_BUDGET_MS = 1500;
+const TOTAL_BUDGET_MS = 1000;
 const TOP_CHUNKS = 8;
 const LEXICAL_TOP = 3;
 
