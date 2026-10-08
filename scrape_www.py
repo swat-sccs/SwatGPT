@@ -5,8 +5,11 @@ filtered to an allowlist of informational sections. Main content is extracted wi
 trafilatura (strips nav/menu/footer boilerplate) and saved under information/www/
 with YAML frontmatter (title, source URL, section, content hash) for RAG ingestion.
 
-Usage: python scrape_www.py
+Usage: python scrape_www.py  (RESUME=1 keeps pages already on disk)
 Dependencies: requests, trafilatura
+
+Pages that were not rescraped are pruned only when every fetch succeeded and at most
+MAX_PRUNE_RATIO (default 0.2) of the existing files would go; otherwise everything is kept.
 """
 
 import os
@@ -27,6 +30,7 @@ OUT_DIR = Path(__file__).parent / "information" / "www"
 MIN_BODY_CHARS = 300
 SLEEP = 0.25
 RESUME = os.environ.get("RESUME") == "1"
+MAX_PRUNE_RATIO = float(os.environ.get("MAX_PRUNE_RATIO", "0.2"))
 
 # Sections scraped in full (every page under the path prefix).
 # Current-student-focused only: applicant/prospective sections (admissions-aid,
@@ -173,6 +177,32 @@ def slugify(path: str) -> str:
     return slug[:120] or "untitled"
 
 
+def url_hash(url: str) -> str:
+    return hashlib.sha256(url.encode()).hexdigest()[:8]
+
+
+def assign_slug(base: str, url: str, taken: set[str]) -> str:
+    return f"{base}-{url_hash(url)}" if base in taken else base
+
+
+def collision_variants(base: str) -> set[str]:
+    pattern = re.compile(rf"{re.escape(base)}-[0-9a-f]{{8}}")
+    return {f.stem for f in OUT_DIR.glob(f"{base}-*.md") if pattern.fullmatch(f.stem)}
+
+
+def stale_files(kept: set[str], failures: list[str]) -> tuple[list[Path], str | None]:
+    """Files to prune, or the reason pruning is skipped (a failure is not a removal)."""
+    existing = sorted(OUT_DIR.glob("*.md"))
+    stale = [f for f in existing if f.stem not in kept]
+    if failures:
+        return [], f"{len(failures)} fetch(es) failed"
+    if existing and len(stale) > MAX_PRUNE_RATIO * len(existing):
+        return [], (
+            f"{len(stale)}/{len(existing)} files would be removed, over MAX_PRUNE_RATIO={MAX_PRUNE_RATIO}"
+        )
+    return stale, None
+
+
 def frontmatter(title: str, url: str, section: str, body: str) -> str:
     content_hash = hashlib.sha256(body.encode("utf-8")).hexdigest()
     return "\n".join([
@@ -190,6 +220,8 @@ def main() -> None:
     all_urls = sitemap_urls()
     targets = sorted({u for u in all_urls if allowed(u)})
     print(f"Sitemap URLs: {len(all_urls)}; after allowlist filter: {len(targets)}")
+    if not targets:
+        sys.exit("no allowlisted URLs in the sitemap; refusing to touch information/www")
 
     seen_slugs: set[str] = set()
     failures: list[str] = []
@@ -200,9 +232,11 @@ def main() -> None:
 
     for i, url in enumerate(targets, 1):
         path = urlparse(url).path.strip("/")
-        existing = slugify(path)
-        if RESUME and (OUT_DIR / f"{existing}.md").exists():
-            seen_slugs.add(existing)
+        base = slugify(path)
+        slug = assign_slug(base, url, seen_slugs)
+        if RESUME and (OUT_DIR / f"{slug}.md").exists():
+            seen_slugs.add(slug)
+            seen_slugs.update(collision_variants(base))
             resumed += 1
             continue
 
@@ -227,11 +261,7 @@ def main() -> None:
             time.sleep(SLEEP)
             continue
 
-        slug = slugify(path)
-        if slug in seen_slugs:
-            slug = f"{slug}-{hashlib.sha256(url.encode()).hexdigest()[:8]}"
         seen_slugs.add(slug)
-
         section = path.split("/")[0]
         content = f"{frontmatter(title, url, section, body)}\n\n# {title}\n\n{body}\n"
         (OUT_DIR / f"{slug}.md").write_text(content, encoding="utf-8")
@@ -239,7 +269,7 @@ def main() -> None:
         print(f"[{i}/{len(targets)}] {path} -> {slug}.md")
         time.sleep(SLEEP)
 
-    stale = [f for f in OUT_DIR.glob("*.md") if f.stem not in seen_slugs]
+    stale, skip_reason = stale_files(seen_slugs, failures)
     for f in stale:
         f.unlink()
 
@@ -248,6 +278,8 @@ def main() -> None:
         f"{len(stale)} stale files removed), "
         f"{stubs} skipped as stubs, {non_english} skipped as non-English, {len(failures)} failed"
     )
+    if skip_reason:
+        print(f"Pruning skipped: {skip_reason}. Existing pages were kept; re-run (RESUME=1) to retry.")
     if failures:
         print("Failed pages:", *failures, sep="\n  ")
 

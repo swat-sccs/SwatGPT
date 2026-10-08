@@ -9,15 +9,23 @@ course credit, academic calendar) from the current catalog year are each
 written to information/catalog/ as markdown with YAML frontmatter as they are
 scraped, for RAG ingestion.
 
-Usage: python3 scrape_catalog.py
+Every run re-fetches and overwrites each item, then prunes files that this run
+did not produce (older catalog years, renamed or removed items). An item that
+fails keeps its existing file, and pruning is skipped entirely when a program
+or course index could not be listed.
+
+Usage: python3 scrape_catalog.py  (RESUME=1 skips items already on disk for the current catalog)
 Dependencies: requests, html2text
 """
 
+import os
 import re
 import sys
 import time
 import hashlib
 from html import unescape
+from functools import partial
+from collections.abc import Callable
 from pathlib import Path
 
 import requests
@@ -28,6 +36,8 @@ OUT_DIR = Path(__file__).parent / "information" / "catalog"
 REQUEST_PACING = 1.0
 THROTTLE_INITIAL_WAIT = 60
 THROTTLE_MAX_WAIT = 480
+RESUME = os.environ.get("RESUME") == "1"
+KINDS = ("course", "program", "policy")
 POLICY_SECTIONS = (
     "educational program",
     "degree requirements",
@@ -153,17 +163,72 @@ class Writer:
         return filename
 
 
-def load_done() -> tuple[dict[str, set[int]], set[str]]:
-    done: dict[str, set[int]] = {"course": set(), "program": set(), "policy": set()}
-    filenames: set[str] = set()
+def index_existing(catoid: int) -> dict[str, dict[int, str]]:
+    """Map kind -> item id -> filename for files on disk scraped from this catoid."""
+    existing: dict[str, dict[int, str]] = {kind: {} for kind in KINDS}
     for path in OUT_DIR.glob("*.md"):
-        filenames.add(path.name)
         head = path.read_text(encoding="utf-8")[:600]
         type_match = re.search(r"^type: (\w+)$", head, re.MULTILINE)
-        id_match = re.search(r"[?&](?:coid|poid|navoid)=(\d+)", head)
-        if type_match and id_match and type_match.group(1) in done:
-            done[type_match.group(1)].add(int(id_match.group(1)))
-    return done, filenames
+        source_match = re.search(r"^source: \S*[?&]catoid=(\d+)&(?:coid|poid|navoid)=(\d+)", head, re.MULTILINE)
+        if not type_match or not source_match or type_match.group(1) not in existing:
+            continue
+        if int(source_match.group(1)) == catoid:
+            existing[type_match.group(1)][int(source_match.group(2))] = path.name
+    return existing
+
+
+class Run:
+    """Tracks which files this run keeps, so everything else in OUT_DIR can be pruned."""
+
+    def __init__(self, writer: Writer, existing: dict[str, dict[int, str]]):
+        self.writer = writer
+        self.existing = existing
+        self.kept: set[str] = set()
+        self.failures: list[str] = []
+        self.resumed = 0
+        self.prune_blocked: str | None = None
+
+    def keep(self, filename: str) -> None:
+        self.kept.add(filename)
+        self.writer.seen.add(filename)
+
+    def item(self, kind: str, item_id: int, label: str, scrape: Callable[[], str]) -> None:
+        on_disk = self.existing[kind].get(item_id)
+        if RESUME and on_disk:
+            self.keep(on_disk)
+            self.resumed += 1
+            return
+        try:
+            filename = scrape()
+            self.kept.add(filename)
+            print(f"[{label}] -> {filename}")
+        except Exception as exc:
+            self.failures.append(f"{label}: {exc}")
+            print(f"[{label}] FAILED: {exc}", file=sys.stderr)
+            if on_disk:
+                self.keep(on_disk)
+        time.sleep(REQUEST_PACING)
+
+    def index(self, label: str, lister: Callable[[], list]) -> list:
+        try:
+            items = lister()
+        except Exception as exc:
+            self.failures.append(f"{label} index: {exc}")
+            self.prune_blocked = f"{label} index failed ({exc})"
+            print(f"[{label} index] FAILED: {exc}", file=sys.stderr)
+            return []
+        if not items:
+            self.prune_blocked = f"{label} index was empty"
+        print(f"Found {len(items)} {label}s")
+        return items
+
+    def prune(self) -> list[Path]:
+        if self.prune_blocked:
+            return []
+        stale = [p for p in OUT_DIR.glob("*.md") if p.name not in self.kept]
+        for path in stale:
+            path.unlink()
+        return stale
 
 
 def list_course_ids(catoid: int, navoid: int) -> list[int]:
@@ -272,54 +337,30 @@ def main() -> None:
 
     converter = make_converter()
     writer = Writer(year)
-    failures: list[str] = []
-    done, existing_files = load_done()
-    writer.seen.update(existing_files)
-    skipped = sum(len(ids) for ids in done.values())
-    if skipped:
-        print(f"Resuming: {len(done['course'])} courses, {len(done['program'])} programs, {len(done['policy'])} policies already on disk")
+    run = Run(writer, index_existing(catoid))
 
     for navoid in nav["policies"]:
-        if navoid in done["policy"]:
-            continue
-        try:
-            filename = scrape_policy(catoid, navoid, converter, writer)
-            print(f"[policy {navoid}] -> {filename}")
-        except Exception as exc:
-            failures.append(f"policy navoid={navoid}: {exc}")
-            print(f"[policy {navoid}] FAILED: {exc}", file=sys.stderr)
-        time.sleep(REQUEST_PACING)
+        run.item("policy", navoid, f"policy navoid={navoid}", partial(scrape_policy, catoid, navoid, converter, writer))
 
-    programs = list_programs(catoid, nav["programs"])
-    print(f"Found {len(programs)} programs")
+    programs = run.index("program", lambda: list_programs(catoid, nav["programs"]))
     for i, (poid, name) in enumerate(programs, 1):
-        if poid in done["program"]:
-            continue
-        try:
-            filename = scrape_program(catoid, poid, name, converter, writer)
-            print(f"[program {i}/{len(programs)}] {name} -> {filename}")
-        except Exception as exc:
-            failures.append(f"program poid={poid} ({name}): {exc}")
-            print(f"[program {i}/{len(programs)}] FAILED {name}: {exc}", file=sys.stderr)
-        time.sleep(REQUEST_PACING)
+        label = f"program {i}/{len(programs)} poid={poid} {name}"
+        run.item("program", poid, label, partial(scrape_program, catoid, poid, name, converter, writer))
 
-    course_ids = list_course_ids(catoid, nav["courses"])
-    print(f"Found {len(course_ids)} courses")
+    course_ids = run.index("course", lambda: list_course_ids(catoid, nav["courses"]))
     for i, coid in enumerate(course_ids, 1):
-        if coid in done["course"]:
-            continue
-        try:
-            filename = scrape_course(catoid, coid, converter, writer)
-            print(f"[course {i}/{len(course_ids)}] coid={coid} -> {filename}")
-        except Exception as exc:
-            failures.append(f"course coid={coid}: {exc}")
-            print(f"[course {i}/{len(course_ids)}] FAILED coid={coid}: {exc}", file=sys.stderr)
-        time.sleep(REQUEST_PACING)
+        run.item("course", coid, f"course {i}/{len(course_ids)} coid={coid}", partial(scrape_course, catoid, coid, converter, writer))
 
+    stale = run.prune()
     total = sum(writer.counts.values())
-    print(f"\nDone: {total} new files in {OUT_DIR}/ ({writer.counts}), {skipped} skipped as already scraped, {len(failures)} failed")
-    if failures:
-        print("Failures:", *failures, sep="\n  ")
+    print(
+        f"\nDone: {total} files written to {OUT_DIR}/ ({writer.counts}), {run.resumed} resumed, "
+        f"{len(stale)} stale removed, {len(run.failures)} failed"
+    )
+    if run.prune_blocked:
+        print(f"Pruning skipped: {run.prune_blocked}. Existing files were kept.")
+    if run.failures:
+        print("Failures:", *run.failures, sep="\n  ")
 
 
 if __name__ == "__main__":
