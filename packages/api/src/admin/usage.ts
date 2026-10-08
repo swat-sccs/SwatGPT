@@ -6,6 +6,7 @@ import type {
   IMessage,
   UsageRange,
   UsageBucket,
+  FlagMethods,
   UsageSummary,
   UsageUserRow,
   IConversation,
@@ -23,7 +24,7 @@ import type {
   TAdminUsageModelsResponse,
   TAdminConversationListItem,
 } from 'librechat-data-provider';
-import type { Model } from 'mongoose';
+import type { FilterQuery, Model } from 'mongoose';
 import type { Response } from 'express';
 import type { HasCapabilityFn } from '~/middleware/capabilities';
 import type { ServerRequest } from '~/types/http';
@@ -59,8 +60,11 @@ export interface AdminUsageDeps {
   getConversationStats: (conversationIds: string[]) => Promise<Map<string, ConversationStats>>;
   countFlags: (range: UsageRange) => Promise<number>;
   countFlagsByUser: (range: UsageRange, userIds: string[]) => Promise<Map<string, number>>;
-  countFlagsByConversation: (conversationIds: string[]) => Promise<Map<string, number>>;
+  /** Conversations with an open flag, matching the oversight list's `flagged`. */
+  getFlaggedConversationIds: FlagMethods['getFlaggedConversationIds'];
   isUserBanned: (userId: string) => Promise<boolean>;
+  /** Ban state per id, in input order, read in one batch. */
+  areUsersBanned: (userIds: string[]) => Promise<boolean[]>;
   /** Gates conversation titles in the user detail view on `read:conversations`. */
   hasCapability: HasCapabilityFn;
 }
@@ -324,7 +328,7 @@ export function createAdminUsageHandlers(deps: AdminUsageDeps): AdminUsageHandle
       const userIds = result.users.map((row) => row.userId);
       const [flags, banned] = await Promise.all([
         deps.countFlagsByUser(range, userIds),
-        Promise.all(userIds.map((id) => deps.isUserBanned(id))),
+        deps.areUsersBanned(userIds),
       ]);
       const response: TAdminUsageUsersResponse = {
         users: result.users.map((row, index) =>
@@ -345,10 +349,10 @@ export function createAdminUsageHandlers(deps: AdminUsageDeps): AdminUsageHandle
   ): Promise<Array<Omit<TAdminConversationListItem, 'user'>>> {
     const conversations = await deps.findRecentConversations(userId, RECENT_CONVERSATIONS_LIMIT);
     const ids = conversations.map((conversation) => conversation.conversationId);
-    const [usage, stats, flags] = await Promise.all([
+    const [usage, stats, flagged] = await Promise.all([
       deps.getConversationUsage(ids),
       deps.getConversationStats(ids),
-      deps.countFlagsByConversation(ids),
+      deps.getFlaggedConversationIds(ids),
     ]);
     return conversations.map((conversation) => {
       const id = conversation.conversationId;
@@ -362,7 +366,7 @@ export function createAdminUsageHandlers(deps: AdminUsageDeps): AdminUsageHandle
         promptTokens: tokens?.promptTokens ?? 0,
         completionTokens: tokens?.completionTokens ?? 0,
         errors: tokens?.errors ?? 0,
-        flagged: (flags.get(id) ?? 0) > 0,
+        flagged: flagged.has(id),
         feedback: { up: stat?.up ?? 0, down: stat?.down ?? 0 },
         createdAt: toIso(conversation.createdAt),
         updatedAt: toIso(conversation.updatedAt),
@@ -513,14 +517,11 @@ function toObjectIds(ids: string[]): Types.ObjectId[] {
 /** Flag counters over the `flags` collection written by keyword screening and manual review. */
 export function createUsageFlagReaders(
   Flag: Model<IFlag>,
-): Pick<AdminUsageDeps, 'countFlags' | 'countFlagsByUser' | 'countFlagsByConversation'> {
-  async function countGrouped(
-    match: Record<string, unknown>,
-    groupBy: string,
-  ): Promise<Map<string, number>> {
+): Pick<AdminUsageDeps, 'countFlags' | 'countFlagsByUser'> {
+  async function countByUser(match: FilterQuery<IFlag>): Promise<Map<string, number>> {
     const rows = await Flag.aggregate<CountRow>([
       { $match: match },
-      { $group: { _id: { $toString: `$${groupBy}` }, count: { $sum: 1 } } },
+      { $group: { _id: { $toString: '$user' }, count: { $sum: 1 } } },
     ]);
     return new Map(rows.map(({ _id, count }) => [_id, count]));
   }
@@ -535,11 +536,7 @@ export function createUsageFlagReaders(
       const users = toObjectIds(userIds);
       return users.length === 0
         ? Promise.resolve(new Map())
-        : countGrouped({ createdAt: { $gte: from, $lt: to }, user: { $in: users } }, 'user');
+        : countByUser({ createdAt: { $gte: from, $lt: to }, user: { $in: users } });
     },
-    countFlagsByConversation: (conversationIds) =>
-      conversationIds.length === 0
-        ? Promise.resolve(new Map())
-        : countGrouped({ conversationId: { $in: conversationIds } }, 'conversationId'),
   };
 }

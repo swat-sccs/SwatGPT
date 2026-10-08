@@ -1,5 +1,5 @@
 import mongoose, { Types } from 'mongoose';
-import { flagSchema } from '@librechat/data-schemas';
+import { flagSchema, createMethods } from '@librechat/data-schemas';
 import { MongoMemoryServer } from 'mongodb-memory-server';
 import type { IFlag } from '@librechat/data-schemas';
 import type { Model } from 'mongoose';
@@ -92,18 +92,19 @@ describe('createUsageFlagReaders', () => {
     });
   });
 
-  describe('countFlagsByConversation', () => {
-    it('counts every flag per conversation regardless of date', async () => {
-      const counts = await readers.countFlagsByConversation(['c1', 'c2', 'c4', 'missing']);
-      expect(counts.get('c1')).toBe(2);
-      expect(counts.get('c2')).toBe(1);
-      expect(counts.get('c4')).toBe(1);
-      expect(counts.has('missing')).toBe(false);
-      expect(counts.size).toBe(3);
-    });
+  it('no longer exposes a resolution-blind per-conversation counter', () => {
+    expect(Object.keys(readers).sort()).toEqual(['countFlags', 'countFlagsByUser']);
+  });
+});
 
-    it('returns an empty map for no conversation ids', async () => {
-      await expect(readers.countFlagsByConversation([])).resolves.toEqual(new Map());
+describe('recent conversations flagged state', () => {
+  it('matches the oversight list: a resolved-only conversation is not flagged', async () => {
+    await Flag.collection.insertOne({
+      ...flag(bob, 'c5', INSIDE),
+      resolvedAt: new Date(),
     });
+    const { getFlaggedConversationIds } = createMethods(mongoose);
+    const flagged = await getFlaggedConversationIds(['c1', 'c3', 'c5']);
+    expect(Array.from(flagged).sort()).toEqual(['c1', 'c3']);
   });
 });

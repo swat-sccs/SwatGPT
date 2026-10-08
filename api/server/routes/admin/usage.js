@@ -30,6 +30,7 @@ const handlers = createAdminUsageHandlers({
   findUser: (userId) => db.findUser({ _id: userId }, USAGE_USER_FIELDS),
   ...createUsageConversationReaders({ Conversation, Message }),
   ...createUsageFlagReaders(Flag),
+  getFlaggedConversationIds: db.getFlaggedConversationIds,
   isUserBanned: banService.isBanned,
   hasCapability,
 });

@@ -57,8 +57,11 @@ function createDeps(overrides: Partial<AdminUsageDeps> = {}): AdminUsageDeps {
     getConversationStats: jest.fn().mockResolvedValue(new Map()),
     countFlags: jest.fn().mockResolvedValue(0),
     countFlagsByUser: jest.fn().mockResolvedValue(new Map()),
-    countFlagsByConversation: jest.fn().mockResolvedValue(new Map()),
+    getFlaggedConversationIds: jest.fn().mockResolvedValue(new Set()),
     isUserBanned: jest.fn().mockResolvedValue(false),
+    areUsersBanned: jest
+      .fn()
+      .mockImplementation((ids: string[]) => Promise.resolve(ids.map(() => false))),
     hasCapability: jest.fn().mockResolvedValue(true),
     ...overrides,
   };
@@ -252,7 +255,7 @@ describe('createAdminUsageHandlers', () => {
           ],
         }),
         countFlagsByUser: jest.fn().mockResolvedValue(new Map([[userId, 2]])),
-        isUserBanned: jest.fn().mockResolvedValue(true),
+        areUsersBanned: jest.fn().mockResolvedValue([true]),
       });
       const { req, res, json } = createReqRes({
         query: { from: FROM, to: TO, sort: 'errors', limit: '5', offset: '10', search: ' ali ' },
@@ -266,7 +269,9 @@ describe('createAdminUsageHandlers', () => {
         offset: 10,
         search: 'ali',
       });
-      expect(deps.isUserBanned).toHaveBeenCalledWith(userId);
+      expect(deps.areUsersBanned).toHaveBeenCalledTimes(1);
+      expect(deps.areUsersBanned).toHaveBeenCalledWith([userId]);
+      expect(deps.isUserBanned).not.toHaveBeenCalled();
       expect(json).toHaveBeenCalledWith({
         users: [
           expect.objectContaining({
@@ -281,6 +286,38 @@ describe('createAdminUsageHandlers', () => {
         limit: 5,
         offset: 10,
       });
+    });
+
+    it('reads ban state for the whole page in one batch and keeps row order', async () => {
+      const ids = ['a', 'b', 'c'].map(() => new Types.ObjectId().toString());
+      const rows = ids.map((userId) => ({
+        userId,
+        name: userId,
+        username: userId,
+        email: '',
+        role: 'USER',
+        requests: 1,
+        errors: 0,
+        promptTokens: 1,
+        completionTokens: 1,
+        conversations: 1,
+        lastActiveAt: null,
+      }));
+      const deps = createDeps({
+        getUsageByUser: jest.fn().mockResolvedValue({ total: 3, users: rows }),
+        areUsersBanned: jest.fn().mockResolvedValue([false, true, false]),
+      });
+      const { req, res, json } = createReqRes({ query: { from: FROM, to: TO } });
+      await createAdminUsageHandlers(deps).users(req, res);
+      expect(deps.areUsersBanned).toHaveBeenCalledTimes(1);
+      expect(deps.areUsersBanned).toHaveBeenCalledWith(ids);
+      expect(deps.isUserBanned).not.toHaveBeenCalled();
+      const body = json.mock.calls[0][0];
+      expect(body.users.map((u: { id: string; banned: boolean }) => [u.id, u.banned])).toEqual([
+        [ids[0], false],
+        [ids[1], true],
+        [ids[2], false],
+      ]);
     });
 
     it('rejects an unknown sort and an oversized search', async () => {
@@ -323,7 +360,7 @@ describe('createAdminUsageHandlers', () => {
         getConversationStats: jest
           .fn()
           .mockResolvedValue(new Map([['c1', { messageCount: 6, up: 1, down: 0 }]])),
-        countFlagsByConversation: jest.fn().mockResolvedValue(new Map([['c1', 1]])),
+        getFlaggedConversationIds: jest.fn().mockResolvedValue(new Set(['c1'])),
         countFlags: jest.fn().mockResolvedValue(1),
       });
       const { req, res, json } = createReqRes({
@@ -394,7 +431,7 @@ describe('createAdminUsageHandlers', () => {
       expect(deps.findRecentConversations).not.toHaveBeenCalled();
       expect(deps.getConversationUsage).not.toHaveBeenCalled();
       expect(deps.getConversationStats).not.toHaveBeenCalled();
-      expect(deps.countFlagsByConversation).not.toHaveBeenCalled();
+      expect(deps.getFlaggedConversationIds).not.toHaveBeenCalled();
     });
 
     it('fails closed when the capability check errors', async () => {
