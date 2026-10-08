@@ -1,5 +1,12 @@
+x-logging: &logging
+  driver: json-file
+  options:
+    max-size: ${SWATGPT_LOG_MAX_SIZE:-20m}
+    max-file: '${SWATGPT_LOG_MAX_FILE:-5}'
+
 services:
   api:
+    logging: *logging
     image: swatgpt:local
     build:
       context: .
@@ -28,8 +35,21 @@ services:
       start_period: 60s
       retries: 3
 
+  admin-panel:
+    logging: *logging
+
+  mongodb:
+    logging: *logging
+
+  meilisearch:
+    logging: *logging
+
+  qdrant:
+    logging: *logging
+
   swatgpt-postgres:
     image: postgres:17-alpine
+    logging: *logging
     restart: unless-stopped
     environment:
       POSTGRES_DB: ${SWATGPT_POSTGRES_DB:-swatgpt}
@@ -51,6 +71,17 @@ services:
     build:
       context: ./dash_mcp
     restart: unless-stopped
+    logging: *logging
+    read_only: true
+    tmpfs:
+      - /tmp:size=8m
+    cap_drop:
+      - ALL
+    security_opt:
+      - no-new-privileges:true
+    mem_limit: ${SWATGPT_MCP_MEM_LIMIT:-512m}
+    cpus: ${SWATGPT_MCP_CPUS:-1.0}
+    pids_limit: 256
     depends_on:
       swatgpt-postgres:
         condition: service_healthy
@@ -58,7 +89,7 @@ services:
       DATABASE_URL: postgres://${SWATGPT_POSTGRES_USER:-swatgpt}:${SWATGPT_POSTGRES_PASSWORD}@swatgpt-postgres:5432/${SWATGPT_POSTGRES_DB:-swatgpt}
       HOST: 0.0.0.0
       PORT: 3000
-      MCP_ALLOWED_HOSTS: swatgpt-mcp,localhost,127.0.0.1
+      MCP_ALLOWED_HOSTS: ${SWATGPT_MCP_ALLOWED_HOSTS:-swatgpt-mcp,localhost,127.0.0.1,eagle.sccs.swarthmore.edu,130.58.218.151}
       MCP_TOOL_TIMEOUT_MS: ${SWATGPT_MCP_TOOL_TIMEOUT_MS:-5000}
       HEALTHCHECK_PROBE_TIMEOUT_MS: ${SWATGPT_HEALTHCHECK_PROBE_TIMEOUT_MS:-4000}
       HEALTHCHECK_FAILURE_THRESHOLD: ${SWATGPT_HEALTHCHECK_FAILURE_THRESHOLD:-3}
@@ -73,13 +104,17 @@ services:
       CONFIG_POLL_INTERVAL_SECONDS: ${SWATGPT_CONFIG_POLL_INTERVAL_SECONDS:-3600}
       OBSERVATION_RETENTION_DAYS: ${SWATGPT_OBSERVATION_RETENTION_DAYS:-30}
       LOG_LEVEL: ${SWATGPT_LOG_LEVEL:-info}
+      NODE_OPTIONS: --max-old-space-size=${SWATGPT_MCP_HEAP_MB:-384}
     expose:
       - '3000'
+    ports:
+      - '${SWATGPT_METRICS_BIND:-130.58.218.151}:3001:3000'
 
   node-exporter:
     image: prom/node-exporter:v1.9.1
     container_name: swatgpt-node-exporter
     restart: unless-stopped
+    logging: *logging
     pid: host
     ports:
       - '${SWATGPT_METRICS_BIND:-130.58.218.151}:9100:9100'
@@ -97,6 +132,7 @@ services:
     image: gcr.io/cadvisor/cadvisor:v0.52.1
     container_name: swatgpt-cadvisor
     restart: unless-stopped
+    logging: *logging
     privileged: true
     ports:
       - '${SWATGPT_METRICS_BIND:-130.58.218.151}:8080:8080'
