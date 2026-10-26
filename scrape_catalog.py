@@ -138,7 +138,8 @@ def slugify(text: str) -> str:
 
 
 def quote(value: str) -> str:
-    return '"' + value.replace('"', "'") + '"'
+    """Double-quoted YAML scalar; the raw title stays in the H1 and ingest matches the two."""
+    return '"' + value.replace("\\", "\\\\").replace('"', '\\"') + '"'
 
 
 def frontmatter(fields: list[tuple[str, str]]) -> str:

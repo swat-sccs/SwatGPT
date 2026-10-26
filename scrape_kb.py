@@ -93,10 +93,15 @@ def fetch_page(title: str) -> dict | None:
     return data.get("parse")
 
 
+def yaml_quote(value: str) -> str:
+    """Double-quoted YAML scalar; the raw title stays in the H1 and ingest matches the two."""
+    return '"' + value.replace("\\", "\\\\").replace('"', '\\"') + '"'
+
+
 def frontmatter(title: str, url: str, pageid: int, categories: list[str]) -> str:
     lines = [
         "---",
-        f'title: "{title.replace(chr(34), chr(39))}"',
+        f"title: {yaml_quote(title)}",
         f"source: {url}",
         f"pageid: {pageid}",
     ]

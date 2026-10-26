@@ -56,12 +56,20 @@ def iter_docs():
             yield path, doc_type
 
 
+LEGACY_QUOTES = str.maketrans('"', "'")
+
+
+def is_title_heading(heading, title):
+    """Scrapers used to write titles with every double quote turned into a single quote."""
+    return heading == title or heading.translate(LEGACY_QUOTES) == title
+
+
 def section_path(node, title):
     parts = [p for p in node.metadata.get("header_path", "").split("/") if p]
     first_line = node.get_content(metadata_mode=MetadataMode.NONE).lstrip().split("\n", 1)[0]
     if first_line.startswith("#"):
         parts.append(first_line.lstrip("#").strip())
-    if parts and parts[0] == title:
+    if parts and is_title_heading(parts[0], title):
         parts = parts[1:]
     return " › ".join(parts)
 

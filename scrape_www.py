@@ -203,11 +203,16 @@ def stale_files(kept: set[str], failures: list[str]) -> tuple[list[Path], str | 
     return stale, None
 
 
+def yaml_quote(value: str) -> str:
+    """Double-quoted YAML scalar; the raw title stays in the H1 and ingest matches the two."""
+    return '"' + value.replace("\\", "\\\\").replace('"', '\\"') + '"'
+
+
 def frontmatter(title: str, url: str, section: str, body: str) -> str:
     content_hash = hashlib.sha256(body.encode("utf-8")).hexdigest()
     return "\n".join([
         "---",
-        f'title: "{title.replace(chr(34), chr(39))}"',
+        f"title: {yaml_quote(title)}",
         f"source: {url}",
         f"section: {section}",
         f"content_hash: {content_hash}",

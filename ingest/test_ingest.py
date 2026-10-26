@@ -12,6 +12,7 @@ from pathlib import Path
 from unittest import mock
 
 import httpx
+import frontmatter
 from qdrant_client import QdrantClient, models
 
 import ingest
@@ -66,6 +67,44 @@ def seed_collection(qdrant, name, count, alias=False):
     )
     if alias:
         ingest.swap_alias(qdrant, name)
+
+
+def chunk_file(path):
+    from llama_index.core.node_parser import MarkdownNodeParser, SentenceSplitter
+
+    return ingest.chunk_doc(
+        path, "kb", frontmatter.load(path), MarkdownNodeParser(), SentenceSplitter(), set()
+    )
+
+
+class SectionPathTest(unittest.TestCase):
+    """The H1 repeats the frontmatter title and must not become part of the breadcrumb."""
+
+    def setUp(self):
+        self.tmp = tempfile.TemporaryDirectory()
+        self.addCleanup(self.tmp.cleanup)
+        self.root = Path(self.tmp.name)
+
+    def write(self, yaml_title, heading):
+        path = self.root / "printing.md"
+        path.write_text(
+            f"---\ntitle: {yaml_title}\nsource: https://kb.swarthmore.edu/wiki/Printing\n---\n\n"
+            f"# {heading}\n\nIntro paragraph.\n\n## Large format\n\nPosters are 48x35.\n"
+        )
+        return path
+
+    def assert_breadcrumbs(self, path):
+        sections = [point["payload"].get("section") for point in chunk_file(path)]
+        self.assertEqual(sections, [None, "Large format"])
+
+    def test_escaped_quotes_in_title_match_the_heading(self):
+        self.assert_breadcrumbs(self.write('"Printing \\"Policies\\""', 'Printing "Policies"'))
+
+    def test_legacy_single_quote_substitution_still_matches_the_heading(self):
+        self.assert_breadcrumbs(self.write("\"Printing 'Policies'\"", 'Printing "Policies"'))
+
+    def test_unquoted_plain_title_matches_the_heading(self):
+        self.assert_breadcrumbs(self.write("Printing Policies", "Printing Policies"))
 
 
 class TokenizerSelfcheckTest(unittest.TestCase):

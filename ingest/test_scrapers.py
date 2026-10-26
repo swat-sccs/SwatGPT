@@ -1,4 +1,4 @@
-"""Pruning/refresh tests for ../scrape_www.py and ../scrape_catalog.py.
+"""Frontmatter and pruning/refresh tests for ../scrape_kb.py, ../scrape_www.py and ../scrape_catalog.py.
 
 Run from ingest/:
   uv run --no-project --with requests --with trafilatura --with html2text \
@@ -15,6 +15,7 @@ from unittest import mock
 
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 
+import scrape_kb
 import scrape_www
 import scrape_catalog
 
@@ -31,6 +32,27 @@ def page(title):
         f'<html lang="en"><head><title>{title} | Swarthmore College</title></head>'
         f"<body><main><article><h1>{title}</h1>{paragraphs}</article></main></body></html>"
     )
+
+
+QUOTED_TITLE = 'Printing "Policies" \\ FAQ'
+QUOTED_YAML = 'title: "Printing \\"Policies\\" \\\\ FAQ"'
+
+
+class TitleQuotingTest(unittest.TestCase):
+    """Every scraper escapes the YAML title instead of swapping quotes, so it still equals the H1."""
+
+    def test_kb_frontmatter_escapes_quotes_and_backslashes(self):
+        text = scrape_kb.frontmatter(QUOTED_TITLE, "https://kb.swarthmore.edu/wiki/Printing", 7, ["Printing"])
+        self.assertIn(QUOTED_YAML, text.splitlines())
+        self.assertEqual(text.splitlines()[-1], "---")
+
+    def test_www_frontmatter_escapes_quotes_and_backslashes(self):
+        text = scrape_www.frontmatter(QUOTED_TITLE, f"{WWW}/registrar", "registrar", "body")
+        self.assertIn(QUOTED_YAML, text.splitlines())
+
+    def test_catalog_quote_escapes_quotes_and_backslashes(self):
+        self.assertEqual(f"title: {scrape_catalog.quote(QUOTED_TITLE)}", QUOTED_YAML)
+        self.assertEqual(scrape_catalog.quote("plain"), '"plain"')
 
 
 class TempOutDir(unittest.TestCase):
