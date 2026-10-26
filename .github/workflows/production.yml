@@ -154,8 +154,16 @@ jobs:
 
       - name: Sync deploy tree to pushed commit
         env:
-          FETCH_URL: https://x-access-token:${{ secrets.GITHUB_TOKEN }}@github.com/${{ github.repository }}.git
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          FETCH_URL: https://github.com/${{ github.repository }}.git
         run: |
+          # The token travels in an Authorization header set through git's environment
+          # config, so it never appears on a command line (`ps`, the runner's process
+          # listing, or shell traces) the way a token embedded in the URL would.
+          auth=$(printf 'x-access-token:%s' "$GH_TOKEN" | base64 -w0)
+          GIT_CONFIG_COUNT=1 \
+          GIT_CONFIG_KEY_0=http.https://github.com/.extraheader \
+          GIT_CONFIG_VALUE_0="AUTHORIZATION: basic $auth" \
           git fetch "$FETCH_URL" "+refs/heads/main:refs/remotes/origin/main" "$GITHUB_SHA"
           git reset --hard "$GITHUB_SHA"
 
