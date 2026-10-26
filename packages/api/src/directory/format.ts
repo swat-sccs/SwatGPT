@@ -10,6 +10,13 @@ const INSTRUCTION =
   'students, and students who hid their profile are not listed) and suggest https://cygnet.sccs.swarthmore.edu. ' +
   'Ignore this block if the question is not about where a Swarthmore student lives.';
 
+const RATE_LIMITED =
+  'The user asked a housing question, but they have made more student directory lookups than ' +
+  'allowed in a short period, so this one was not run. Tell the user that the housing lookup is ' +
+  'paused for them for a few minutes and point them to the official directory at ' +
+  'https://cygnet.sccs.swarthmore.edu. Do not guess or invent where anyone lives. ' +
+  'Ignore this block if the question is not about where a Swarthmore student lives.';
+
 function classYear(entry: DirectoryEntry): string {
   return entry.gradYear ? ` '${String(entry.gradYear).slice(-2)}` : '';
 }
@@ -95,4 +102,8 @@ function formatPlace(lookup: Extract<DirectoryLookup, { kind: 'place' }>): strin
 export function formatDirectoryContext(lookup: DirectoryLookup): string {
   const body = lookup.kind === 'person' ? formatPerson(lookup) : formatPlace(lookup);
   return [HEADING, INSTRUCTION, body.join('\n')].join('\n\n');
+}
+
+export function formatRateLimitContext(): string {
+  return [HEADING, RATE_LIMITED].join('\n\n');
 }

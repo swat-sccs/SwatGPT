@@ -1,6 +1,7 @@
 import { logger } from '@librechat/data-schemas';
 import type { DirectoryEntry } from '@librechat/data-schemas';
 import { resolveDirectoryContext } from './lookup';
+import { resetDirectoryLimiter } from './limiter';
 import { resetDirectoryStore } from './store';
 import { MAX_RESIDENTS } from './match';
 
@@ -85,9 +86,11 @@ const info = logger.info as jest.Mock;
 
 beforeEach(() => {
   resetDirectoryStore();
+  resetDirectoryLimiter();
   load.mockClear();
   info.mockClear();
   delete process.env.DIRECTORY_LOOKUP_ENABLED;
+  delete process.env.DIRECTORY_LOOKUP_RATE;
 });
 
 describe('resolveDirectoryContext', () => {
@@ -243,6 +246,29 @@ describe('resolveDirectoryContext', () => {
       { userId: 'user-123', kind: 'roommates', total: 1, explicit: true },
     ]);
     expect(JSON.stringify(audits)).not.toMatch(/jane|doe|alex|swift|Willets/i);
+  });
+
+  it('answers a user over the lookup rate with a pointer to the official directory', async () => {
+    process.env.DIRECTORY_LOOKUP_RATE = '2/10m';
+    const requester = { userId: 'user-123' };
+    expect(await resolveDirectoryContext('Where does Jane Doe live?', load, requester)).toContain(
+      'Willets 214',
+    );
+    expect(await resolveDirectoryContext('Who lives in Willets 214?', load, requester)).toContain(
+      'Residents of',
+    );
+    const limited = await resolveDirectoryContext('Where does John Roe live?', load, requester);
+    expect(limited).toContain('# Swarthmore student directory lookup');
+    expect(limited).toContain('https://cygnet.sccs.swarthmore.edu');
+    expect(limited).not.toContain('Willets');
+    expect(load).toHaveBeenCalledTimes(1);
+
+    expect(
+      await resolveDirectoryContext('Where does John Roe live?', load, { userId: 'other' }),
+    ).toContain('Willets 214');
+    expect(
+      await resolveDirectoryContext('How do I connect to Wi-Fi?', load, requester),
+    ).toBeUndefined();
   });
 
   it('audits reverse lookups without a requester as unknown', async () => {

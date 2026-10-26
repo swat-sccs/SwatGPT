@@ -2,8 +2,9 @@ import { logger } from '@librechat/data-schemas';
 import type { DirectoryIntent } from './intent';
 import type { DirectoryLoader } from './store';
 import type { DirectoryLookup } from './match';
-import { formatDirectoryContext } from './format';
+import { formatDirectoryContext, formatRateLimitContext } from './format';
 import { getDirectoryIndex } from './store';
+import { allowLookup } from './limiter';
 import { detectIntent } from './intent';
 import { runLookup } from './match';
 
@@ -76,7 +77,9 @@ function auditPersonLookup(
  * `undefined` when the message is not a directory question. Fail-open: any
  * error yields `undefined` so the chat message is never affected. Every
  * lookup is logged with the requester's id and counts (never student data);
- * reverse lookups are additionally capped at `MAX_RESIDENTS`.
+ * reverse lookups are additionally capped at `MAX_RESIDENTS`, and a user
+ * over `DIRECTORY_LOOKUP_RATE` gets a block pointing at the official
+ * directory instead of a result.
  */
 export async function resolveDirectoryContext(
   text: string,
@@ -90,6 +93,9 @@ export async function resolveDirectoryContext(
     const intent = detectIntent(text);
     if (!intent) {
       return undefined;
+    }
+    if (!allowLookup(requester?.userId)) {
+      return formatRateLimitContext();
     }
     const index = await getDirectoryIndex(load);
     if (!index) {
