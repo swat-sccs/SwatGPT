@@ -63,7 +63,9 @@ if ! grep -q '^rule_files:' "$C/prometheus.yml"; then
   printf '\nrule_files:\n  - /etc/prometheus/swatgpt-alerts.yml\n' >> "$C/prometheus.yml"
   echo "rule_files added"
 fi
-sed -i 's|^        - targets: \[\]$|        - targets: ["alertmanager:9093"]|' "$C/prometheus.yml"
+# Only the empty alertmanager target list inside the `alerting:` block is filled in; an
+# empty `targets: []` under a scrape job is left alone.
+sed -i '/^alerting:/,/^[^[:space:]]/ s|^        - targets: \[\]$|        - targets: ["alertmanager:9093"]|' "$C/prometheus.yml"
 
 TOKEN_TMP=$(mktemp "$C/.swatgpt_metrics_token.XXXXXX")
 printf '%s' "$TOKEN" > "$TOKEN_TMP"
@@ -117,8 +119,12 @@ PY
   echo "alertmanager service added to the stack file"
 fi
 
-echo "--- promtool check config"
-docker run --rm -v "$C:/etc/prometheus:ro" --entrypoint promtool prom/prometheus:latest check config /etc/prometheus/prometheus.yml
+# Validate with the image the stack actually runs, so a rule that only parses on a newer
+# promtool cannot pass here and then fail to load on gull.
+PROM_IMAGE=$(awk '/^  prometheus:/ { in_svc = 1; next } /^  [^[:space:]]/ { in_svc = 0 } in_svc && /^    image:/ { print $2; exit }' "$STACK")
+PROM_IMAGE=${PROM_IMAGE:-prom/prometheus:v3.5.0}
+echo "--- promtool check config ($PROM_IMAGE)"
+docker run --rm -v "$C:/etc/prometheus:ro" --entrypoint promtool "$PROM_IMAGE" check config /etc/prometheus/prometheus.yml
 echo "--- amtool check-config"
 docker run --rm -v "$AM:/cfg:ro" --entrypoint amtool prom/alertmanager:v0.28.1 check-config /cfg/alertmanager.yml
 echo "--- docker stack deploy (adds alertmanager; unchanged services are left alone)"

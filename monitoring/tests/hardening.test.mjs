@@ -317,7 +317,9 @@ test('eagle-harden.sh warns when IPv6 publishes bypass the IPv4 rules', () => {
   assert.match(result.stdout, /WARNING: enp6s18 has a global IPv6 address/);
 });
 
-function gullSandbox() {
+const SCRATCH_JOB = '  - job_name: scratch\n    static_configs:\n        - targets: []\n';
+
+function gullSandbox({ stack = 'services:\n  alertmanager:\n    image: x\n' } = {}) {
   const box = sandbox();
   const monitor = path.join(box.dir, 'monitor');
   const config = path.join(monitor, 'prometheus/config');
@@ -328,12 +330,9 @@ function gullSandbox() {
     .join('\n');
   fs.writeFileSync(
     path.join(config, 'prometheus.yml'),
-    `global:\n  scrape_interval: 15s\nalerting:\n  alertmanagers:\n    - static_configs:\n        - targets: []\nscrape_configs:\n${jobs}`,
+    `global:\n  scrape_interval: 15s\nalerting:\n  alertmanagers:\n    - static_configs:\n        - targets: []\nscrape_configs:\n${jobs}${SCRATCH_JOB}`,
   );
-  fs.writeFileSync(
-    path.join(monitor, 'prometheus/docker-compose.yml'),
-    'services:\n  alertmanager:\n    image: x\n',
-  );
+  fs.writeFileSync(path.join(monitor, 'prometheus/docker-compose.yml'), stack);
   fs.writeFileSync(
     path.join(monitor, 'alertmanager/config/alertmanager.yml'),
     'inhibit_rules:\n  - target_matchers: ["alertname = SwatGPTRetrievalNonHitRatioHigh"]\n',
@@ -395,4 +394,26 @@ test('gull-install.sh accepts METRICS_SECRET_FILE and appends only missing scrap
   );
   assert.doesNotMatch(prom, /swatgpt_readyz/);
   assert.equal(fs.readFileSync(path.join(box.config, 'swatgpt_metrics_token'), 'utf8'), TOKEN);
+});
+
+test('gull-install.sh fills only the alertmanager target list and validates with the stack image', () => {
+  const stack =
+    'services:\n  prometheus:\n    image: prom/prometheus:v2.53.0\n  alertmanager:\n    image: x\n';
+  const box = gullSandbox({ stack });
+  const result = box.install(`${TOKEN}\n`);
+  assert.equal(result.status, 0, result.stderr + result.stdout);
+  const prom = fs.readFileSync(path.join(box.config, 'prometheus.yml'), 'utf8');
+  assert.match(prom, /alerting:\n {2}alertmanagers:\n {4}- static_configs:\n {8}- targets: \["alertmanager:9093"\]/);
+  assert.match(prom, /job_name: scratch\n {4}static_configs:\n {8}- targets: \[\]\n/);
+  assert.match(
+    box.calls(),
+    /^docker run --rm -v \S+ --entrypoint promtool prom\/prometheus:v2\.53\.0 check config/m,
+  );
+  assert.doesNotMatch(box.calls(), /prom\/prometheus:latest/);
+});
+
+test('gull-install.sh falls back to a pinned promtool when the stack lists no prometheus image', () => {
+  const box = gullSandbox();
+  assert.equal(box.install(`${TOKEN}\n`).status, 0);
+  assert.match(box.calls(), /--entrypoint promtool prom\/prometheus:v3\.5\.0 check config/m);
 });
