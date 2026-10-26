@@ -14,7 +14,7 @@ once live: `DIRECTORY_LOOKUP_ENABLED=false` in the app's `.env`.
 |---|---|---|
 | `export.mjs` | gull (in a container) | Reads ITS `student_data` and Cygnet's `StudentOverlay`, writes a JSON array |
 | `export.sh` | gull | Runs `export.mjs` as a one-shot swarm service on `cygnet_internal` with credentials read from the running `cygnet_cygnet` service; prints the snapshot path |
-| `sync.sh` | gull | `export.sh`, then `scp` to eagle and `npm run import-directory` inside the LibreChat container |
+| `sync.sh` | gull | `export.sh`, then `scp` to eagle, stream the file into the `api` container and run `npm run import-directory` there |
 | `../config/import-directory.js` | eagle (app container) | Drops `showProfile: false`, hides dorms for `showDorm: false`, maps ITS dorm codes, replaces the previous snapshot atomically |
 
 Only gull is allowlisted on ITS's database (`130.58.64.142:3306`), gull has no host Node,
@@ -58,6 +58,13 @@ Manual run, which is also the first-time publish after sign-off:
 Do not run it while a deploy is in progress on eagle (a push to `main` rebuilds and restarts
 the app container for about five minutes); the import would land in the old container.
 
+On eagle, `sync.sh` runs `docker compose` from the deploy tree, `/srv/SwatGPT` (override with
+`EAGLE_REPO`). The snapshot is written into the container with
+`docker compose exec -T api sh -c 'umask 077; cat > /tmp/directory.json'` rather than
+`docker compose cp`: `cp` creates the file root-owned and 0600, and the `api` container runs as
+the deploy user's uid, so the import would fail with `EACCES`. The copy under `~/.cache` on eagle
+and the file inside the container are removed when the remote step exits.
+
 Export only, leaving `out/directory.json` behind for inspection (delete it afterwards, it
 contains every student's room and the home directory is shared):
 
@@ -83,7 +90,7 @@ otherwise, so no restart follows a publish.
 On eagle:
 
 ```sh
-cd ~/SwatGPT && docker compose exec -T mongodb mongosh --quiet LibreChat \
+cd /srv/SwatGPT && docker compose exec -T mongodb mongosh --quiet LibreChat \
   --eval 'db.directoryentries.aggregate([{ $group: { _id: "$snapshot", n: { $sum: 1 } } }])'
 docker compose logs api | grep '\[directory\] loaded'
 ```
@@ -127,5 +134,8 @@ Overrides for `export.sh` and `sync.sh`: `OUT_DIR`, `CYGNET_NETWORK`, `CYGNET_SE
 
 `script.test.mjs` runs `export.sh` against a stub `docker` on `PATH` and checks that no
 credential reaches the docker command line, that the env file is private and removed, that a
-missing credential aborts, and that the exporter installs from the lockfile. It needs bash and
-no dependencies: `node --test script.test.mjs`. `npm test` runs both.
+missing credential aborts, and that the exporter installs from the lockfile. It also runs
+`sync.sh` against stub `ssh`/`scp` and checks the deploy-tree default, that the snapshot is
+streamed through `exec` rather than `docker compose cp`, and that the exported file is what the
+import receives. It needs bash and no dependencies: `node --test script.test.mjs`. `npm test`
+runs both.
