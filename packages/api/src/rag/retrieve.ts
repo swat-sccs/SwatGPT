@@ -49,11 +49,7 @@ function selectTopChunks(candidates: KbCandidate[], scores: RerankResult[]): KbP
   const lexicalRank = (result: RerankResult): number =>
     candidates[result.index].lexicalRank ?? Number.POSITIVE_INFINITY;
   const isLexical = (result: RerankResult): boolean => lexicalRank(result) <= LEXICAL_TOP;
-  const guaranteed = eligible
-    .filter(isLexical)
-    .reduce<
-      RerankResult | undefined
-    >((best, result) => (best && lexicalRank(best) <= lexicalRank(result) ? best : result), undefined);
+  const guaranteed = eligible.find(isLexical);
   if (guaranteed && top.length === TOP_CHUNKS && !top.some(isLexical)) {
     top[top.length - 1] = guaranteed;
   }
@@ -106,7 +102,8 @@ async function runPipeline(
  * for how follow-ups search and how queries are length-capped.
  * Fail-open by design — any error, timeout, or missing configuration yields no
  * `context` (with `result` explaining why) so a RAG failure never fails the chat message.
- * Every attempt is recorded in the Prometheus RAG metrics.
+ * Every attempt past the blank-query check is recorded in the Prometheus RAG metrics;
+ * a blank query returns `empty` without recording anything.
  */
 export async function retrieveKbContextDetailed(query: string | KbQueries): Promise<KbRetrieval> {
   const queries = resolveRetrievalQueries(query);

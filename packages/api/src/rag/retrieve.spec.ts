@@ -232,6 +232,30 @@ describe('retrieveKbContext', () => {
       expect(context).not.toContain('Title 8');
     });
 
+    it('reserves the slot for the best-reranked lexical hit, not the lowest sparse rank', async () => {
+      const dense = [0, 1, 2, 3, 4, 5, 6, 7, 8].map(kbHit);
+      const lexical = [kbHit(100), kbHit(101)];
+      const scores: RerankResult[] = [
+        { index: 0, score: 0.95 },
+        { index: 1, score: 0.5 },
+        { index: 2, score: 0.94 },
+        { index: 3, score: 0.8 },
+        ...[4, 5, 6, 7, 8, 9, 10].map((index, offset) => ({ index, score: 0.93 - offset * 0.01 })),
+      ];
+      mockServices({ hits: dense, sparseHits: lexical, scores });
+      const context = await retrieveKbContext(QUERY);
+
+      expect(requestBody(3)).toMatchObject({
+        texts: [0, 100, 1, 101, 2, 3, 4, 5, 6, 7, 8].map((index) =>
+          embedText(kbHit(index).payload as KbPayload),
+        ),
+      });
+      expect(context).toContain('Title 101');
+      expect(context).not.toContain('Title 100');
+      expect(context).toContain('Title 6');
+      expect(context).not.toContain('Title 7');
+    });
+
     it('drops the lexical hit when it is below the rerank score floor', async () => {
       const dense = [0, 1, 2, 3, 4, 5, 6, 7, 8].map(kbHit);
       const scores: RerankResult[] = [
