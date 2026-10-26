@@ -20,7 +20,12 @@ const ratio = (count: number, total: number): number => (total ? count / total :
 
 const finalTurn = (record: CaseRecord) => record.turns[record.turns.length - 1];
 
-export function summarize(cases: CaseRecord[]): Summary {
+/** Local oracle mode seeds the candidate pool with the gold chunks, so their presence in the context is not retrieval recall. */
+export type SummaryMode = Pick<RunMeta, 'mode' | 'oracle'>;
+
+const measuresRecall = ({ mode, oracle }: SummaryMode): boolean => mode !== 'local' || !oracle;
+
+export function summarize(cases: CaseRecord[], meta: SummaryMode): Summary {
   const scored = cases.filter((record) => record.score && !record.error);
   const answerable = scored.filter((record) => record.kind !== 'unanswerable');
   const unanswerable = scored.filter((record) => record.kind === 'unanswerable');
@@ -85,10 +90,12 @@ export function summarize(cases: CaseRecord[]): Summary {
       count(withUrls, (record) => record.score?.citedRetrieved === true),
       withUrls.length,
     ),
-    goldRetrieved: ratio(
-      count(answerable, (record) => record.score?.goldRetrieved === true),
-      answerable.length,
-    ),
+    goldRetrieved: measuresRecall(meta)
+      ? ratio(
+          count(answerable, (record) => record.score?.goldRetrieved === true),
+          answerable.length,
+        )
+      : undefined,
     latencyMs: percentiles(scored.map((record) => finalTurn(record).completion.totalMs)),
     ttftMs: percentiles(defined(scored.map((record) => finalTurn(record).completion.ttftMs))),
     retrievalMs: percentiles(turns.map((turn) => turn.retrieval.elapsedMs)),
@@ -206,7 +213,10 @@ export function renderMarkdown(report: Report): string {
       'Cited URL among retrieved sources (answers citing any URL)',
       pct(summary.citedAmongRetrieved),
     ],
-    ['Expected source in retrieved context', pct(summary.goldRetrieved)],
+    [
+      'Expected source in retrieved context',
+      summary.goldRetrieved === undefined ? 'n/a (oracle)' : pct(summary.goldRetrieved),
+    ],
     [
       'Latency p50 / p95 (final turn)',
       `${ms(summary.latencyMs.p50)} / ${ms(summary.latencyMs.p95)}`,

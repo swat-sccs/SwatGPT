@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict';
 import { describe, it } from 'node:test';
-import type { CaseRecord, Score } from '../lib/types.ts';
+import type { CaseRecord, Report, RunMeta, Score } from '../lib/types.ts';
 import { percentile, renderMarkdown, summarize, worstCases } from '../lib/report.ts';
 
 const score = (overrides: Partial<Score>): Score => ({
@@ -70,7 +70,8 @@ describe('summarize', () => {
     }),
     { ...record('e', 'followup', {}), score: undefined, error: 'vLLM returned 503' },
   ];
-  const summary = summarize(cases);
+  const live: RunMeta['mode'] = 'live';
+  const summary = summarize(cases, { mode: live, oracle: false });
 
   it('splits accuracy, refusals and hallucinations by kind and excludes errors', () => {
     assert.equal(summary.cases, 5);
@@ -88,30 +89,60 @@ describe('summarize', () => {
       worstCases(cases, 3).map((entry) => entry.id),
       ['e', 'd', 'b'],
     );
-    const markdown = renderMarkdown({
-      meta: {
-        startedAt: 's',
-        finishedAt: 'f',
-        mode: 'local',
-        oracle: true,
-        concurrency: 2,
-        params: {
-          model: 'm',
-          baseUrl: 'u',
-          temperature: 0.3,
-          top_p: 0.8,
-          top_k: 20,
-          max_tokens: 1536,
-          chat_template_kwargs: { enable_thinking: false },
-        },
-        questionSet: 'q',
-        notes: ['note'],
-      },
-      summary,
-      cases,
-    });
+    const markdown = renderMarkdown(report(meta('local', true), summary, cases));
     assert.match(markdown, /invented URL https:\/\/x\.edu\/y/);
     assert.match(markdown, /answer d/);
     assert.match(markdown, /error: vLLM returned 503/);
   });
+
+  it('reports retrieval recall of the expected sources outside local oracle mode', () => {
+    const recall = [
+      record('a', 'answerable', {}),
+      record('b', 'answerable', { goldRetrieved: false }),
+      record('c', 'unanswerable', { goldRetrieved: false, factsTotal: 0, factsMatched: 0 }),
+    ];
+    assert.equal(summarize(recall, { mode: live, oracle: false }).goldRetrieved, 0.5);
+    assert.equal(summarize(recall, { mode: live, oracle: true }).goldRetrieved, 0.5);
+    assert.equal(summarize(recall, { mode: 'local', oracle: false }).goldRetrieved, 0.5);
+    const markdown = renderMarkdown(
+      report(meta('local', false), summarize(recall, { mode: 'local', oracle: false }), recall),
+    );
+    assert.match(markdown, /\| Expected source in retrieved context \| 50\.0% \|/);
+  });
+
+  it('does not report recall in local oracle mode, where the gold chunks are injected', () => {
+    const oracle = summarize(cases, { mode: 'local', oracle: true });
+    assert.equal(oracle.goldRetrieved, undefined);
+    assert.equal(oracle.accuracy, summary.accuracy);
+    const markdown = renderMarkdown(report(meta('local', true), oracle, cases));
+    assert.match(markdown, /\| Expected source in retrieved context \| n\/a \(oracle\) \|/);
+    assert.doesNotMatch(markdown, /retrieved context \| \d/);
+  });
+});
+
+function meta(mode: RunMeta['mode'], oracle: boolean): RunMeta {
+  return {
+    startedAt: 's',
+    finishedAt: 'f',
+    mode,
+    oracle,
+    concurrency: 2,
+    params: {
+      model: 'm',
+      baseUrl: 'u',
+      temperature: 0.3,
+      top_p: 0.8,
+      top_k: 20,
+      max_tokens: 1536,
+      chat_template_kwargs: { enable_thinking: false },
+    },
+    questionSet: 'q',
+    notes: ['note'],
+  };
+}
+
+const report = (runMeta: RunMeta, summary: Report['summary'], cases: CaseRecord[]): Report => ({
+  meta: runMeta,
+  summary,
+  cases,
 });

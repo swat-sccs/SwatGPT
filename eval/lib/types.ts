@@ -125,7 +125,8 @@ export interface Summary {
   numericCitationRate: number;
   expectedSourceCited: number;
   citedAmongRetrieved: number;
-  goldRetrieved: number;
+  /** Retrieval recall of the expected sources; `undefined` in local oracle mode, where they are injected. */
+  goldRetrieved?: number;
   latencyMs: Percentiles;
   ttftMs: Percentiles;
   retrievalMs: Percentiles;

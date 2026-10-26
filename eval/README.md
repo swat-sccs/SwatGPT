@@ -53,7 +53,7 @@ cited KB files, so edit the set and run `npm test` before a run.
 | `[n]` citations | Answerable cases that cite context entries by number, which users cannot follow |
 | Expected source cited | The answer links one of the question's source URLs |
 | Cited among retrieved | Of answers that cite a URL, how many cite one from the retrieved context |
-| Expected source retrieved | The question's source document was in the context block (retrieval recall) |
+| Expected source retrieved | The question's source document was in the context block (retrieval recall). Reported as `n/a (oracle)` in local oracle mode, where the gold chunks are injected into the candidate pool |
 | Latency, TTFT | Final-turn wall time and time to the first content token, p50/p95 |
 
 Failures are ranked by severity (invented URLs, emails and phone numbers, then unanswerable questions

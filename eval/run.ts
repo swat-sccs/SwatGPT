@@ -8,6 +8,7 @@ import type {
   QuestionSet,
   Report,
   RetrievalMode,
+  RunMeta,
   TurnRecord,
 } from './lib/types.ts';
 import type { ProductionConfig } from './lib/prompt.ts';
@@ -189,7 +190,7 @@ async function rescore(options: Options): Promise<void> {
         `Re-scored ${new Date().toISOString()} without new generations.`,
       ],
     },
-    summary: summarize(cases),
+    summary: summarize(cases, previous.meta),
     cases,
   };
   const stamp = previous.meta.startedAt.replace(/[:.]/g, '-');
@@ -280,20 +281,17 @@ async function main(): Promise<void> {
     process.stderr.write(`[${done}/${questions.length}] ${question.id} ${status} ${latency}ms\n`);
     return record;
   });
-  const report: Report = {
-    meta: {
-      startedAt: startedAt.toISOString(),
-      finishedAt: new Date().toISOString(),
-      mode,
-      oracle: options.oracle,
-      concurrency: options.concurrency,
-      params: production.params,
-      questionSet: options.questions,
-      notes: modeNotes(mode, options.oracle, env),
-    },
-    summary: summarize(cases),
-    cases,
+  const meta: RunMeta = {
+    startedAt: startedAt.toISOString(),
+    finishedAt: new Date().toISOString(),
+    mode,
+    oracle: options.oracle,
+    concurrency: options.concurrency,
+    params: production.params,
+    questionSet: options.questions,
+    notes: modeNotes(mode, options.oracle, env),
   };
+  const report: Report = { meta, summary: summarize(cases, meta), cases };
   await writeReport(report, options.out, `eval-${startedAt.toISOString().replace(/[:.]/g, '-')}`);
   if (cases.some((record) => record.error)) {
     process.exitCode = 1;
