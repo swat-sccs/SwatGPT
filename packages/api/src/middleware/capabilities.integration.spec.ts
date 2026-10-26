@@ -6,6 +6,7 @@ import {
   createMethods,
   SystemCapabilities,
   CapabilityImplications,
+  ADMIN_SEED_CAPABILITIES,
 } from '@librechat/data-schemas';
 import type { SystemCapability, ConfigSection } from '@librechat/data-schemas';
 import type { AllMethods } from '@librechat/data-schemas';
@@ -125,7 +126,7 @@ describe('capabilities integration (real MongoDB)', () => {
     it('resolves all seeded capabilities for ADMIN', async () => {
       await methods.seedSystemGrants();
 
-      for (const cap of Object.values(SystemCapabilities)) {
+      for (const cap of ADMIN_SEED_CAPABILITIES) {
         const result = await hasCapability(adminUser, cap);
         expect(result).toBe(true);
       }

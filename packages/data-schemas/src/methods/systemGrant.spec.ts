@@ -3,7 +3,12 @@ import { MongoMemoryServer } from 'mongodb-memory-server';
 import { PrincipalType, SystemRoles } from 'librechat-data-provider';
 import type { SystemCapability } from '~/types/admin';
 import type * as t from '~/types';
-import { SystemCapabilities, CapabilityImplications } from '~/admin/capabilities';
+import {
+  SystemCapabilities,
+  CapabilityImplications,
+  ADMIN_SEED_CAPABILITIES,
+  OVERSIGHT_CAPABILITIES,
+} from '~/admin/capabilities';
 import { createSystemGrantMethods } from './systemGrant';
 import systemGrantSchema from '~/schema/systemGrant';
 import logger from '~/config/winston';
@@ -38,7 +43,7 @@ beforeEach(async () => {
 
 describe('systemGrant methods', () => {
   describe('seedSystemGrants', () => {
-    it('seeds every SystemCapabilities value for the ADMIN role', async () => {
+    it('seeds ADMIN_SEED_CAPABILITIES for the ADMIN role', async () => {
       await methods.seedSystemGrants();
 
       const grants = await SystemGrant.find({
@@ -46,9 +51,45 @@ describe('systemGrant methods', () => {
         principalId: SystemRoles.ADMIN,
       }).lean();
 
-      const expected = Object.values(SystemCapabilities).sort();
+      const expected = [...ADMIN_SEED_CAPABILITIES].sort();
       const actual = grants.map((g) => g.capability).sort();
       expect(actual).toEqual(expected);
+    });
+
+    it('leaves the oversight capabilities to the audited grants API', async () => {
+      await methods.seedSystemGrants();
+
+      const seeded = new Set(
+        (await SystemGrant.find({ principalId: SystemRoles.ADMIN }).lean()).map(
+          (g) => g.capability,
+        ),
+      );
+      for (const capability of OVERSIGHT_CAPABILITIES) {
+        expect(seeded.has(capability)).toBe(false);
+      }
+      expect(seeded.has(SystemCapabilities.ACCESS_ADMIN)).toBe(true);
+    });
+
+    it('does not re-insert a revoked oversight grant on the next boot', async () => {
+      const { grant } = await methods.grantCapability({
+        principalType: PrincipalType.ROLE,
+        principalId: SystemRoles.ADMIN,
+        capability: SystemCapabilities.READ_CONVERSATIONS,
+      });
+      expect(grant?.capability).toBe(SystemCapabilities.READ_CONVERSATIONS);
+      await methods.revokeCapability({
+        principalType: PrincipalType.ROLE,
+        principalId: SystemRoles.ADMIN,
+        capability: SystemCapabilities.READ_CONVERSATIONS,
+      });
+
+      await methods.seedSystemGrants();
+
+      const count = await SystemGrant.countDocuments({
+        principalId: SystemRoles.ADMIN,
+        capability: SystemCapabilities.READ_CONVERSATIONS,
+      });
+      expect(count).toBe(0);
     });
 
     it('is idempotent — duplicate calls produce no extra documents', async () => {
@@ -60,7 +101,7 @@ describe('systemGrant methods', () => {
         principalType: PrincipalType.ROLE,
         principalId: SystemRoles.ADMIN,
       });
-      expect(count).toBe(Object.values(SystemCapabilities).length);
+      expect(count).toBe(ADMIN_SEED_CAPABILITIES.length);
     });
 
     it('seeds platform-level grants (no tenantId field)', async () => {
@@ -695,9 +736,9 @@ describe('systemGrant methods', () => {
         principalId: SystemRoles.ADMIN,
       });
 
-      expect(grants).toHaveLength(Object.values(SystemCapabilities).length);
+      expect(grants).toHaveLength(ADMIN_SEED_CAPABILITIES.length);
       const caps = grants.map((g) => g.capability).sort();
-      expect(caps).toEqual(Object.values(SystemCapabilities).sort());
+      expect(caps).toEqual([...ADMIN_SEED_CAPABILITIES].sort());
     });
 
     it('returns empty array when principal has no grants', async () => {
@@ -760,7 +801,7 @@ describe('systemGrant methods', () => {
       });
 
       expect(grants.some((g) => g.capability === SystemCapabilities.ACCESS_ADMIN)).toBe(true);
-      expect(grants).toHaveLength(Object.values(SystemCapabilities).length);
+      expect(grants).toHaveLength(ADMIN_SEED_CAPABILITIES.length);
     });
 
     it('throws TypeError for invalid ObjectId string on USER principal', async () => {

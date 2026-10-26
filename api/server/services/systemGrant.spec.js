@@ -2,7 +2,7 @@ const mongoose = require('mongoose');
 const { createModels, createMethods } = require('@librechat/data-schemas');
 const { MongoMemoryServer } = require('mongodb-memory-server');
 const { SystemRoles, PrincipalType } = require('librechat-data-provider');
-const { SystemCapabilities } = require('@librechat/data-schemas');
+const { SystemCapabilities, ADMIN_SEED_CAPABILITIES } = require('@librechat/data-schemas');
 
 jest.mock('@librechat/data-schemas', () => ({
   ...jest.requireActual('@librechat/data-schemas'),
@@ -57,7 +57,7 @@ beforeEach(async () => {
 
 describe('SystemGrant methods', () => {
   describe('seedSystemGrants', () => {
-    it('seeds all capabilities for the ADMIN role', async () => {
+    it('seeds the boot-time capabilities for the ADMIN role', async () => {
       await methods.seedSystemGrants();
 
       const grants = await SystemGrant.find({
@@ -65,11 +65,10 @@ describe('SystemGrant methods', () => {
         principalId: SystemRoles.ADMIN,
       }).lean();
 
-      const expectedCount = Object.values(SystemCapabilities).length;
-      expect(grants).toHaveLength(expectedCount);
+      expect(grants).toHaveLength(ADMIN_SEED_CAPABILITIES.length);
 
       const capabilities = grants.map((g) => g.capability).sort();
-      const expected = Object.values(SystemCapabilities).sort();
+      const expected = [...ADMIN_SEED_CAPABILITIES].sort();
       expect(capabilities).toEqual(expected);
     });
 
@@ -82,7 +81,7 @@ describe('SystemGrant methods', () => {
         principalId: SystemRoles.ADMIN,
       });
 
-      expect(count).toBe(Object.values(SystemCapabilities).length);
+      expect(count).toBe(ADMIN_SEED_CAPABILITIES.length);
     });
 
     it('seeds grants with no tenantId', async () => {
@@ -274,7 +273,7 @@ describe('SystemGrant methods', () => {
         principalId: SystemRoles.ADMIN,
       });
 
-      expect(grants).toHaveLength(Object.values(SystemCapabilities).length);
+      expect(grants).toHaveLength(ADMIN_SEED_CAPABILITIES.length);
     });
 
     it('returns empty array for a principal with no grants', async () => {

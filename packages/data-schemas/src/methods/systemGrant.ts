@@ -2,7 +2,11 @@ import { PrincipalType, SystemRoles } from 'librechat-data-provider';
 import type { Types, Model, ClientSession, FilterQuery } from 'mongoose';
 import type { SystemCapability } from '~/types/admin';
 import type { ISystemGrant } from '~/types';
-import { SystemCapabilities, CapabilityImplications } from '~/admin/capabilities';
+import {
+  SystemCapabilities,
+  CapabilityImplications,
+  ADMIN_SEED_CAPABILITIES,
+} from '~/admin/capabilities';
 import { tenantSafeBulkWrite } from '~/utils/tenantBulkWrite';
 import { normalizePrincipalId } from '~/utils/principal';
 import logger from '~/config/winston';
@@ -506,7 +510,9 @@ export function createSystemGrantMethods(mongoose: typeof import('mongoose')): {
   }
 
   /**
-   * Seed the ADMIN role with all system capabilities.
+   * Seed the ADMIN role with the base system capabilities. Oversight capabilities
+   * (`ADMIN_SEED_CAPABILITIES` excludes them) are left to the audited grants API so a
+   * revocation is not silently re-inserted on the next boot.
    * Context-agnostic: caller provides tenant context (e.g., `runAsSystem()` for
    * startup, `tenantStorage.run()` for future per-tenant provisioning).
    * Idempotent and concurrency-safe: uses bulkWrite with ordered:false so parallel
@@ -519,7 +525,7 @@ export function createSystemGrantMethods(mongoose: typeof import('mongoose')): {
       try {
         const SystemGrant = mongoose.models.SystemGrant as Model<ISystemGrant>;
         const now = new Date();
-        const ops = Object.values(SystemCapabilities).map((capability) => ({
+        const ops = ADMIN_SEED_CAPABILITIES.map((capability) => ({
           updateOne: {
             filter: {
               principalType: PrincipalType.ROLE,
