@@ -149,3 +149,38 @@ export interface Report {
   summary: Summary;
   cases: CaseRecord[];
 }
+
+export interface RetrievalCase {
+  id: string;
+  kind: QuestionKind;
+  retrievalQuery: string;
+  expectedSources: string[];
+  retrieval: Retrieval;
+  /** Share of `expectedSources` among the retrieved entries; 1 when none are expected. */
+  recall: number;
+}
+
+export interface RetrievalSummary {
+  cases: number;
+  answerable: number;
+  /** Mean per-case recall of the expected sources in the top 8, answerable cases. */
+  recallAt8: number;
+  /** Answerable cases with at least one expected source retrieved. */
+  anyExpectedFound: number;
+  results: Record<RetrievalResult, number>;
+  retrievalMs: Percentiles;
+}
+
+export interface RetrievalMeta {
+  startedAt: string;
+  finishedAt: string;
+  concurrency: number;
+  questionSet: string;
+  notes: string[];
+}
+
+export interface RetrievalReport {
+  meta: RetrievalMeta;
+  summary: RetrievalSummary;
+  cases: RetrievalCase[];
+}

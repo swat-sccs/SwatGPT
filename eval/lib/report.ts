@@ -130,8 +130,8 @@ function modeDetail(meta: RunMeta): string {
   return meta.oracle ? ' (oracle: gold chunks added to the pool)' : ' (no oracle)';
 }
 
-const pct = (value: number): string => `${(value * 100).toFixed(1)}%`;
-const ms = (value: number | undefined): string =>
+export const pct = (value: number): string => `${(value * 100).toFixed(1)}%`;
+export const ms = (value: number | undefined): string =>
   value === undefined ? 'n/a' : `${Math.round(value)} ms`;
 
 function failureReasons(record: CaseRecord): string[] {

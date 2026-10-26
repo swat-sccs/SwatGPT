@@ -7,7 +7,9 @@ import type {
   Question,
   QuestionSet,
   Report,
+  RetrievalCase,
   RetrievalMode,
+  RetrievalReport,
   RunMeta,
   TurnRecord,
 } from './lib/types.ts';
@@ -15,8 +17,14 @@ import type { ProductionConfig } from './lib/prompt.ts';
 import type { Retriever } from './lib/retrieval.ts';
 import type { Corpus } from './lib/corpus.ts';
 import type { EvalEnv } from './lib/env.ts';
-import { createLiveRetriever, createLocalRetriever, resolveMode } from './lib/retrieval.ts';
+import {
+  createLiveRetriever,
+  createLocalRetriever,
+  probeQdrant,
+  resolveMode,
+} from './lib/retrieval.ts';
 import { buildSystemPrompt, loadProductionConfig } from './lib/prompt.ts';
+import { recallAt8, renderRetrievalMarkdown, summarizeRetrieval } from './lib/recall.ts';
 import { caseStatus, renderMarkdown, summarize } from './lib/report.ts';
 import { validateQuestions } from './lib/questions.ts';
 import { streamCompletion } from './lib/chat.ts';
@@ -37,6 +45,7 @@ interface Options {
   out: string;
   mode: RetrievalMode | 'auto';
   oracle: boolean;
+  retrievalOnly: boolean;
   concurrency: number;
   only?: Set<string>;
   baseUrl?: string;
@@ -53,6 +62,7 @@ function parseOptions(): Options {
       out: { type: 'string', default: join(import.meta.dirname, 'reports') },
       mode: { type: 'string', default: 'auto' },
       'no-oracle': { type: 'boolean', default: false },
+      'retrieval-only': { type: 'boolean', default: false },
       concurrency: { type: 'string', default: String(MAX_CONCURRENCY) },
       only: { type: 'string' },
       'base-url': { type: 'string' },
@@ -75,6 +85,7 @@ function parseOptions(): Options {
     out: values.out,
     mode,
     oracle: !values['no-oracle'],
+    retrievalOnly: values['retrieval-only'],
     concurrency,
     only: values.only ? new Set(values.only.split(',').map((id) => id.trim())) : undefined,
     baseUrl: values['base-url'],
@@ -111,10 +122,11 @@ async function runTurn(
   return { question: text, retrievalQuery: queries.retrievalQuery, retrieval, completion };
 }
 
+const expectedSourcesOf = (corpus: Corpus, question: Question): string[] =>
+  question.docs.map((doc) => corpus.documents.get(doc)?.source ?? doc);
+
 async function runCase(context: Context, question: Question): Promise<CaseRecord> {
-  const expectedSources = question.docs.map(
-    (doc) => context.corpus.documents.get(doc)?.source ?? doc,
-  );
+  const expectedSources = expectedSourcesOf(context.corpus, question);
   const record: CaseRecord = {
     id: question.id,
     kind: question.kind,
@@ -162,13 +174,81 @@ function scoreRecord(record: CaseRecord, promptPrefix: string, corpus: Corpus): 
   return { ...record, score };
 }
 
-async function writeReport(report: Report, out: string, name: string): Promise<string> {
+async function writeReport(
+  report: Report | RetrievalReport,
+  markdown: string,
+  out: string,
+  name: string,
+): Promise<string> {
   await mkdir(out, { recursive: true });
   const base = join(out, name);
   await writeFile(`${base}.json`, `${JSON.stringify(report, null, 2)}\n`);
-  await writeFile(`${base}.md`, renderMarkdown(report));
+  await writeFile(`${base}.md`, markdown);
   process.stdout.write(`${JSON.stringify(report.summary, null, 2)}\nreport: ${base}.md\n`);
   return base;
+}
+
+const stampOf = (date: Date): string => date.toISOString().replace(/[:.]/g, '-');
+
+/** Live retrieval for the scored turn of one case, with the earlier user turns as history; nothing is generated. */
+async function retrievalCase(
+  retriever: Retriever,
+  corpus: Corpus,
+  question: Question,
+): Promise<RetrievalCase> {
+  const branch = question.turns.map((text) => ({ text, isCreatedByUser: true }));
+  const queries = librechatApi.buildKbQueries(branch);
+  const retrieval = await retriever(queries, question.docs);
+  const expectedSources = expectedSourcesOf(corpus, question);
+  return {
+    id: question.id,
+    kind: question.kind,
+    retrievalQuery: queries.retrievalQuery,
+    expectedSources,
+    retrieval,
+    recall: recallAt8(expectedSources, retrieval.sources),
+  };
+}
+
+/** Runs only production retrieval for every case and reports recall@8 and latency. */
+async function runRetrievalOnly(
+  options: Options,
+  env: EvalEnv,
+  corpus: Corpus,
+  questions: Question[],
+): Promise<void> {
+  if (!(await probeQdrant(env))) {
+    throw new Error('--retrieval-only needs the live stack: QDRANT_URL, TEI_EMBEDDINGS_URL, TEI_RERANK_URL');
+  }
+  process.env.TEI_EMBEDDINGS_URL = env.TEI_EMBEDDINGS_URL;
+  process.env.TEI_RERANK_URL = env.TEI_RERANK_URL;
+  process.env.QDRANT_URL = env.QDRANT_URL;
+  const retriever = createLiveRetriever();
+  const startedAt = new Date();
+  process.stderr.write(`eval: retrieval only, ${questions.length} cases, concurrency ${options.concurrency}\n`);
+  const cases = await mapPool(questions, options.concurrency, (question) =>
+    retrievalCase(retriever, corpus, question),
+  );
+  const report: RetrievalReport = {
+    meta: {
+      startedAt: startedAt.toISOString(),
+      finishedAt: new Date().toISOString(),
+      concurrency: options.concurrency,
+      questionSet: options.questions,
+      notes: [
+        `Retrieval: production retrieveKbContextDetailed against Qdrant at ${env.QDRANT_URL}; no generation.`,
+        'Recall@8 counts a case\'s expected source URLs among the entries of the final-turn context block.',
+      ],
+    },
+    summary: summarizeRetrieval(cases),
+    cases,
+  };
+  await writeReport(
+    report,
+    renderRetrievalMarkdown(report),
+    options.out,
+    `eval-${stampOf(startedAt)}-retrieval`,
+  );
 }
 
 /** Re-scores a saved report with the current scorer and KB, without calling any model. */
@@ -194,7 +274,7 @@ async function rescore(options: Options): Promise<void> {
     cases,
   };
   const stamp = previous.meta.startedAt.replace(/[:.]/g, '-');
-  await writeReport(report, options.out, `eval-${stamp}-rescored`);
+  await writeReport(report, renderMarkdown(report), options.out, `eval-${stamp}-rescored`);
 }
 
 async function mapPool<T, R>(
@@ -238,7 +318,7 @@ async function main(): Promise<void> {
     return rescore(options);
   }
   const env = await loadEnv(options.envFile);
-  if (!env.VLLM_API_KEY) {
+  if (!env.VLLM_API_KEY && !options.retrievalOnly) {
     throw new Error('VLLM_API_KEY is not set (environment or --env-file)');
   }
   const [corpus, production, questionText] = await Promise.all([
@@ -254,6 +334,9 @@ async function main(): Promise<void> {
   const questions = questionSet.questions.filter(
     (question) => !options.only || options.only.has(question.id),
   );
+  if (options.retrievalOnly) {
+    return runRetrievalOnly(options, env, corpus, questions);
+  }
   const mode = await resolveMode(options.mode, env);
   if (mode === 'live') {
     process.env.TEI_EMBEDDINGS_URL = env.TEI_EMBEDDINGS_URL;
@@ -267,7 +350,7 @@ async function main(): Promise<void> {
     mode === 'live'
       ? createLiveRetriever()
       : createLocalRetriever(corpus, env.TEI_RERANK_URL ?? '', options.oracle);
-  const context: Context = { corpus, production, retriever, apiKey: env.VLLM_API_KEY };
+  const context: Context = { corpus, production, retriever, apiKey: env.VLLM_API_KEY ?? '' };
   const startedAt = new Date();
   process.stderr.write(
     `eval: ${questions.length} cases, mode ${mode}, ${corpus.chunks.length} local chunks, concurrency ${options.concurrency}\n`,
@@ -292,7 +375,7 @@ async function main(): Promise<void> {
     notes: modeNotes(mode, options.oracle, env),
   };
   const report: Report = { meta, summary: summarize(cases, meta), cases };
-  await writeReport(report, options.out, `eval-${startedAt.toISOString().replace(/[:.]/g, '-')}`);
+  await writeReport(report, renderMarkdown(report), options.out, `eval-${stampOf(startedAt)}`);
   if (cases.some((record) => record.error)) {
     process.exitCode = 1;
   }
