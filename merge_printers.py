@@ -14,6 +14,7 @@ from pathlib import Path
 from collections import defaultdict
 
 INFO_DIR = Path(__file__).parent / "information"
+PRINTER_CATEGORY_URL = "https://kb.swarthmore.edu/wiki/Category:FacStaff_Printer"
 
 FIELD_ORDER = ["Department", "Location", "Queue Name", "Printer Model", "Access", "Print Release Station"]
 
@@ -133,7 +134,7 @@ def write_directory(printers: list[dict]) -> None:
     lines = [
         "---",
         'title: "Campus Printer Directory"',
-        "source: https://kb.swarthmore.edu/wiki/Main_Page",
+        f"source: {PRINTER_CATEGORY_URL}",
         "categories:",
         "  - FacStaff Printer",
         "  - Printing",
@@ -173,7 +174,7 @@ def write_instructions(variants: dict[str, dict]) -> None:
     lines = [
         "---",
         'title: "Campus Printer Setup Instructions"',
-        "source: https://kb.swarthmore.edu/wiki/Main_Page",
+        f"source: {PRINTER_CATEGORY_URL}",
         "categories:",
         "  - FacStaff Printer",
         "  - Printing",

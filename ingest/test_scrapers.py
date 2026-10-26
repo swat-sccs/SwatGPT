@@ -18,6 +18,7 @@ sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 import scrape_kb
 import scrape_www
 import scrape_catalog
+import merge_printers
 
 WWW = "https://www.swarthmore.edu"
 PARAGRAPH = (
@@ -185,6 +186,53 @@ class ScrapeKbTest(TempOutDir):
         (self.out / "www" / "page.md").write_text("---\ntitle: www\n---\n")
         self.run_scraper(["Eduroam"])
         self.assertTrue((self.out / "www" / "page.md").exists())
+
+
+def printer_page(queue, location):
+    return "\n".join([
+        "---",
+        f'title: "{queue} Printer"',
+        f"source: https://kb.swarthmore.edu/wiki/{queue}_Printer",
+        "---",
+        "",
+        f"# {queue} Printer",
+        "",
+        "Department | ITS",
+        f"Location | {location}",
+        f"Queue Name | {queue}",
+        "Printer Model | Canon iR-ADV C5840",
+        "Access | Faculty and staff",
+        "Print Release Station | Yes",
+        "",
+        "## Connecting from Windows",
+        "",
+        "Add the queue name from the table above on swat-print.",
+        "",
+    ])
+
+
+class MergePrintersTest(TempOutDir):
+    module = merge_printers
+
+    def setUp(self):
+        self.tmp = tempfile.TemporaryDirectory()
+        self.addCleanup(self.tmp.cleanup)
+        self.out = Path(self.tmp.name)
+        self.patch(merge_printers, "INFO_DIR", self.out)
+
+    def test_merged_docs_cite_the_printer_category_page(self):
+        (self.out / "prtsrv-parrish1_Printer.md").write_text(printer_page("prtsrv-parrish1", "Parrish 100"))
+        (self.out / "prtsrv-kohlberg2_Printer.md").write_text(printer_page("prtsrv-kohlberg2", "Kohlberg 200"))
+        (self.out / "eduroam.md").write_text("---\ntitle: Eduroam\n---\n\nnot a printer\n")
+        merge_printers.main()
+        self.assertEqual(self.files(), {"printer-directory.md", "printer-setup-instructions.md", "eduroam.md"})
+        for name in ("printer-directory.md", "printer-setup-instructions.md"):
+            text = (self.out / name).read_text()
+            self.assertIn(f"source: {merge_printers.PRINTER_CATEGORY_URL}", text.splitlines())
+            self.assertNotIn("Main_Page", text)
+        directory = (self.out / "printer-directory.md").read_text()
+        self.assertIn("- **Source**: https://kb.swarthmore.edu/wiki/prtsrv-parrish1_Printer", directory)
+        self.assertIn("from the Campus Printer Directory", (self.out / "printer-setup-instructions.md").read_text())
 
 
 CATOID = 9

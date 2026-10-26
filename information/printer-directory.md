@@ -1,6 +1,6 @@
 ---
 title: "Campus Printer Directory"
-source: https://kb.swarthmore.edu/wiki/Main_Page
+source: https://kb.swarthmore.edu/wiki/Category:FacStaff_Printer
 categories:
   - FacStaff Printer
   - Printing
