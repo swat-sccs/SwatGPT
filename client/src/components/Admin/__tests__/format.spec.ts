@@ -73,7 +73,7 @@ describe('admin format helpers', () => {
     const presets = ['24h', '7d', '30d'] as const;
     const durations = { '24h': 1, '7d': 7, '30d': 30 };
     for (const preset of presets) {
-      const { from = '', to } = rangeFor(preset, NOW);
+      const { from = '', to = '' } = rangeFor(preset, NOW);
       const spanMs = Date.parse(to) - Date.parse(from);
       expect(spanMs).toBeGreaterThanOrEqual(durations[preset] * 24 * 60 * 60 * 1000);
     }
