@@ -56,6 +56,7 @@ tests:
             exp_annotations:
               summary: "No successful SwatGPT backup in over 36 hours"
               description: "The newest complete backup on eagle finished 1d 13h 0m 0s ago (decades means none exists). Check `systemctl status swatgpt-backup.service` and `journalctl -u swatgpt-backup.service` on eagle."
+              runbook_url: "https://github.com/swat-sccs/SwatGPT/blob/main/monitoring/README.md#swatgptbackupstale"
       - eval_time: 23h
         alertname: SwatGPTBackupRunFailed
         exp_alerts: []
@@ -66,6 +67,7 @@ tests:
             exp_annotations:
               summary: "The last SwatGPT backup run failed"
               description: "Older backups are intact, but tonight's did not complete. See `journalctl -u swatgpt-backup.service` on eagle. Goes critical as SwatGPTBackupStale after 36h."
+              runbook_url: "https://github.com/swat-sccs/SwatGPT/blob/main/monitoring/README.md#swatgptbackuprunfailed"
 
   - name: node_exporter up without backup metrics
     interval: 1m
@@ -83,6 +85,7 @@ tests:
             exp_annotations:
               summary: "eagle's node_exporter is up but exports no backup metrics"
               description: "Either the backup timer has never run, the textfile collector flag is missing from node-exporter, or /var/lib/node_exporter/textfile_collector is not readable by it."
+              runbook_url: "https://github.com/swat-sccs/SwatGPT/blob/main/monitoring/README.md#swatgptbackupmetricsmissing"
 
   - name: restore test never ran although eight daily backups exist
     interval: 1m
@@ -100,6 +103,7 @@ tests:
             exp_annotations:
               summary: "The SwatGPT backup restore test has never run"
               description: "At least 8 daily backups exist on eagle but verify.sh has never written its metrics. Check that swatgpt-backup-verify.timer is enabled (`systemctl list-timers swatgpt-backup-verify.timer`)."
+              runbook_url: "https://github.com/swat-sccs/SwatGPT/blob/main/monitoring/README.md#swatgptbackuprestoretestmissing"
 
   - name: restore test last passed nine days ago
     interval: 1m
@@ -117,3 +121,4 @@ tests:
             exp_annotations:
               summary: "No passing SwatGPT backup restore test in 8 days"
               description: "verify.sh last passed 9d 0h 0m 0s ago. Backups that have not been restored are not known to be good. See `journalctl -u swatgpt-backup-verify.service` on eagle."
+              runbook_url: "https://github.com/swat-sccs/SwatGPT/blob/main/monitoring/README.md#swatgptbackuprestoreteststale"

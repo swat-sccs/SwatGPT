@@ -25,6 +25,7 @@ groups:
         annotations:
           summary: "vLLM on loon is not answering scrapes"
           description: "Prometheus has failed to scrape {{ $labels.instance }} for 2 minutes. Chat generation is down for everyone."
+          runbook_url: "https://github.com/swat-sccs/SwatGPT/blob/main/monitoring/README.md#swatgptvllmdown"
 
       - alert: SwatGPTVllmQueueing
         expr: max(vllm:num_requests_waiting) > 0
@@ -35,6 +36,7 @@ groups:
         annotations:
           summary: "vLLM has had queued requests for 5 minutes"
           description: "{{ $value }} request(s) are waiting for a slot. Users see slow first tokens; check running requests, KV cache, and max-num-seqs."
+          runbook_url: "https://github.com/swat-sccs/SwatGPT/blob/main/monitoring/README.md#swatgptvllmqueueing"
 
       - alert: SwatGPTVllmTtftHigh
         expr: histogram_quantile(0.95, sum by (le) (rate(vllm:time_to_first_token_seconds_bucket[5m]))) > 5
@@ -45,6 +47,7 @@ groups:
         annotations:
           summary: "vLLM p95 time-to-first-token above 5s"
           description: "p95 TTFT over the last 5 minutes is {{ $value | humanizeDuration }}. Prompts are too long, the queue is deep, or the prefix cache stopped hitting."
+          runbook_url: "https://github.com/swat-sccs/SwatGPT/blob/main/monitoring/README.md#swatgptvllmttfthigh"
 
       - alert: SwatGPTVllmKvCacheHigh
         expr: max(vllm:kv_cache_usage_perc) > 0.9
@@ -55,6 +58,7 @@ groups:
         annotations:
           summary: "vLLM KV cache above 90%"
           description: "KV cache usage is {{ $value | humanizePercentage }}. Preemption and queueing follow; lower max-num-seqs or max-model-len, or shorten the system prompt and KB context."
+          runbook_url: "https://github.com/swat-sccs/SwatGPT/blob/main/monitoring/README.md#swatgptvllmkvcachehigh"
 
   - name: swatgpt-retrieval
     rules:
@@ -67,6 +71,7 @@ groups:
         annotations:
           summary: "TEI {{ $labels.instance }} is not answering scrapes"
           description: "Embeddings (:8001) or reranker (:8002) is down. Retrieval fails open, so users silently lose the Swarthmore knowledge base."
+          runbook_url: "https://github.com/swat-sccs/SwatGPT/blob/main/monitoring/README.md#swatgptteidown"
 
       - alert: SwatGPTRetrievalFailureRatioHigh
         expr: |
@@ -83,6 +88,7 @@ groups:
         annotations:
           summary: "More than 20% of KB retrievals timed out or errored"
           description: "{{ $value | humanizePercentage }} of retrievals in the last 10 minutes timed out or errored (needs at least 10 retrievals, so a quiet night cannot page). TEI or Qdrant outage signal; see the retrieval panels for the breakdown by result. 'empty' (nothing passed the rerank floor, normal for greetings and off-topic chat) is not counted; 'disabled' has its own alert."
+          runbook_url: "https://github.com/swat-sccs/SwatGPT/blob/main/monitoring/README.md#swatgptretrievalfailureratiohigh"
 
       - alert: SwatGPTRetrievalDisabled
         expr: increase(rag_retrieval_total{job="swatgpt_app",result="disabled"}[10m]) > 0
@@ -93,6 +99,7 @@ groups:
         annotations:
           summary: "Retrieval is running without RAG configuration"
           description: "retrieveKbContext is returning 'disabled': TEI_EMBEDDINGS_URL, TEI_RERANK_URL, or QDRANT_URL is unset in the app container."
+          runbook_url: "https://github.com/swat-sccs/SwatGPT/blob/main/monitoring/README.md#swatgptretrievaldisabled"
 
   - name: swatgpt-app
     rules:
@@ -105,6 +112,7 @@ groups:
         annotations:
           summary: "LibreChat exporter on eagle is not answering scrapes"
           description: "Prometheus cannot scrape {{ $labels.instance }}/metrics. Either the app is down or METRICS_SECRET no longer matches /etc/prometheus/swatgpt_metrics_token (a 401 also counts as down)."
+          runbook_url: "https://github.com/swat-sccs/SwatGPT/blob/main/monitoring/README.md#swatgptappdown"
 
       - alert: SwatGPTReadyzFailing
         expr: probe_success{job="swatgpt_readyz"} == 0
@@ -115,6 +123,7 @@ groups:
         annotations:
           summary: "LibreChat /readyz is failing"
           description: "The readiness probe for {{ $labels.instance }} has failed for 2 minutes. Requires the optional blackbox job in swatgpt-jobs.yml."
+          runbook_url: "https://github.com/swat-sccs/SwatGPT/blob/main/monitoring/README.md#swatgptreadyzfailing"
 
       - alert: SwatGPTApp5xxRateHigh
         expr: |
@@ -131,6 +140,7 @@ groups:
         annotations:
           summary: "LibreChat 5xx ratio above 2%"
           description: "{{ $value | humanizePercentage }} of HTTP responses in the last 5 minutes were 5xx. Check the app logs on eagle and the vLLM/TEI alerts first."
+          runbook_url: "https://github.com/swat-sccs/SwatGPT/blob/main/monitoring/README.md#swatgptapp5xxratehigh"
 
   - name: swatgpt-mcp
     rules:
@@ -143,6 +153,7 @@ groups:
         annotations:
           summary: "Dash MCP exporter on eagle is not answering scrapes"
           description: "Prometheus cannot scrape {{ $labels.instance }}/metrics. Either swatgpt-mcp is down or its 3001 publish/firewall rule is missing; campus data tools and their staleness alerts are blind."
+          runbook_url: "https://github.com/swat-sccs/SwatGPT/blob/main/monitoring/README.md#swatgptmcpdown"
 
       - alert: SwatGPTMcpPollFailing
         expr: |
@@ -164,6 +175,7 @@ groups:
         annotations:
           summary: "Dash MCP {{ $labels.kind }} polling keeps failing with no success"
           description: "Every {{ $labels.kind }} poll in the last hour (3 hours for configuration, which polls hourly) failed. A Dash outage or schema change usually breaks the live fallback too, so tools return stale or unavailable data. Check `docker compose logs swatgpt-mcp` for 'Polling job failed'."
+          runbook_url: "https://github.com/swat-sccs/SwatGPT/blob/main/monitoring/README.md#swatgptmcppollfailing"
 
       - alert: SwatGPTMcpPollStale
         expr: |
@@ -178,6 +190,7 @@ groups:
         annotations:
           summary: "Dash MCP {{ $labels.kind }} has not polled successfully for 3+ intervals"
           description: "The last successful {{ $labels.kind }} poll was {{ $value | humanizeDuration }} ago. Polls are failing, hanging on the job lock, or the scheduler stopped."
+          runbook_url: "https://github.com/swat-sccs/SwatGPT/blob/main/monitoring/README.md#swatgptmcppollstale"
 
       - alert: SwatGPTMcpSnapshotStale
         expr: |
@@ -190,6 +203,7 @@ groups:
         annotations:
           summary: "Dash MCP {{ $labels.domain }} snapshot is {{ $value | humanizeDuration }} old"
           description: "No fresh {{ $labels.domain }} data has been stored for 3+ poll intervals even if polls report success (for hours, news and resources, an upstream schema change that parses to zero records looks like this; weather and transit store a row even when it is empty). Tools are serving stale data. Alerts, dining, events, sports and mind_candy are left out because they can be legitimately empty."
+          runbook_url: "https://github.com/swat-sccs/SwatGPT/blob/main/monitoring/README.md#swatgptmcpsnapshotstale"
 
       - alert: SwatGPTMcpToolErrorRatioHigh
         expr: |
@@ -206,6 +220,7 @@ groups:
         annotations:
           summary: "More than 20% of MCP tool calls are failing"
           description: "{{ $value | humanizePercentage }} of Dash MCP tool calls from LibreChat in the last 15 minutes failed or returned an error result (needs at least 10 calls, so one bad model argument at low traffic does not page). Check the Dash MCP alerts and `docker compose logs swatgpt-mcp`."
+          runbook_url: "https://github.com/swat-sccs/SwatGPT/blob/main/monitoring/README.md#swatgptmcptoolerrorratiohigh"
 
   - name: swatgpt-eagle
     rules:
@@ -218,6 +233,7 @@ groups:
         annotations:
           summary: "eagle exporter {{ $labels.instance }} is not answering scrapes"
           description: "node_exporter (:9100) or cadvisor (:8080) on eagle is unreachable. Host and container metrics are blind."
+          runbook_url: "https://github.com/swat-sccs/SwatGPT/blob/main/monitoring/README.md#swatgpteagleexporterdown"
 
       - alert: SwatGPTEagleDiskHigh
         expr: |
@@ -232,6 +248,7 @@ groups:
         annotations:
           summary: "eagle root filesystem above 85%"
           description: "/ on eagle is {{ $value | humanizePercentage }} full. Run `docker builder prune` and `docker image prune` before MongoDB or Meilisearch run out of space."
+          runbook_url: "https://github.com/swat-sccs/SwatGPT/blob/main/monitoring/README.md#swatgpteaglediskhigh"
 
       - alert: SwatGPTEagleMemoryLow
         expr: node_memory_MemAvailable_bytes{job="eagle"} / node_memory_MemTotal_bytes{job="eagle"} < 0.1
@@ -242,6 +259,7 @@ groups:
         annotations:
           summary: "eagle has less than 10% memory available"
           description: "{{ $value | humanizePercentage }} of RAM is available on eagle. MongoDB, Meilisearch, or the app container is growing."
+          runbook_url: "https://github.com/swat-sccs/SwatGPT/blob/main/monitoring/README.md#swatgpteaglememorylow"
 
   - name: swatgpt-backup
     rules:
@@ -254,6 +272,7 @@ groups:
         annotations:
           summary: "No successful SwatGPT backup in over 36 hours"
           description: "The newest complete backup on eagle finished {{ $value | humanizeDuration }} ago (decades means none exists). Check `systemctl status swatgpt-backup.service` and `journalctl -u swatgpt-backup.service` on eagle."
+          runbook_url: "https://github.com/swat-sccs/SwatGPT/blob/main/monitoring/README.md#swatgptbackupstale"
 
       - alert: SwatGPTBackupMetricsMissing
         expr: absent(swatgpt_backup_last_success_timestamp{job="eagle"}) and on() max(up{job="eagle", instance=~".*:9100"}) == 1
@@ -264,6 +283,7 @@ groups:
         annotations:
           summary: "eagle's node_exporter is up but exports no backup metrics"
           description: "Either the backup timer has never run, the textfile collector flag is missing from node-exporter, or /var/lib/node_exporter/textfile_collector is not readable by it."
+          runbook_url: "https://github.com/swat-sccs/SwatGPT/blob/main/monitoring/README.md#swatgptbackupmetricsmissing"
 
       - alert: SwatGPTBackupRunFailed
         expr: max(swatgpt_backup_last_run_success{job="eagle"}) == 0
@@ -274,6 +294,7 @@ groups:
         annotations:
           summary: "The last SwatGPT backup run failed"
           description: "Older backups are intact, but tonight's did not complete. See `journalctl -u swatgpt-backup.service` on eagle. Goes critical as SwatGPTBackupStale after 36h."
+          runbook_url: "https://github.com/swat-sccs/SwatGPT/blob/main/monitoring/README.md#swatgptbackuprunfailed"
 
       - alert: SwatGPTBackupRestoreTestStale
         expr: time() - max(swatgpt_backup_last_verify_success_timestamp{job="eagle"}) > 8 * 86400
@@ -284,6 +305,7 @@ groups:
         annotations:
           summary: "No passing SwatGPT backup restore test in 8 days"
           description: "verify.sh last passed {{ $value | humanizeDuration }} ago. Backups that have not been restored are not known to be good. See `journalctl -u swatgpt-backup-verify.service` on eagle."
+          runbook_url: "https://github.com/swat-sccs/SwatGPT/blob/main/monitoring/README.md#swatgptbackuprestoreteststale"
 
       - alert: SwatGPTBackupRestoreTestMissing
         expr: absent(swatgpt_backup_last_verify_success_timestamp{job="eagle"}) and on() max(swatgpt_backup_retained_count{job="eagle"}) >= 8
@@ -294,3 +316,4 @@ groups:
         annotations:
           summary: "The SwatGPT backup restore test has never run"
           description: "At least 8 daily backups exist on eagle but verify.sh has never written its metrics. Check that swatgpt-backup-verify.timer is enabled (`systemctl list-timers swatgpt-backup-verify.timer`)."
+          runbook_url: "https://github.com/swat-sccs/SwatGPT/blob/main/monitoring/README.md#swatgptbackuprestoretestmissing"

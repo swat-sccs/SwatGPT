@@ -6,7 +6,9 @@ global:
 
 route:
   receiver: sccs-discord
-  group_by: ["alertname", "service"]
+  # kind/domain are only set by the Dash MCP rules; grouping on them keeps one
+  # notification per failing poll kind or stale domain instead of one mixed group.
+  group_by: ["alertname", "service", "kind", "domain"]
   group_wait: 30s
   group_interval: 5m
   repeat_interval: 4h
@@ -34,18 +36,22 @@ receivers:
   - name: sccs-discord
     discord_configs:
       - webhook_url: "https://discord.com/api/webhooks/REPLACE_ME"
-        title: '{{ .CommonAnnotations.summary }}'
+        # The title comes from the group labels, which every alert in the group shares.
+        # CommonAnnotations.summary is empty whenever the grouped summaries differ (the
+        # templated Dash MCP ones do), which left notifications without a title.
+        title: '[{{ .Status | toUpper }}{{ if eq .Status "firing" }}:{{ .Alerts.Firing | len }}{{ end }}] {{ .GroupLabels.alertname }}'
         message: >-
           {{ range .Alerts }}[{{ .Status | toUpper }}] {{ .Labels.alertname }} ({{ .Labels.severity }}):
-          {{ .Annotations.description }}
+          {{ .Annotations.summary }}. {{ .Annotations.description }}
+          Runbook: {{ .Annotations.runbook_url }}
           {{ end }}
 
   # - name: sccs-slack
   #   slack_configs:
   #     - api_url: "https://hooks.slack.com/services/REPLACE_ME"
   #       channel: "#swatgpt-alerts"
-  #       title: '{{ .CommonAnnotations.summary }}'
-  #       text: '{{ range .Alerts }}{{ .Annotations.description }}{{ "\n" }}{{ end }}'
+  #       title: '[{{ .Status | toUpper }}] {{ .GroupLabels.alertname }}'
+  #       text: '{{ range .Alerts }}{{ .Annotations.summary }}. {{ .Annotations.description }} Runbook: {{ .Annotations.runbook_url }}{{ "\n" }}{{ end }}'
 
   # - name: sccs-email
   #   email_configs:

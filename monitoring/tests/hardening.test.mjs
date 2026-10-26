@@ -199,6 +199,56 @@ test('alert names agree across rules, Alertmanager inhibitions, and the README t
   assert.deepEqual([...documented].sort(), [...names].sort());
 });
 
+/** GitHub's heading slug: lowercase, drop punctuation other than hyphens, spaces to hyphens. */
+function headingSlug(heading) {
+  return heading
+    .toLowerCase()
+    .replace(/[^\w\- ]/g, '')
+    .replace(/ /g, '-');
+}
+
+test('every alert has a runbook_url that resolves to a heading in monitoring/README.md', () => {
+  const readme = read('monitoring/README.md');
+  const anchors = new Set([...readme.matchAll(/^#{1,6} (.+)$/gm)].map((m) => headingSlug(m[1])));
+  const rules = load('monitoring/prometheus/swatgpt-alerts.yml').groups.flatMap(
+    (group) => group.rules,
+  );
+  assert.ok(rules.length > 0);
+  for (const rule of rules) {
+    const url = rule.annotations?.runbook_url;
+    assert.ok(url, `${rule.alert} has no runbook_url`);
+    const [page, anchor] = url.split('#');
+    assert.equal(
+      page,
+      'https://github.com/swat-sccs/SwatGPT/blob/main/monitoring/README.md',
+      rule.alert,
+    );
+    assert.equal(
+      anchor,
+      rule.alert.toLowerCase(),
+      `${rule.alert} runbook anchor must be its own name`,
+    );
+    assert.ok(
+      anchors.has(anchor),
+      `${rule.alert}: no "### ${rule.alert}" heading in monitoring/README.md`,
+    );
+  }
+});
+
+test('Alertmanager titles come from group labels and messages print the runbook', () => {
+  const config = load('monitoring/alertmanager/alertmanager.yml');
+  assert.ok(config.route.group_by.includes('alertname'));
+  for (const label of ['kind', 'domain'])
+    assert.ok(config.route.group_by.includes(label), `group_by must include ${label}`);
+  for (const receiver of config.receivers) {
+    for (const discord of receiver.discord_configs ?? []) {
+      assert.match(discord.title, /\.GroupLabels\.alertname/);
+      assert.doesNotMatch(discord.title, /CommonAnnotations\.summary/);
+      assert.match(discord.message, /\.Annotations\.runbook_url/);
+    }
+  }
+});
+
 function sandbox() {
   const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'swatgpt-hardening-'));
   const bin = path.join(dir, 'bin');
@@ -403,7 +453,10 @@ test('gull-install.sh fills only the alertmanager target list and validates with
   const result = box.install(`${TOKEN}\n`);
   assert.equal(result.status, 0, result.stderr + result.stdout);
   const prom = fs.readFileSync(path.join(box.config, 'prometheus.yml'), 'utf8');
-  assert.match(prom, /alerting:\n {2}alertmanagers:\n {4}- static_configs:\n {8}- targets: \["alertmanager:9093"\]/);
+  assert.match(
+    prom,
+    /alerting:\n {2}alertmanagers:\n {4}- static_configs:\n {8}- targets: \["alertmanager:9093"\]/,
+  );
   assert.match(prom, /job_name: scratch\n {4}static_configs:\n {8}- targets: \[\]\n/);
   assert.match(
     box.calls(),

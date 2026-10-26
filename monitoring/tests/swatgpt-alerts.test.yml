@@ -63,3 +63,4 @@ tests:
             exp_annotations:
               summary: "More than 20% of KB retrievals timed out or errored"
               description: "33.33% of retrievals in the last 10 minutes timed out or errored (needs at least 10 retrievals, so a quiet night cannot page). TEI or Qdrant outage signal; see the retrieval panels for the breakdown by result. 'empty' (nothing passed the rerank floor, normal for greetings and off-topic chat) is not counted; 'disabled' has its own alert."
+              runbook_url: "https://github.com/swat-sccs/SwatGPT/blob/main/monitoring/README.md#swatgptretrievalfailureratiohigh"

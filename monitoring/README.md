@@ -232,6 +232,173 @@ Without a blackbox exporter, `/readyz` is covered indirectly: the compose `healt
 service hits `/readyz` every 30 s (visible in `docker compose ps`), the deploy workflow polls it, and
 `SwatGPTAppDown` fires when the process stops answering scrapes.
 
+Every rule carries a `runbook_url` annotation pointing at its heading in the next section, and the
+Alertmanager message template prints it. Notification titles come from the group labels
+(`[FIRING:n] <alertname>`), not from `CommonAnnotations.summary`, which is empty whenever the grouped
+summaries differ (the Dash MCP ones embed `kind`/`domain`). `monitoring/tests/hardening.test.mjs`
+fails if a rule has no `runbook_url` or its anchor has no heading here.
+
+## Runbooks
+
+vLLM and TEI run as the `swatgpt_vllm` swarm stack managed from gull (`ops/vllm/README.md`); the
+app, Dash MCP, exporters and backups run on eagle from `/srv/SwatGPT` (`docker compose` there).
+Production changes on either host are planned and approved first.
+
+### SwatGPTVllmDown
+
+Chat is down for everyone. On gull: `docker service ps swatgpt_vllm_vllm --no-trunc` and
+`docker service logs --since 10m swatgpt_vllm_vllm`. A restart takes about 12 minutes (weights
+load); if the GPU is wedged (`nvidia-smi` on loon hangs or shows no process), the host needs a
+reboot. Once `up{job="vllm"}` is 1 again, send one chat from SwatGPT to confirm.
+
+### SwatGPTVllmQueueing
+
+Requests are waiting for a slot. Check `vllm:num_requests_running` against `--max-num-seqs` (96)
+and `vllm:kv_cache_usage_perc` on the dashboard. Sustained queueing at low concurrency means long
+prompts or a lost prefix cache; see `SwatGPTVllmKvCacheHigh`. A one-off spike during a class
+assignment clears on its own; do not restart vLLM for it.
+
+### SwatGPTVllmTtftHigh
+
+p95 time to first token is above 5 s. Usually a symptom of `SwatGPTVllmQueueing` or
+`SwatGPTVllmKvCacheHigh`; check those first. If neither fires, compare
+`ops/vllm/metrics.sh http://loon.sccs.swarthmore.edu:8000/metrics` with a saved baseline for a
+drop in prefix-cache hit rate (a system-prompt or KB-context change invalidates it).
+
+### SwatGPTVllmKvCacheHigh
+
+KV cache above 90% leads to preemption and queueing. Lowering `--max-num-seqs` or
+`--max-model-len`, or shortening the system prompt and KB context, are the levers; all but the
+app-side ones need a vLLM restart (about 12 minutes) in a change window.
+
+### SwatGPTTeiDown
+
+Embeddings (`:8001`) or the reranker (`:8002`) is down; retrieval fails open, so users silently
+lose the knowledge base. On gull: `docker service ps swatgpt_vllm_tei-embeddings swatgpt_vllm_tei-reranker`
+and their logs. TEI restarts in under a minute. Confirm with a KB question in SwatGPT afterwards.
+
+### SwatGPTRetrievalFailureRatioHigh
+
+More than 20% of retrievals time out or error. If `SwatGPTTeiDown` is not firing, check Qdrant on
+eagle (`docker compose logs --since 15m qdrant`, `curl -s localhost:6333/readyz`) and the app's
+retrieval timeouts in the api logs (`[retrieveKbContext]`). The dashboard's by-result panel shows
+whether it is `timeout` (slow TEI/Qdrant) or `error` (unreachable or a bad response).
+
+### SwatGPTRetrievalDisabled
+
+The app is running without `TEI_EMBEDDINGS_URL`, `TEI_RERANK_URL` or `QDRANT_URL`. Compare
+`/srv/SwatGPT/.env` on eagle with `.env.example`; a deploy that recreated `api` after an `.env`
+edit which replaced the file's inode is the usual cause (`ops/eagle/README.md`, section 2).
+Fix the variable and `docker compose up -d --force-recreate --no-deps api`.
+
+### SwatGPTAppDown
+
+Prometheus cannot scrape `eagle:3080/metrics`. First `curl -s -o /dev/null -w '%{http_code}\n'
+http://localhost:3080/readyz` on eagle: a 200 there with the alert firing means the scrape token
+is wrong (a 401 counts as down); see B.2 to rotate it. Otherwise `docker compose ps` and
+`docker compose logs --tail=100 api`; if a deploy just ran, the workflow's rollback step may
+already be restoring the previous image.
+
+### SwatGPTReadyzFailing
+
+The blackbox probe of `/readyz` fails while the exporter may still answer. The app cannot reach
+MongoDB or has not finished starting. On eagle: `docker compose ps`, `docker compose logs --tail=100
+api mongodb`. Requires the optional blackbox job in `swatgpt-jobs.yml`.
+
+### SwatGPTApp5xxRateHigh
+
+More than 2% of responses are 5xx. Check the vLLM and TEI alerts first (a dead backend turns
+every chat into a 5xx). Otherwise `docker compose logs --since 10m api | grep -iE 'error|5[0-9]{2}'`
+on eagle and the latency panels; the ratio is over all routes, so one broken endpoint under load
+is enough.
+
+### SwatGPTMcpDown
+
+Prometheus cannot scrape `eagle:3001/metrics`. On eagle: `docker compose ps swatgpt-mcp`,
+`docker compose logs --tail=100 swatgpt-mcp`, and `curl -s localhost:3001/metrics | head`. If the
+container is healthy but the scrape fails, the `3001` firewall rule or the
+`SWATGPT_MCP_ALLOWED_HOSTS` entry is missing (A.4 and the Dash MCP note above).
+
+### SwatGPTMcpPollFailing
+
+Every poll of one kind failed with no success for an hour (three hours for `configuration`).
+`docker compose logs --since 1h swatgpt-mcp | grep 'Polling job failed'` shows the upstream error.
+A Dash outage clears on its own; a schema change needs a fix in `dash_mcp/` and a deploy. Tools
+keep serving the last snapshot meanwhile.
+
+### SwatGPTMcpPollStale
+
+A poll kind has not succeeded for three intervals, with no error counted either: the scheduler
+stopped or a poll is hanging on the job lock. `docker compose logs --since 30m swatgpt-mcp` and,
+if nothing is logged at all, `docker compose restart swatgpt-mcp`.
+
+### SwatGPTMcpSnapshotStale
+
+Polls report success but no fresh rows are stored. For `hours`, `news` and `resources` this is
+usually an upstream schema change that parses to zero records; check the raw Dash response
+against the parser in `dash_mcp/src/`. For `weather` and `transit` it means the stored row is
+old even though the poll ran; look at the poll logs for the domain.
+
+### SwatGPTMcpToolErrorRatioHigh
+
+More than 20% of Dash MCP tool calls from the app fail. If no other MCP alert is firing, the
+failures are per-tool: `docker compose logs --since 15m swatgpt-mcp | grep -i error`, and the
+dashboard's by-tool panel. A model passing bad arguments at volume shows up here too; compare
+with the `swatgpt_mcp_tool_calls_total{result}` breakdown.
+
+### SwatGPTEagleExporterDown
+
+node_exporter (`:9100`) or cadvisor (`:8080`) is unreachable. On eagle: `docker compose ps
+node-exporter cadvisor` and `docker compose up -d node-exporter cadvisor`. If both are up, the
+firewall rule for gull is missing (A.4). Backup alerts read from `:9100`, so they are blind
+while this fires.
+
+### SwatGPTEagleDiskHigh
+
+`/` on eagle is above 85%. `docker system df` first; then `docker builder prune -f --filter
+until=168h` and `docker image prune -f` (the deploy workflow already does both). Container logs
+are capped by the json-file options; if a volume is growing, `du -sh /var/lib/docker/volumes/*`
+tells which. MongoDB and Meilisearch stop writing when the disk fills.
+
+### SwatGPTEagleMemoryLow
+
+Less than 10% of RAM is available. `docker stats --no-stream` shows which container is growing
+(MongoDB's cache, Meilisearch, or the app). A restart of the offender buys time; a persistent
+climb needs the VM's memory raised on nest (`context/eagle.md`).
+
+### SwatGPTBackupStale
+
+No complete backup for 36 hours. On eagle: `systemctl status swatgpt-backup.service`,
+`journalctl -u swatgpt-backup.service -n 100`, and `ls -la /srv/backup/swatgpt`. Run
+`sudo systemctl start swatgpt-backup.service` by hand once the cause (disk, a stopped service,
+Qdrant alias) is fixed. `ops/backup/README.md` has the setup and restore runbook.
+
+### SwatGPTBackupMetricsMissing
+
+node_exporter is up but exports no `swatgpt_backup_*` metrics. Either the backup timer was never
+installed (`ops/backup/README.md`, step 4), `/var/lib/node_exporter/textfile_collector` is missing
+or unreadable, or node-exporter lost its `--collector.textfile.directory` flag. `cat
+/var/lib/node_exporter/textfile_collector/swatgpt_backup.prom` on eagle tells which.
+
+### SwatGPTBackupRunFailed
+
+Last night's backup failed; older backups are intact. `journalctl -u swatgpt-backup.service -n 100`
+on eagle names the failing component (`mongo`, `postgres`, `qdrant` or `files`). Fix and start the
+service by hand. It becomes `SwatGPTBackupStale` after 36 hours.
+
+### SwatGPTBackupRestoreTestStale
+
+No passing restore test in 8 days. `journalctl -u swatgpt-backup-verify.service -n 200` on eagle
+shows which component failed to restore; `systemctl list-timers swatgpt-backup-verify.timer`
+confirms the timer is live. A backup that does not restore is not a backup: treat a repeated
+failure as `SwatGPTBackupStale`.
+
+### SwatGPTBackupRestoreTestMissing
+
+Backups exist but `verify.sh` has never written metrics. Enable the timer:
+`sudo systemctl enable --now swatgpt-backup-verify.timer` and run it once by hand
+(`ops/backup/README.md`, step 4).
+
 ## Tests
 
 `monitoring/tests/` checks this directory and the compose hardening before anything reaches eagle
