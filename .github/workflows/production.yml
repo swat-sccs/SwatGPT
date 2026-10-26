@@ -180,10 +180,14 @@ jobs:
       - name: Deploy
         id: deploy
         run: |
+          echo "DEPLOY_STARTED_AT=$(date -u +%Y-%m-%dT%H:%M:%SZ)" >> "$GITHUB_ENV"
           before_api=$(docker compose ps -q api 2>/dev/null || true)
           docker compose up -d --remove-orphans
           after_api=$(docker compose ps -q api)
 
+          if [ -z "$before_api" ] || [ "$before_api" != "$after_api" ]; then
+            echo "API_RECREATED=true" >> "$GITHUB_ENV"
+          fi
           if [ -n "$before_api" ] && [ "$before_api" != "$after_api" ]; then
             echo "api was recreated by compose; it already mounts the new librechat.yaml"
             exit 0
@@ -209,6 +213,7 @@ jobs:
 
           echo "Recreating api: $reason"
           docker compose up -d --no-build --no-deps --force-recreate api
+          echo "API_RECREATED=true" >> "$GITHUB_ENV"
 
       - name: Health check
         id: health
@@ -259,9 +264,26 @@ jobs:
             });
           " || fail "API container cannot reach http://swatgpt-mcp:3000/healthz"
 
-          last_mcp_init=$(docker compose logs api | grep -E 'Initialized with [0-9]+ configured server' | tail -1 || true)
-          echo "${last_mcp_init:-no MCP init log yet}"
-          if echo "$last_mcp_init" | grep -Eq 'and 0 tools'; then
+          # MCP servers initialize after /readyz turns green, so only a fresh api container
+          # is gated, and only on log lines written since this deploy started: the whole log
+          # history would pass on an old container's line (or on none at all).
+          if [ "${API_RECREATED:-false}" != "true" ]; then
+            echo "api container was not recreated; skipping the MCP tool-count gate"
+            exit 0
+          fi
+          mcp_init=""
+          for i in $(seq 1 12); do
+            mcp_init=$(docker compose logs --since "$DEPLOY_STARTED_AT" api 2>/dev/null | grep -E 'Initialized with [0-9]+ configured server' | tail -1 || true)
+            if [ -n "$mcp_init" ]; then
+              break
+            fi
+            sleep 5
+          done
+          if [ -z "$mcp_init" ]; then
+            fail "api logged no MCP initialization line within 60s of becoming ready"
+          fi
+          echo "$mcp_init"
+          if echo "$mcp_init" | grep -Eq 'and 0 tools'; then
             fail "LibreChat started with the Dash MCP server configured but 0 tools"
           fi
 
