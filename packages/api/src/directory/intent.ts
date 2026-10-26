@@ -29,7 +29,6 @@ const PERSON_PATTERNS: ReadonlyArray<RegExp> = [
   /where (?:does|do|did|is|are) (.+?) (?:live|stay|reside) (?:on campus|this year|this semester|now)\b/,
   /(?:what|which) (?:dorm|room|building|hall|residence hall|dorm room|house) (?:is|does|do|did|are|has|have) (.+?) (?:live in|living in|stay in|staying in|reside in|residing in)\b/,
   /(?:what|which) (?:dorm|dorm room|residence hall|house) (?:is|are) (.+?) (?:in|at|located in)\b/,
-  /(?:what|which) (?:dorm|dorm room|residence hall|house) (?:is|does|do|are) (.+)$/,
   /([a-z0-9]+(?: [a-z0-9]+){0,4})['’]s? (?:dorm|room|dorm room|building|housing|residence|hall|room number|address)\b/,
   /(?:dorm|room|dorm room|housing|residence|room number|address) (?:of|for) (.+)$/,
   /(?:find|locate|look up|lookup) (.+?) (?:in the )?(?:dorm|room|directory|housing)\b/,
@@ -41,13 +40,17 @@ const LOOSE_PERSON_PATTERNS: ReadonlyArray<RegExp> = [
   /where (?:is|are) (.+?) located\b/,
   /(?:what|which) (?:room|building|hall) (?:is|are) (.+?) (?:in|at|located in)\b/,
   /(?:what|which) (?:room|building|hall) (?:is|are) (.+)$/,
+  /(?:what|which) (?:dorm|dorm room|residence hall|house) (?:is|does|do|are) (.+)$/,
   /where (?:is|are) (.+)$/,
 ];
 
 /** A capture opening with an article names a thing ("the registrar"), not a person. */
 const ARTICLE_LEAD = /^(?:the|a|an) /;
 
-/** Question lead-ins that precede a name in a span such as "what is jane doe". */
+/**
+ * Question lead-ins that precede a name in a span such as "what is jane doe",
+ * plus group words ("seniors", "most students") that make a span generic.
+ */
 const LEAD_STOPWORDS: ReadonlySet<string> = new Set([
   'what',
   'whats',
@@ -103,13 +106,34 @@ const LEAD_STOPWORDS: ReadonlySet<string> = new Set([
   'classmate',
   'swattie',
   'freshman',
+  'freshmen',
   'sophomore',
+  'sophomores',
   'junior',
+  'juniors',
   'senior',
+  'seniors',
+  'first',
+  'years',
+  'upperclassmen',
+  'underclassmen',
+  'professor',
+  'professors',
+  'faculty',
+  'staff',
+  'people',
+  'most',
+  'many',
+  'all',
+  'everyone',
+  'everybody',
   'one',
   'guy',
+  'guys',
   'girl',
+  'girls',
   'kid',
+  'kids',
 ]);
 /** Descriptors that trail a name, such as "jane doe the freshman" or "jane doe 27". */
 const TRAIL_STOPWORDS: ReadonlySet<string> = new Set([

@@ -101,8 +101,21 @@ describe('detectIntent', () => {
     'Which building is the chemistry final in',
     'What dorm is the registrar in?',
     'Where is Lang room 101?',
-  ])('produces no directory lookup for the place question %j', (text) => {
+    'Where do seniors live?',
+    'Where do freshmen live?',
+    'where do professors live',
+    'Where do most students live',
+    'What dorm is best for freshmen?',
+    'Which dorm is closest to Sharples?',
+    'where do all my friends live',
+    'where does the class of 2027 live',
+  ])('produces no directory lookup for the generic question %j', (text) => {
     expect(lookup(text)).toBeUndefined();
+  });
+
+  it('only reports an explicit miss for a span short enough to be a name', () => {
+    expect(lookup('Where does Taylor Swift live?')).toMatchObject({ kind: 'person', total: 0 });
+    expect(lookup('where does John Jacob Astor live')).toBeUndefined();
   });
 
   it.each([

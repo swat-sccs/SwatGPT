@@ -57,6 +57,8 @@ const PLACE_STOPWORDS: ReadonlySet<string> = new Set([
   'semester',
 ]);
 const MAX_NAME_TOKENS = 3;
+/** An explicit miss is only worth reporting when the span is short enough to be a name. */
+const MAX_MISS_TOKENS = 2;
 
 function push(map: Map<string, number[]>, key: string, index: number): void {
   const bucket = map.get(key);
@@ -143,7 +145,7 @@ function nameTokens(span: string): string[] {
 function looksLikeName(tokens: string[]): boolean {
   return (
     tokens.length > 0 &&
-    tokens.length <= MAX_NAME_TOKENS &&
+    tokens.length <= MAX_MISS_TOKENS &&
     tokens.every((token) => !/\d/.test(token))
   );
 }
