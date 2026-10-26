@@ -287,6 +287,82 @@ def abort(reasons):
     sys.exit("refusing to swap the alias:\n  " + "\n  ".join(reasons))
 
 
+DIFF_PAYLOAD = ["source", "content_hash", "chunk_index"]
+SCROLL_BATCH = 1000
+LIST_LIMIT = 40
+
+
+def doc_summary(points):
+    """source -> {"content_hash", "chunks"} for a list of payload dicts."""
+    docs = {}
+    for payload in points:
+        entry = docs.setdefault(str(payload.get("source")), {"content_hash": None, "chunks": 0})
+        entry["chunks"] += 1
+        if payload.get("content_hash") is not None:
+            entry["content_hash"] = str(payload["content_hash"])
+    return docs
+
+
+def scroll_payloads(qdrant, collection_name):
+    offset = None
+    while True:
+        records, offset = qdrant.scroll(
+            collection_name=collection_name,
+            limit=SCROLL_BATCH,
+            offset=offset,
+            with_payload=DIFF_PAYLOAD,
+            with_vectors=False,
+        )
+        yield from (record.payload or {} for record in records)
+        if offset is None:
+            return
+
+
+def doc_changed(before, after):
+    if before["content_hash"] and after["content_hash"]:
+        return before["content_hash"] != after["content_hash"]
+    return before["chunks"] != after["chunks"]
+
+
+def diff_docs(live, corpus):
+    """Sources added, removed and changed between the live alias and the parsed corpus."""
+    common = live.keys() & corpus.keys()
+    return {
+        "added": sorted(corpus.keys() - live.keys()),
+        "removed": sorted(live.keys() - corpus.keys()),
+        "changed": sorted(s for s in common if doc_changed(live[s], corpus[s])),
+        "live_chunks": sum(d["chunks"] for d in live.values()),
+        "corpus_chunks": sum(d["chunks"] for d in corpus.values()),
+    }
+
+
+def print_sources(label, sources, live, corpus):
+    chunks = lambda docs, source: docs[source]["chunks"] if source in docs else 0
+    delta = sum(chunks(corpus, s) - chunks(live, s) for s in sources)
+    print(f"{label}: {len(sources)} docs ({delta:+d} chunks)")
+    for source in sources[:LIST_LIMIT]:
+        print(f"  {source} ({chunks(live, source)} -> {chunks(corpus, source)} chunks)")
+    if len(sources) > LIST_LIMIT:
+        print(f"  ... and {len(sources) - LIST_LIMIT} more")
+
+
+def diff(qdrant):
+    """Dry run: compare the parsed corpus with the live alias; no TEI calls, nothing written."""
+    target = current_target(qdrant)
+    if not target:
+        sys.exit(f"no live '{ALIAS}' alias to compare against")
+    points, _ = parse_corpus()
+    live = doc_summary(scroll_payloads(qdrant, target))
+    corpus = doc_summary(p["payload"] for p in points)
+    result = diff_docs(live, corpus)
+    print(f"live '{ALIAS}' -> {target}: {len(live)} docs, {result['live_chunks']} chunks")
+    for label in ("added", "removed", "changed"):
+        print_sources(label, result[label], live, corpus)
+    delta = result["corpus_chunks"] - result["live_chunks"]
+    print(f"chunk delta: {delta:+d} ({result['live_chunks']} -> {result['corpus_chunks']})")
+    return result
+
+
 def parse_corpus():
     md_parser = MarkdownNodeParser()
     splitter = SentenceSplitter(chunk_size=CHUNK_SIZE, chunk_overlap=CHUNK_OVERLAP)
@@ -405,6 +481,11 @@ def main():
         action="store_true",
         help="point the 'kb' alias back at the newest other kb_* collection",
     )
+    mode.add_argument(
+        "--diff",
+        action="store_true",
+        help="dry run: report docs added/removed/changed vs. the live 'kb' alias (no TEI, no writes)",
+    )
     parser.add_argument(
         "--force",
         action="store_true",
@@ -415,6 +496,9 @@ def main():
     qdrant = QdrantClient(url=QDRANT_URL, timeout=120)
     if args.rollback:
         rollback(qdrant)
+        return
+    if args.diff:
+        diff(qdrant)
         return
     with httpx.Client(timeout=120) as http:
         if args.verify:

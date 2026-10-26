@@ -2,7 +2,7 @@
 
 Each article in the main namespace is fetched via the MediaWiki API, converted from
 rendered HTML to markdown, and saved under information/ with YAML frontmatter
-(title, source URL, page id, categories) for RAG ingestion.
+(title, source URL, page id, content hash, categories) for RAG ingestion.
 
 Usage: python scrape_kb.py
 Dependencies: requests, html2text
@@ -16,6 +16,7 @@ import os
 import re
 import sys
 import time
+import hashlib
 from pathlib import Path
 
 import requests
@@ -118,12 +119,13 @@ def yaml_quote(value: str) -> str:
     return '"' + value.replace("\\", "\\\\").replace('"', '\\"') + '"'
 
 
-def frontmatter(title: str, url: str, pageid: int, categories: list[str]) -> str:
+def frontmatter(title: str, url: str, pageid: int, categories: list[str], body: str) -> str:
     lines = [
         "---",
         f"title: {yaml_quote(title)}",
         f"source: {url}",
         f"pageid: {pageid}",
+        f"content_hash: {hashlib.sha256(body.encode('utf-8')).hexdigest()}",
     ]
     if categories:
         lines.append("categories:")
@@ -162,7 +164,7 @@ def main() -> None:
             slug = f"{slug}-{page['pageid']}"
         seen_slugs.add(slug)
 
-        content = f"{frontmatter(title, url, page['pageid'], categories)}\n\n# {title}\n\n{body}\n"
+        content = f"{frontmatter(title, url, page['pageid'], categories, body)}\n\n# {title}\n\n{body}\n"
         (OUT_DIR / f"{slug}.md").write_text(content, encoding="utf-8")
         print(f"[{i}/{len(pages)}] {title} -> {slug}.md")
         time.sleep(SLEEP)

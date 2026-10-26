@@ -8,6 +8,7 @@ Only the HTTP fetch boundary is faked; slugging, extraction, writing and pruning
 """
 
 import sys
+import hashlib
 import tempfile
 import unittest
 from pathlib import Path
@@ -43,8 +44,9 @@ class TitleQuotingTest(unittest.TestCase):
     """Every scraper escapes the YAML title instead of swapping quotes, so it still equals the H1."""
 
     def test_kb_frontmatter_escapes_quotes_and_backslashes(self):
-        text = scrape_kb.frontmatter(QUOTED_TITLE, "https://kb.swarthmore.edu/wiki/Printing", 7, ["Printing"])
+        text = scrape_kb.frontmatter(QUOTED_TITLE, "https://kb.swarthmore.edu/wiki/Printing", 7, ["Printing"], "body")
         self.assertIn(QUOTED_YAML, text.splitlines())
+        self.assertIn(f"content_hash: {hashlib.sha256(b'body').hexdigest()}", text.splitlines())
         self.assertEqual(text.splitlines()[-1], "---")
 
     def test_www_frontmatter_escapes_quotes_and_backslashes(self):

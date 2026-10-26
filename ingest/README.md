@@ -12,6 +12,7 @@ uv run python ingest.py            # full ingestion
 uv run python ingest.py --verify   # smoke queries against the `kb` alias
 uv run python ingest.py --force    # accept a corpus under MIN_RATIO of the live one
 uv run python ingest.py --rollback # point `kb` at the newest other non-empty kb_* collection
+uv run python ingest.py --diff     # dry run: docs added/removed/changed vs. the live `kb` alias
 uv run python -m unittest test_ingest  # safety tests (in-memory Qdrant, fake TEI)
 uv run --no-project --with requests --with trafilatura --with html2text \
   python -m unittest test_scrapers     # prune/refresh tests for ../scrape_www.py, ../scrape_catalog.py
@@ -44,6 +45,10 @@ uv run --no-project --with requests --with trafilatura --with html2text \
 - The `kb` alias is then atomically repointed. The previous target is kept and every older
   `kb_*` collection is deleted, so `--rollback` is a single alias re-point (run it again to go
   forward). Never write to the alias directly.
+- `--diff` parses the corpus and scrolls the live alias (`source`, `content_hash`, `chunk_index`
+  payload fields only) to report the docs that would be added, removed or changed (hash
+  mismatch, or chunk-count mismatch when a side has no hash) and the resulting chunk delta.
+  It never calls TEI or creates a collection.
 - Deterministic point ids (`uuid5(source#chunk_index)`), payload indexed on `doc_type`
   (`kb` | `www` | `course`).
 

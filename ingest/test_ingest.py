@@ -32,11 +32,12 @@ def tei_handler(request):
     )
 
 
-def write_doc(directory, stem, title):
+def write_doc(directory, stem, title, sentences=5, hashed=True):
     directory.mkdir(parents=True, exist_ok=True)
-    body = f"# {title}\n\n" + " ".join(f"{title} detail sentence number {n}." for n in range(5))
+    body = f"# {title}\n\n" + " ".join(f"{title} detail sentence number {n}." for n in range(sentences))
+    digest = f"content_hash: {hashlib.sha256(body.encode()).hexdigest()}\n" if hashed else ""
     (directory / f"{stem}.md").write_text(
-        f'---\ntitle: "{title}"\nsource: https://example.edu/{directory.name}/{stem}\n---\n\n{body}\n'
+        f'---\ntitle: "{title}"\nsource: https://example.edu/{directory.name}/{stem}\n{digest}---\n\n{body}\n'
     )
 
 
@@ -219,6 +220,41 @@ class IngestSafetyTest(unittest.TestCase):
             ingest.ingest(self.qdrant, self.http)
         self.assertEqual(self.collections(), {"kb_old"})
         self.assertEqual(ingest.current_target(self.qdrant), "kb_old")
+
+    def test_diff_reports_added_removed_and_changed_docs_without_writing(self):
+        build_corpus(self.root)
+        ingest.ingest(self.qdrant, self.http)
+        before = self.collections()
+
+        write_doc(self.root, "kb-9", "KB article 9")
+        (self.root / "www" / "www-1.md").unlink()
+        write_doc(self.root / "catalog", "course-0", "Course 0", sentences=120)
+
+        with mock.patch.object(ingest, "embed_batch", side_effect=AssertionError("TEI called")):
+            result = ingest.diff(self.qdrant)
+
+        self.assertEqual(result["added"], [f"https://example.edu/{self.root.name}/kb-9"])
+        self.assertEqual(result["removed"], ["https://example.edu/www/www-1"])
+        self.assertEqual(result["changed"], ["https://example.edu/catalog/course-0"])
+        self.assertEqual(result["live_chunks"], 6)
+        self.assertGreater(result["corpus_chunks"], 6)
+        self.assertEqual(self.collections(), before)
+        self.assertEqual(ingest.current_target(self.qdrant), "kb_20300101000000")
+
+    def test_diff_falls_back_to_chunk_counts_for_unhashed_docs(self):
+        live = {"a": {"content_hash": None, "chunks": 2}, "b": {"content_hash": "x", "chunks": 1}}
+        corpus = {
+            "a": {"content_hash": None, "chunks": 3},
+            "b": {"content_hash": "x", "chunks": 2},
+        }
+        result = ingest.diff_docs(live, corpus)
+        self.assertEqual(result["changed"], ["a"])
+        self.assertEqual((result["live_chunks"], result["corpus_chunks"]), (3, 5))
+
+    def test_diff_without_live_alias_exits(self):
+        build_corpus(self.root)
+        with self.assertRaises(SystemExit):
+            ingest.diff(self.qdrant)
 
     def test_rollback_skips_empty_collections(self):
         seed_collection(self.qdrant, "kb_a", 2)
