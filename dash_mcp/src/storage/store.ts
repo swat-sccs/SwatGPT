@@ -197,7 +197,9 @@ export class PgStore {
       }
       await client.query('COMMIT');
     } catch (error) {
-      await client.query('ROLLBACK');
+      await client.query('ROLLBACK').catch((rollbackError: unknown) => {
+        log('warn', 'ROLLBACK failed after a write error', { error: rollbackError instanceof Error ? rollbackError.message : String(rollbackError) });
+      });
       throw error;
     } finally {
       client.release();
