@@ -11,7 +11,10 @@ changes on eagle are planned and approved first; run these steps over ssh with s
 
 ## 1. GitHub Actions runner drop-in
 
-The runner (`actions.runner.swat-sccs-SwatGPT.eagle`) runs as `aidahxr`, an SSSD account.
+The runner (`actions.runner.swat-sccs-SwatGPT.eagle`) is installed in `/srv/actions-runner`
+and runs as `dcrepublic`, an SSSD account (the unit's `User=` was switched from the previous
+personal account on 2026-09-16; `systemctl show "$UNIT" -p User` confirms). Its working
+directory for deploys is `/srv/SwatGPT`, the tree `.github/workflows/production.yml` resets.
 Without ordering on `sssd.service` and `nss-user-lookup.target`, a reboot can start the unit
 before the user resolves; it fails once and stays dead, and every push to `main` then sits
 queued with no error on the eagle side.
@@ -42,13 +45,13 @@ cd /srv/SwatGPT
 stat -c '%U:%G %a' .env                  # note the owner: it must be the user compose runs as
 sudo chown "$(stat -c %U .)": .env
 sudo chmod 600 .env
-stat -c '%U:%G %a' .env                  # <runner user>:<group> 600
+stat -c '%U:%G %a' .env                  # dcrepublic:<group> 600
 ```
 
 Why the owner matters:
 
-- `docker compose` (run by the Actions runner as the deploy tree's owner) reads `.env` for
-  interpolation, so that user must be able to read it.
+- `docker compose` (run by the Actions runner as `dcrepublic`, the deploy tree's owner) reads
+  `.env` for interpolation, so that user must be able to read it.
 - The `api` container runs as `${UID}:${GID}` and reads the bind-mounted `/app/.env` at
   startup. `UID`/`GID` in `.env` must equal the file owner's ids, or LibreChat starts without
   its configuration. Check with `id -u "$(stat -c %U .env)"` against `grep '^UID=' .env`.
