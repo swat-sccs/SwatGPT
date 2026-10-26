@@ -82,8 +82,12 @@ export function buildIndex(entries: ReadonlyArray<DirectoryEntry>): DirectoryInd
         push(byFirst, variant, index);
       }
     }
-    for (const token of tokenize(entry.lastName)) {
+    const lastTokens = tokenize(entry.lastName);
+    for (const token of lastTokens) {
       push(byLast, token, index);
+    }
+    if (lastTokens.length > 1) {
+      push(byLast, lastTokens.join(' '), index);
     }
     if (!entry.dorm) {
       return;
@@ -160,10 +164,21 @@ function sameRoom(a: DirectoryEntry, b: DirectoryEntry): boolean {
   );
 }
 
+/** Entries whose surname contains every token, so "smith jones" or "van der berg" alone still hits. */
+function surnameMatches(tokens: string[], index: DirectoryIndex): number[] {
+  const buckets = tokens.map((token) => index.byLast.get(token));
+  return buckets
+    .slice(1)
+    .reduce<number[]>((acc, bucket) => intersect(acc, bucket), [...(buckets[0] ?? [])]);
+}
+
 function strongMatches(tokens: string[], index: DirectoryIndex): number[] {
   const byName = fullNameMatches(tokens, index);
-  if (byName.length > 0 || tokens.length !== 1) {
+  if (byName.length > 0) {
     return byName;
+  }
+  if (tokens.length > 1) {
+    return surnameMatches(tokens, index);
   }
   const uidHit = index.byUid.get(tokens[0]);
   return uidHit === undefined ? [] : [uidHit];
