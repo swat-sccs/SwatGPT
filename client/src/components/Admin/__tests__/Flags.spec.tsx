@@ -1,7 +1,7 @@
 import { screen, within, fireEvent, waitFor } from '@testing-library/react';
 import { renderAdmin, mockCapabilities, pending, mocks } from '../testing/utils';
 import { flag } from '../testing/fixtures';
-import Flags from '../Flags';
+import Flags, { countBySource } from '../Flags';
 
 describe('admin flags', () => {
   it('shows a loading state', async () => {
@@ -54,6 +54,60 @@ describe('admin flags', () => {
       message: 'The action failed. Please try again.',
       status: 'error',
     });
+  });
+
+  it('counts loaded flags by source', () => {
+    const manual = { ...flag, id: 'flag-2', source: 'manual' as const };
+    expect(countBySource([flag, manual, { ...manual, id: 'flag-3' }])).toEqual({
+      all: 3,
+      manual: 2,
+      keyword: 1,
+    });
+    expect(countBySource([])).toEqual({ all: 0, manual: 0, keyword: 0 });
+  });
+
+  it('filters the loaded queue by source with counted chips', async () => {
+    mockCapabilities();
+    mocks.getAdminFlags.mockResolvedValue({
+      flags: [flag, { ...flag, id: 'flag-2', source: 'manual', reason: 'Reported by staff' }],
+      nextCursor: null,
+    });
+    renderAdmin(<Flags />);
+    await screen.findByText('Contains a phone number');
+
+    const chips = screen.getByRole('group', { name: 'Flag source' });
+    expect(within(chips).getByRole('button', { name: 'All (2)' })).toHaveAttribute(
+      'aria-pressed',
+      'true',
+    );
+
+    fireEvent.click(within(chips).getByRole('button', { name: 'Manual (1)' }));
+    expect(screen.getByText('Reported by staff')).toBeInTheDocument();
+    expect(screen.queryByText('Contains a phone number')).not.toBeInTheDocument();
+    expect(within(chips).getByRole('button', { name: 'Manual (1)' })).toHaveAttribute(
+      'aria-pressed',
+      'true',
+    );
+    expect(within(chips).getByRole('button', { name: 'All (2)' })).toHaveAttribute(
+      'aria-pressed',
+      'false',
+    );
+    expect(mocks.getAdminFlags).toHaveBeenCalledTimes(1);
+
+    fireEvent.click(within(chips).getByRole('button', { name: 'Keyword (1)' }));
+    expect(screen.getByText('Contains a phone number')).toBeInTheDocument();
+    expect(screen.queryByText('Reported by staff')).not.toBeInTheDocument();
+  });
+
+  it('explains an empty source filter without calling the queue empty', async () => {
+    mockCapabilities();
+    mocks.getAdminFlags.mockResolvedValue({ flags: [flag], nextCursor: null });
+    renderAdmin(<Flags />);
+    await screen.findByText('Contains a phone number');
+
+    fireEvent.click(screen.getByRole('button', { name: 'Manual (0)' }));
+    expect(screen.getByText('No loaded flags come from this source')).toBeInTheDocument();
+    expect(screen.queryByText('The review queue is empty')).not.toBeInTheDocument();
   });
 
   it('shows an empty queue', async () => {
