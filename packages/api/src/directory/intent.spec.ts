@@ -22,6 +22,15 @@ const entries: DirectoryEntry[] = [
     room: 'C210',
     dormHidden: false,
   },
+  {
+    uid: 'kobri1',
+    firstName: 'Kate',
+    lastName: "O'Brien",
+    gradYear: 2029,
+    dorm: 'Parrish',
+    room: '3W1',
+    dormHidden: false,
+  },
 ];
 
 const index = buildIndex(entries);
@@ -52,6 +61,9 @@ describe('detectIntent', () => {
     ['What hall does Lang live in?', 'lang'],
     ['Where is Jane Doe living?', 'jane doe'],
     ['Where is Jane rooming this year?', 'jane'],
+    ["what's O'Brien's room number", 'obrien'],
+    ['Kate O’Brien’s dorm', 'kate obrien'],
+    ["what is d'angelo's room", 'dangelo'],
   ])('extracts the person span from %j', (text, span) => {
     expect(detectIntent(text)).toEqual({ kind: 'person', span, roommates: false, explicit: true });
   });
@@ -78,6 +90,7 @@ describe('detectIntent', () => {
   it.each([
     ["Who are Jane Doe's roommates?", 'jane doe'],
     ['who lives with Jane Doe', 'jane doe'],
+    ["who are O'Brien's roommates", 'obrien'],
   ])('flags roommate questions like %j', (text, span) => {
     expect(detectIntent(text)).toEqual({ kind: 'person', span, roommates: true, explicit: true });
   });
@@ -123,6 +136,8 @@ describe('detectIntent', () => {
     ['What dorm is Jane Doe in?', 'jdoe1'],
     ['What room is Jane Doe in?', 'jdoe1'],
     ['Which building does jdoe1 live in', 'jdoe1'],
+    ["what's O'Brien's room number", 'kobri1'],
+    ["where is Kate O'Brien's dorm", 'kobri1'],
   ])('still resolves the person question %j', (text, uid) => {
     const result = lookup(text);
     expect(result?.kind).toBe('person');

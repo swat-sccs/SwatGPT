@@ -10,9 +10,14 @@ export const MAX_QUESTION_LENGTH = 500;
 const HOUSING_GATE =
   /\b(live|lives|living|lived|dorm|dorms|dormed|room|rooms|rooming|roommate|roommates|housing|reside|resides|residence|hall|building|stay|stays|staying|find|neighbor|neighbors|where (?:is|are))\b/;
 
+/** One name token; an inner apostrophe ("o'brien", "d'angelo") is part of the name, not a possessive. */
+const NAME_TOKEN = "[a-z0-9]+(?:['’][a-z0-9]+)?";
+/** Up to five name tokens followed by a possessive, e.g. "jane doe's" or "o'brien's". */
+const POSSESSIVE_NAME = `(${NAME_TOKEN}(?: ${NAME_TOKEN}){0,4})['’]s? `;
+
 const ROOMMATE_PATTERNS: ReadonlyArray<RegExp> = [
   /who (?:lives|rooms|stays|is rooming|is living|is) with (.+)$/,
-  /([a-z0-9]+(?: [a-z0-9]+){0,4})['’]s? roommates?\b/,
+  new RegExp(`${POSSESSIVE_NAME}roommates?\\b`),
   /roommates? (?:of|for) (.+)$/,
 ];
 
@@ -29,7 +34,9 @@ const PERSON_PATTERNS: ReadonlyArray<RegExp> = [
   /where (?:does|do|did|is|are) (.+?) (?:live|stay|reside) (?:on campus|this year|this semester|now)\b/,
   /(?:what|which) (?:dorm|room|building|hall|residence hall|dorm room|house) (?:is|does|do|did|are|has|have) (.+?) (?:live in|living in|stay in|staying in|reside in|residing in)\b/,
   /(?:what|which) (?:dorm|dorm room|residence hall|house) (?:is|are) (.+?) (?:in|at|located in)\b/,
-  /([a-z0-9]+(?: [a-z0-9]+){0,4})['’]s? (?:dorm|room|dorm room|building|housing|residence|hall|room number|address)\b/,
+  new RegExp(
+    `${POSSESSIVE_NAME}(?:dorm|room|dorm room|building|housing|residence|hall|room number|address)\\b`,
+  ),
   /(?:dorm|room|dorm room|housing|residence|room number|address) (?:of|for) (.+)$/,
   /(?:find|locate|look up|lookup) (.+?) (?:in the )?(?:dorm|room|directory|housing)\b/,
 ];
