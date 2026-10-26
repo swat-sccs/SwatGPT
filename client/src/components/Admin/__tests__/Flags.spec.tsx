@@ -11,7 +11,7 @@ describe('admin flags', () => {
     expect(await screen.findByRole('status')).toBeInTheDocument();
   });
 
-  it('lists unresolved flags, resolves one and toggles resolved', async () => {
+  it('lists unresolved flags, resolves one and includes resolved ones on toggle', async () => {
     mockCapabilities();
     mocks.getAdminFlags.mockResolvedValue({ flags: [flag], nextCursor: null });
     mocks.resolveAdminFlag.mockResolvedValue({ ...flag, resolvedAt: '2026-09-09T00:00:00.000Z' });
@@ -23,8 +23,11 @@ describe('admin flags', () => {
     await waitFor(() => expect(mocks.resolveAdminFlag).toHaveBeenCalledWith('flag-1'));
 
     fireEvent.click(screen.getByRole('switch'));
-    await waitFor(() =>
-      expect(mocks.getAdminFlags).toHaveBeenCalledWith(expect.objectContaining({ resolved: true })),
+    await waitFor(() => expect(mocks.getAdminFlags.mock.calls.length).toBeGreaterThan(1));
+    const unfiltered = mocks.getAdminFlags.mock.calls.at(-1)?.[0];
+    expect(unfiltered?.resolved).toBeUndefined();
+    expect(mocks.getAdminFlags).not.toHaveBeenCalledWith(
+      expect.objectContaining({ resolved: true }),
     );
   });
 

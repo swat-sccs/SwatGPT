@@ -9,7 +9,7 @@ import { FlagList } from './Flag';
 function Content() {
   const localize = useLocalize();
   const [showResolved, setShowResolved] = useState(false);
-  const query = useAdminFlags({ resolved: showResolved });
+  const query = useAdminFlags({ resolved: showResolved ? undefined : false });
   const flags = query.data?.pages.flatMap((page) => page.flags) ?? [];
 
   return (
