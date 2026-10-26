@@ -6,8 +6,13 @@ rendered HTML to markdown, and saved under information/ with YAML frontmatter
 
 Usage: python scrape_kb.py
 Dependencies: requests, html2text
+
+Articles that were not rescraped (removed or renamed on the wiki) are pruned only when
+every fetch succeeded and at most MAX_PRUNE_RATIO (default 0.2) of the existing files
+would go; otherwise everything is kept. Run merge_printers.py afterwards as usual.
 """
 
+import os
 import re
 import sys
 import time
@@ -19,6 +24,8 @@ import html2text
 API = "https://kb.swarthmore.edu/api.php"
 BASE = "https://kb.swarthmore.edu"
 OUT_DIR = Path(__file__).parent / "information"
+SLEEP = 0.15
+MAX_PRUNE_RATIO = float(os.environ.get("MAX_PRUNE_RATIO", "0.2"))
 
 session = requests.Session()
 session.headers["User-Agent"] = "SwatGPT-KB-Scraper/1.0 (Swarthmore RAG ingestion)"
@@ -93,6 +100,19 @@ def fetch_page(title: str) -> dict | None:
     return data.get("parse")
 
 
+def stale_files(kept: set[str], failures: list[str]) -> tuple[list[Path], str | None]:
+    """Files to prune, or the reason pruning is skipped (a failure is not a removal)."""
+    existing = sorted(OUT_DIR.glob("*.md"))
+    stale = [f for f in existing if f.stem not in kept]
+    if failures:
+        return [], f"{len(failures)} fetch(es) failed"
+    if existing and len(stale) > MAX_PRUNE_RATIO * len(existing):
+        return [], (
+            f"{len(stale)}/{len(existing)} files would be removed, over MAX_PRUNE_RATIO={MAX_PRUNE_RATIO}"
+        )
+    return stale, None
+
+
 def yaml_quote(value: str) -> str:
     """Double-quoted YAML scalar; the raw title stays in the H1 and ingest matches the two."""
     return '"' + value.replace("\\", "\\\\").replace('"', '\\"') + '"'
@@ -145,9 +165,18 @@ def main() -> None:
         content = f"{frontmatter(title, url, page['pageid'], categories)}\n\n# {title}\n\n{body}\n"
         (OUT_DIR / f"{slug}.md").write_text(content, encoding="utf-8")
         print(f"[{i}/{len(pages)}] {title} -> {slug}.md")
-        time.sleep(0.15)
+        time.sleep(SLEEP)
 
-    print(f"\nDone: {len(pages) - len(failures)} saved to {OUT_DIR}/, {len(failures)} failed")
+    stale, skip_reason = stale_files(seen_slugs, failures)
+    for f in stale:
+        f.unlink()
+
+    print(
+        f"\nDone: {len(pages) - len(failures)} saved to {OUT_DIR}/, "
+        f"{len(stale)} stale files removed, {len(failures)} failed"
+    )
+    if skip_reason:
+        print(f"Pruning skipped: {skip_reason}. Existing articles were kept; re-run to retry.")
     if failures:
         print("Failed pages:", *failures, sep="\n  ")
 

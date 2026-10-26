@@ -140,6 +140,53 @@ class ScrapeWwwTest(TempOutDir):
         self.assertEqual(self.files(), {"registrar-a-b.md", variant})
 
 
+class ScrapeKbTest(TempOutDir):
+    module = scrape_kb
+
+    def setUp(self):
+        super().setUp()
+        self.patch(scrape_kb, "SLEEP", 0)
+
+    def run_scraper(self, titles, failing=()):
+        def fetch_page(title):
+            if title in failing:
+                raise RuntimeError("HTTP 503")
+            return {"text": f"<h1>{title}</h1><p>{title}: {PARAGRAPH}</p>", "categories": []}
+
+        pages = [{"title": title, "pageid": 1000 + n} for n, title in enumerate(titles)]
+        self.patch(scrape_kb, "list_all_pages", lambda: pages)
+        self.patch(scrape_kb, "fetch_page", fetch_page)
+        scrape_kb.main()
+
+    def seed(self, *stems):
+        for stem in stems:
+            (self.out / f"{stem}.md").write_text("---\ntitle: old\n---\n\nold copy\n")
+
+    def test_clean_run_prunes_removed_articles(self):
+        self.seed("eduroam", "vpn", "retired-article")
+        self.patch(scrape_kb, "MAX_PRUNE_RATIO", 0.5)
+        self.run_scraper(["Eduroam", "VPN"])
+        self.assertEqual(self.files(), {"eduroam.md", "vpn.md"})
+        self.assertIn("# Eduroam", (self.out / "eduroam.md").read_text())
+
+    def test_failed_fetch_keeps_every_existing_article(self):
+        self.seed("eduroam", "vpn", "retired-article")
+        self.run_scraper(["Eduroam", "VPN"], failing={"VPN"})
+        self.assertEqual(self.files(), {"eduroam.md", "vpn.md", "retired-article.md"})
+        self.assertIn("old copy", (self.out / "vpn.md").read_text())
+
+    def test_mass_prune_is_skipped(self):
+        self.seed(*(f"article{n}" for n in range(5)))
+        self.run_scraper(["Eduroam"])
+        self.assertEqual(len(self.files()), 6)
+
+    def test_subdirectories_are_never_pruned(self):
+        (self.out / "www").mkdir()
+        (self.out / "www" / "page.md").write_text("---\ntitle: www\n---\n")
+        self.run_scraper(["Eduroam"])
+        self.assertTrue((self.out / "www" / "page.md").exists())
+
+
 CATOID = 9
 OLD_CATOID = 8
 COURSES = {501: "CPSC 035. Data Structures", 502: "MATH 015. Calculus"}
