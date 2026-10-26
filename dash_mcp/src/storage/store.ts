@@ -13,6 +13,69 @@ export interface ArchiveItem {
   payload: JsonObject;
 }
 
+const MIGRATIONS: ReadonlyArray<[number, string]> = [
+  [1, `
+    CREATE TABLE source_records (
+      id bigserial PRIMARY KEY,
+      domain text NOT NULL,
+      source text NOT NULL,
+      external_id text NOT NULL,
+      title text NOT NULL,
+      search_text text NOT NULL DEFAULT '',
+      event_start timestamptz,
+      event_end timestamptz,
+      published_at timestamptz,
+      first_seen_at timestamptz NOT NULL,
+      last_seen_at timestamptz NOT NULL,
+      active boolean NOT NULL DEFAULT true,
+      payload_hash text NOT NULL,
+      payload jsonb NOT NULL,
+      UNIQUE (domain, source, external_id)
+    );
+    CREATE TABLE record_versions (
+      id bigserial PRIMARY KEY,
+      record_id bigint NOT NULL REFERENCES source_records(id) ON DELETE CASCADE,
+      observed_at timestamptz NOT NULL,
+      payload_hash text NOT NULL,
+      payload jsonb NOT NULL,
+      UNIQUE (record_id, observed_at)
+    );
+    CREATE TABLE observations (
+      id bigserial PRIMARY KEY,
+      domain text NOT NULL,
+      source text NOT NULL,
+      observed_at timestamptz NOT NULL,
+      payload_hash text NOT NULL,
+      payload jsonb NOT NULL
+    );
+    CREATE TABLE sync_runs (
+      id bigserial PRIMARY KEY,
+      job text NOT NULL,
+      started_at timestamptz NOT NULL DEFAULT now(),
+      completed_at timestamptz,
+      status text NOT NULL DEFAULT 'running',
+      error text
+    );
+    CREATE INDEX source_records_domain_active_idx ON source_records(domain, active, last_seen_at DESC);
+    CREATE INDEX source_records_event_idx ON source_records(domain, event_start, event_end);
+    CREATE INDEX source_records_search_idx ON source_records USING gin(to_tsvector('english', search_text));
+    CREATE INDEX record_versions_observed_idx ON record_versions(observed_at DESC);
+    CREATE INDEX observations_domain_observed_idx ON observations(domain, observed_at DESC);
+    CREATE INDEX sync_runs_job_started_idx ON sync_runs(job, started_at DESC);
+  `],
+  [2, `
+    CREATE TABLE domain_sync (
+      domain text NOT NULL,
+      scope text NOT NULL,
+      synced_at timestamptz NOT NULL,
+      PRIMARY KEY (domain, scope)
+    );
+  `],
+];
+
+/** The `domain_sync` scope recorded by a poll that read the whole domain. */
+export const FULL_SYNC_SCOPE = '*';
+
 export class PgStore {
   readonly pool: pg.Pool;
 
@@ -31,64 +94,20 @@ export class PgStore {
           applied_at timestamptz NOT NULL DEFAULT now()
         );
       `);
-      const applied = await client.query<{ version: number }>('SELECT version FROM schema_migrations WHERE version = 1');
-      if (!applied.rowCount) {
+      const applied = await client.query<{ version: number }>('SELECT version FROM schema_migrations');
+      const versions = new Set(applied.rows.map((row) => Number(row.version)));
+      for (const [version, sql] of MIGRATIONS) {
+        if (versions.has(version)) continue;
         await client.query('BEGIN');
-        await client.query(`
-          CREATE TABLE source_records (
-            id bigserial PRIMARY KEY,
-            domain text NOT NULL,
-            source text NOT NULL,
-            external_id text NOT NULL,
-            title text NOT NULL,
-            search_text text NOT NULL DEFAULT '',
-            event_start timestamptz,
-            event_end timestamptz,
-            published_at timestamptz,
-            first_seen_at timestamptz NOT NULL,
-            last_seen_at timestamptz NOT NULL,
-            active boolean NOT NULL DEFAULT true,
-            payload_hash text NOT NULL,
-            payload jsonb NOT NULL,
-            UNIQUE (domain, source, external_id)
-          );
-          CREATE TABLE record_versions (
-            id bigserial PRIMARY KEY,
-            record_id bigint NOT NULL REFERENCES source_records(id) ON DELETE CASCADE,
-            observed_at timestamptz NOT NULL,
-            payload_hash text NOT NULL,
-            payload jsonb NOT NULL,
-            UNIQUE (record_id, observed_at)
-          );
-          CREATE TABLE observations (
-            id bigserial PRIMARY KEY,
-            domain text NOT NULL,
-            source text NOT NULL,
-            observed_at timestamptz NOT NULL,
-            payload_hash text NOT NULL,
-            payload jsonb NOT NULL
-          );
-          CREATE TABLE sync_runs (
-            id bigserial PRIMARY KEY,
-            job text NOT NULL,
-            started_at timestamptz NOT NULL DEFAULT now(),
-            completed_at timestamptz,
-            status text NOT NULL DEFAULT 'running',
-            error text
-          );
-          CREATE INDEX source_records_domain_active_idx ON source_records(domain, active, last_seen_at DESC);
-          CREATE INDEX source_records_event_idx ON source_records(domain, event_start, event_end);
-          CREATE INDEX source_records_search_idx ON source_records USING gin(to_tsvector('english', search_text));
-          CREATE INDEX record_versions_observed_idx ON record_versions(observed_at DESC);
-          CREATE INDEX observations_domain_observed_idx ON observations(domain, observed_at DESC);
-          CREATE INDEX sync_runs_job_started_idx ON sync_runs(job, started_at DESC);
-        `);
-        await client.query('INSERT INTO schema_migrations(version) VALUES (1)');
-        await client.query('COMMIT');
+        try {
+          await client.query(sql);
+          await client.query('INSERT INTO schema_migrations(version) VALUES ($1)', [version]);
+          await client.query('COMMIT');
+        } catch (error) {
+          await client.query('ROLLBACK').catch(() => undefined);
+          throw error;
+        }
       }
-    } catch (error) {
-      await client.query('ROLLBACK').catch(() => undefined);
-      throw error;
     } finally {
       await client.query('SELECT pg_advisory_unlock(hashtext($1))', ['swatgpt:migrations']).catch(() => undefined);
       client.release();
@@ -209,12 +228,27 @@ export class PgStore {
     return result.rows.map((row) => row.payload);
   }
 
+  /**
+   * Records that a successful read of `domain` finished, scoped to `*` for a whole-domain poll
+   * or to a campus date for a one-day read-through, so an empty but successful poll still
+   * counts as fresh data.
+   */
+  async markDomainSynced(domain: Domain, scope: string, syncedAt = new Date()): Promise<void> {
+    await this.pool.query(`
+      INSERT INTO domain_sync(domain, scope, synced_at) VALUES ($1, $2, $3)
+      ON CONFLICT (domain, scope) DO UPDATE SET synced_at = GREATEST(domain_sync.synced_at, EXCLUDED.synced_at)
+    `, [domain, scope, syncedAt.toISOString()]);
+  }
+
+  /** The newest instant `domain` was observed: its latest successful sync or newest stored row. */
   async latestRecordObservedAt(domain: Domain): Promise<string | undefined> {
-    const result = await this.pool.query<{ last_seen_at: Date }>(
-      'SELECT last_seen_at FROM source_records WHERE domain=$1 ORDER BY last_seen_at DESC LIMIT 1',
-      [domain],
-    );
-    return result.rows[0]?.last_seen_at.toISOString();
+    const result = await this.pool.query<{ observed_at: Date | null }>(`
+      SELECT GREATEST(
+        (SELECT max(last_seen_at) FROM source_records WHERE domain=$1),
+        (SELECT max(synced_at) FROM domain_sync WHERE domain=$1)
+      ) AS observed_at
+    `, [domain]);
+    return result.rows[0]?.observed_at?.toISOString();
   }
 
   async latestObservation(domain: Extract<Domain, 'weather' | 'transit'>, source?: string): Promise<{ payload: JsonObject; observed_at: string } | undefined> {

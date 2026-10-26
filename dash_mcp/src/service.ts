@@ -1,5 +1,5 @@
 import type { Config } from './config.js';
-import { PgStore } from './storage/store.js';
+import { FULL_SYNC_SCOPE, PgStore } from './storage/store.js';
 import type {
   ArchiveQuery, DashboardRegistry, Domain, FeedResult, JsonObject, NormalizedRecord, TimeWindow, TransitStation,
 } from './types.js';
@@ -567,9 +567,11 @@ export class SwatService {
       const source = sourceInfo.get(key)!;
       return this.store.replaceSourceRecords(source.domain, source.source, items, undefined, window);
     }));
-    if (!exhaustive || window || !records.length) return;
     const keep = new Map<Domain, string[]>();
     for (const { domain, source } of sourceInfo.values()) keep.set(domain, [...(keep.get(domain) ?? []), source]);
+    const syncScope = window ? currentCampusDate(new Date(window.start)) : exhaustive ? FULL_SYNC_SCOPE : undefined;
+    if (syncScope) await Promise.all([...keep.keys()].map((domain) => this.store.markDomainSynced(domain, syncScope)));
+    if (!exhaustive || window || !records.length) return;
     await Promise.all([...keep.entries()].map(async ([domain, sources]) => {
       const retired = await this.store.deactivateMissingSources(domain, sources);
       if (retired) log('info', 'Retired records from sources no longer returned upstream', { domain, retired });

@@ -63,6 +63,7 @@ describe('PostgreSQL-first service reads', () => {
       currentRecords: vi.fn().mockResolvedValue([]),
       latestRecordObservedAt: vi.fn().mockResolvedValue(new Date().toISOString()),
       replaceSourceRecords: vi.fn().mockResolvedValue(undefined),
+      markDomainSynced: vi.fn().mockResolvedValue(undefined),
     } as unknown as PgStore;
     const discovery = {
       current: vi.fn().mockReturnValue({
@@ -108,6 +109,7 @@ describe('PostgreSQL-first service reads', () => {
       currentRecords: vi.fn().mockResolvedValue([]),
       latestRecordObservedAt: vi.fn().mockResolvedValue(undefined),
       replaceSourceRecords: vi.fn().mockResolvedValue(undefined),
+      markDomainSynced: vi.fn().mockResolvedValue(undefined),
     } as unknown as PgStore;
     const discovery = {
       current: vi.fn().mockReturnValue({
@@ -135,6 +137,7 @@ describe('PostgreSQL-first service reads', () => {
       currentRecords: vi.fn().mockResolvedValue([]),
       latestRecordObservedAt: vi.fn().mockResolvedValue(new Date().toISOString()),
       replaceSourceRecords: vi.fn().mockResolvedValue(undefined),
+      markDomainSynced: vi.fn().mockResolvedValue(undefined),
     } as unknown as PgStore;
     const discovery = {
       current: vi.fn().mockReturnValue({
@@ -182,6 +185,7 @@ describe('PostgreSQL-first service reads', () => {
       currentRecords: vi.fn().mockResolvedValue([]),
       latestRecordObservedAt: vi.fn().mockResolvedValue(new Date().toISOString()),
       replaceSourceRecords: vi.fn().mockResolvedValue(undefined),
+      markDomainSynced: vi.fn().mockResolvedValue(undefined),
     } as unknown as PgStore;
     const discovery = {
       current: vi.fn().mockReturnValue({
@@ -204,6 +208,7 @@ describe('PostgreSQL-first service reads', () => {
       currentRecords: vi.fn().mockResolvedValue([]),
       latestRecordObservedAt: vi.fn().mockResolvedValue(new Date().toISOString()),
       replaceSourceRecords: vi.fn().mockResolvedValue(undefined),
+      markDomainSynced: vi.fn().mockResolvedValue(undefined),
     } as unknown as PgStore;
     const service = new SwatService(config(), client, diningDiscovery(), store);
 
@@ -216,7 +221,9 @@ describe('PostgreSQL-first service reads', () => {
 
   it('keeps the scheduled dining poll as a full replacement so past days are retired', async () => {
     const client = { query: vi.fn().mockResolvedValue({ data: [] }) } as unknown as DashClient;
-    const store = { replaceSourceRecords: vi.fn().mockResolvedValue(undefined) } as unknown as PgStore;
+    const store = {
+      replaceSourceRecords: vi.fn().mockResolvedValue(undefined), markDomainSynced: vi.fn().mockResolvedValue(undefined),
+    } as unknown as PgStore;
     const service = new SwatService(config(), client, diningDiscovery(), store);
 
     await service.getDining({ date: '2026-09-08', limit: 100 }, true);

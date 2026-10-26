@@ -365,6 +365,7 @@ function memoryStore(items: Array<Record<string, unknown>>) {
     latestRecordObservedAt: vi.fn().mockResolvedValue(new Date().toISOString()),
     replaceSourceRecords: vi.fn().mockResolvedValue(undefined),
     deactivateMissingSources: vi.fn().mockResolvedValue(0),
+    markDomainSynced: vi.fn().mockResolvedValue(undefined),
   } as unknown as PgStore & {
     replaceSourceRecords: ReturnType<typeof vi.fn>;
     deactivateMissingSources: ReturnType<typeof vi.fn>;

@@ -24,7 +24,7 @@ describe.skipIf(!databaseUrl)('PostgreSQL-backed service cache', () => {
   });
 
   beforeEach(async () => {
-    await store.pool.query('TRUNCATE source_records, observations, sync_runs RESTART IDENTITY CASCADE');
+    await store.pool.query('TRUNCATE source_records, observations, sync_runs, domain_sync RESTART IDENTITY CASCADE');
   });
 
   afterAll(async () => {
@@ -88,6 +88,37 @@ describe.skipIf(!databaseUrl)('PostgreSQL-backed service cache', () => {
 
     expect(todayResult.items).toEqual([expect.objectContaining({ id: `lunch-${today}` })]);
     expect(client.query).not.toHaveBeenCalled();
+  });
+
+  it('treats a successful poll that returned no alerts as fresh data', async () => {
+    const client = {
+      query: vi.fn().mockImplementation((operation: string) => Promise.resolve(operation === 'CriticalAnnouncement'
+        ? { data: { showMessage: 0 } }
+        : { calendarName: 'Announcements', data: [] })),
+    } as unknown as DashClient;
+    const discovery = { current: () => ({ announcementCalendars: ['cal'], appAnnouncements: [] }) } as unknown as RegistryDiscovery;
+    const service = new SwatService(config(), client, discovery, store);
+
+    expect(await service.snapshotObservedAt('alerts')).toBeUndefined();
+    const before = Date.now();
+    await service.getAlerts(100, true);
+
+    const cached = await service.getAlerts(20);
+    expect(cached.items).toEqual([]);
+    expect(cached.meta.stale).toBe(false);
+    expect(cached.meta.warning).toBeUndefined();
+    const observed = await service.snapshotObservedAt('alerts');
+    expect(new Date(observed!).getTime()).toBeGreaterThanOrEqual(before - 1_000);
+  });
+
+  it('marks only the fetched day as synced on a read-through', async () => {
+    const client = { query: vi.fn().mockResolvedValue({ data: [] }) } as unknown as DashClient;
+    const service = new SwatService(config(), client, diningDiscovery(), store);
+
+    await service.getDining({ location: 'Sharples', date: tomorrow });
+
+    const scopes = await store.pool.query<{ scope: string }>('SELECT scope FROM domain_sync WHERE domain = $1', ['dining']);
+    expect(scopes.rows.map((row) => row.scope)).toEqual([tomorrow]);
   });
 
   it('retires alerts from an announcement calendar that disappeared upstream', async () => {
