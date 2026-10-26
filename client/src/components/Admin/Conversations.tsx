@@ -2,6 +2,7 @@ import { useState } from 'react';
 import { Label, Input, Button, Switch, Table, TableBody, TableHeader } from '@librechat/client';
 import type { FormEvent } from 'react';
 import type { TAdminConversationsQuery } from 'librechat-data-provider';
+import type { TranslationKeys } from '~/hooks';
 import { ConversationHeadRow, ConversationRow } from './Rows';
 import { fromLocalInput, toDateInput } from './format';
 import { Loading, ErrorState, Empty } from './States';
@@ -10,23 +11,71 @@ import { useAdminConversations } from '~/data-provider';
 import { useLocalize } from '~/hooks';
 
 type Filters = Omit<TAdminConversationsQuery, 'cursor'>;
+type FilterField = 'userId' | 'range';
+type FilterErrors = Partial<Record<FilterField, TranslationKeys>>;
 
 const PAGE_SIZE = 25;
+const MIN_SEARCH_LENGTH = 2;
+const OBJECT_ID = /^[0-9a-f]{24}$/i;
 
 const initialFilters: Filters = { limit: PAGE_SIZE, sort: 'updatedAt' };
+
+const errorIds: Record<FilterField, string> = {
+  userId: 'admin-convo-user-error',
+  range: 'admin-convo-range-error',
+};
+
+/** Server-side rules mirrored here so a predictable 400 never replaces the list with an error. */
+export const validateFilters = (draft: Filters): FilterErrors => {
+  const errors: FilterErrors = {};
+  if (draft.userId && !OBJECT_ID.test(draft.userId)) {
+    errors.userId = 'com_admin_filter_user_id_invalid';
+  }
+  if (draft.from && draft.to && draft.from > draft.to) {
+    errors.range = 'com_admin_filter_range_invalid';
+  }
+  return errors;
+};
+
+/** The search is trimmed and dropped below the server minimum instead of being rejected. */
+export const normalizeFilters = (draft: Filters): Filters => {
+  const search = draft.search?.trim();
+  return { ...draft, search: search && search.length >= MIN_SEARCH_LENGTH ? search : undefined };
+};
+
+function FieldError({ id, labelKey }: { id: string; labelKey?: TranslationKeys }) {
+  const localize = useLocalize();
+  if (!labelKey) {
+    return null;
+  }
+  return (
+    <p id={id} role="alert" className="text-xs text-text-destructive">
+      {localize(labelKey)}
+    </p>
+  );
+}
 
 function Content() {
   const localize = useLocalize();
   const [draft, setDraft] = useState<Filters>(initialFilters);
   const [filters, setFilters] = useState<Filters>(initialFilters);
+  const [errors, setErrors] = useState<FilterErrors>({});
   const query = useAdminConversations(filters);
 
   const apply = (event: FormEvent<HTMLFormElement>) => {
     event.preventDefault();
-    setFilters(draft);
+    const invalid = validateFilters(draft);
+    setErrors(invalid);
+    if (Object.keys(invalid).length > 0) {
+      return;
+    }
+    setFilters(normalizeFilters(draft));
   };
 
-  const update = (patch: Partial<Filters>) => setDraft((current) => ({ ...current, ...patch }));
+  const update = (patch: Partial<Filters>) => {
+    setDraft((current) => ({ ...current, ...patch }));
+    setErrors({});
+  };
 
   const items = query.data?.pages.flatMap((page) => page.conversations) ?? [];
 
@@ -55,8 +104,11 @@ function Content() {
             id="admin-convo-user"
             value={draft.userId ?? ''}
             onChange={(event) => update({ userId: event.target.value || undefined })}
+            aria-invalid={errors.userId != null}
+            aria-describedby={errors.userId && errorIds.userId}
             className="w-56 font-mono text-xs"
           />
+          <FieldError id={errorIds.userId} labelKey={errors.userId} />
         </div>
         <div className="space-y-1">
           <Label htmlFor="admin-convo-from">{localize('com_admin_filter_from')}</Label>
@@ -65,7 +117,10 @@ function Content() {
             type="datetime-local"
             value={toDateInput(draft.from)}
             onChange={(event) => update({ from: fromLocalInput(event.target.value) })}
+            aria-invalid={errors.range != null}
+            aria-describedby={errors.range && errorIds.range}
           />
+          <FieldError id={errorIds.range} labelKey={errors.range} />
         </div>
         <div className="space-y-1">
           <Label htmlFor="admin-convo-to">{localize('com_admin_filter_to')}</Label>
@@ -74,6 +129,8 @@ function Content() {
             type="datetime-local"
             value={toDateInput(draft.to)}
             onChange={(event) => update({ to: fromLocalInput(event.target.value) })}
+            aria-invalid={errors.range != null}
+            aria-describedby={errors.range && errorIds.range}
           />
         </div>
         <div className="flex items-center gap-2 pb-2">
@@ -105,7 +162,7 @@ function Content() {
 
       <section aria-busy={query.isFetching}>
         {query.isLoading && <Loading />}
-        {query.isError && <ErrorState onRetry={() => query.refetch()} />}
+        {query.isError && <ErrorState error={query.error} onRetry={() => query.refetch()} />}
         {query.data && items.length === 0 && <Empty />}
         {items.length > 0 && (
           <Table>

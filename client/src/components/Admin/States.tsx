@@ -20,15 +20,39 @@ export function Loading({ rows = 4 }: { rows?: number }) {
   );
 }
 
-export function ErrorState({ message, onRetry }: { message?: string; onRetry?: () => void }) {
+type TServerError = { response?: { status?: number; data?: { error?: unknown } } };
+
+const isClientError = (status: number | undefined): boolean =>
+  status != null && status >= 400 && status < 500;
+
+/** The backend's own `error` string for a rejected (4xx) request, which retrying cannot fix. */
+export const serverError = (error: unknown): string | undefined => {
+  const response = (error as TServerError | null | undefined)?.response;
+  if (!response || !isClientError(response.status)) {
+    return undefined;
+  }
+  const detail = response.data?.error;
+  return typeof detail === 'string' && detail.length > 0 ? detail : undefined;
+};
+
+export function ErrorState({
+  message,
+  error,
+  onRetry,
+}: {
+  message?: string;
+  error?: unknown;
+  onRetry?: () => void;
+}) {
   const localize = useLocalize();
+  const rejected = serverError(error);
   return (
     <div
       role="alert"
       className="flex items-center justify-between gap-4 rounded-lg border border-border-medium p-4 text-sm text-text-destructive"
     >
-      <span>{message ?? localize('com_admin_error_loading')}</span>
-      {onRetry && (
+      <span>{message ?? rejected ?? localize('com_admin_error_loading')}</span>
+      {onRetry && rejected === undefined && (
         <Button variant="outline" size="sm" onClick={onRetry}>
           {localize('com_ui_retry')}
         </Button>
