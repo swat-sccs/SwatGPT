@@ -47,6 +47,37 @@ describe('admin conversation reader', () => {
     );
   });
 
+  it('localizes the feedback tag instead of showing its raw key', async () => {
+    mockCapabilities();
+    const [prompt, reply] = conversationDetail.messages;
+    mocks.getAdminConversation.mockResolvedValue({
+      ...conversationDetail,
+      messages: [
+        prompt,
+        {
+          ...reply,
+          feedback: {
+            rating: 'thumbsDown',
+            tag: {
+              key: 'inaccurate',
+              label: 'com_ui_feedback_tag_inaccurate',
+              direction: 'thumbsDown',
+              icon: 'xmark',
+            },
+            text: 'Hours were wrong',
+          },
+        },
+      ],
+    });
+    renderAdmin(<Conversation />, routeOptions);
+
+    const feedback = await screen.findByRole('img', { name: 'Thumbs down' });
+    expect(feedback).toHaveAttribute('title', 'Inaccurate or incorrect answer');
+    expect(feedback).toHaveTextContent('Inaccurate or incorrect answer');
+    expect(feedback).toHaveTextContent('Hours were wrong');
+    expect(screen.queryByText('inaccurate')).not.toBeInTheDocument();
+  });
+
   it('labels generation metadata and localizes a failed status', async () => {
     mockCapabilities();
     const [prompt, reply] = conversationDetail.messages;

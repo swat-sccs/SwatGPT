@@ -6,8 +6,9 @@ import type {
   TAdminGenerationStatus,
   TAdminConversationMessage,
 } from 'librechat-data-provider';
-import type { ReactNode } from 'react';
+import type { TFeedbackTagKey } from 'librechat-data-provider';
 import type { TranslationKeys } from '~/hooks';
+import type { ReactNode } from 'react';
 import { formatDate, formatInt, formatMs } from './format';
 import { useLocalize } from '~/hooks';
 import { cn } from '~/utils';
@@ -30,6 +31,8 @@ const bodyOf = (message: TAdminConversationMessage): string => {
 };
 
 type TMetaEntry = { term: TranslationKeys; value: ReactNode };
+
+const feedbackTagKey = (key: TFeedbackTagKey): TranslationKeys => `com_ui_feedback_tag_${key}`;
 
 const statusKeys: Record<Exclude<TAdminGenerationStatus, 'ok'>, TranslationKeys> = {
   error: 'com_admin_generation_error',
@@ -98,6 +101,7 @@ export default function Message({ message }: { message: TAdminConversationMessag
   const localize = useLocalize();
   const roleKey = message.isCreatedByUser ? 'com_ui_user' : 'com_ui_assistant';
   const FeedbackIcon = message.feedback?.rating === 'thumbsUp' ? ThumbsUp : ThumbsDown;
+  const feedbackTag = message.feedback?.tag && localize(feedbackTagKey(message.feedback.tag.key));
 
   return (
     <article
@@ -122,10 +126,11 @@ export default function Message({ message }: { message: TAdminConversationMessag
                 ? 'com_admin_feedback_up'
                 : 'com_admin_feedback_down',
             )}
-            title={message.feedback.tag?.key ?? undefined}
+            title={feedbackTag || undefined}
             className="ml-auto inline-flex items-center gap-1"
           >
             <FeedbackIcon className="size-4" aria-hidden="true" />
+            {feedbackTag && <span className="text-text-tertiary">{feedbackTag}</span>}
             {message.feedback.text && (
               <span className="text-text-tertiary">{message.feedback.text}</span>
             )}

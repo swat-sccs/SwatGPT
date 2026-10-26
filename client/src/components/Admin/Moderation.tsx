@@ -1,7 +1,13 @@
 import { useState, useEffect } from 'react';
 import { Label, Input, Button } from '@librechat/client';
+import { REFILL_INTERVAL_UNITS } from 'librechat-data-provider';
+import type {
+  TAdminBalance,
+  RefillIntervalUnit,
+  TAdminUserControls,
+} from 'librechat-data-provider';
+import type { TranslationKeys } from '~/hooks';
 import type { FormEvent } from 'react';
-import type { TAdminUserControls } from 'librechat-data-provider';
 import { useBanUser, useUnbanUser, useSetUserBalance, useAdminUserControls } from '~/data-provider';
 import { Loading, ErrorState, ActionError, useActionFailedToast } from './States';
 import { formatDate, formatInt } from './format';
@@ -19,6 +25,18 @@ const durations = [
 ] as const;
 
 type DurationValue = (typeof durations)[number]['value'];
+
+const intervalKeys: Record<RefillIntervalUnit, TranslationKeys> = {
+  seconds: 'com_admin_interval_seconds',
+  minutes: 'com_admin_interval_minutes',
+  hours: 'com_admin_interval_hours',
+  days: 'com_admin_interval_days',
+  weeks: 'com_admin_interval_weeks',
+  months: 'com_admin_interval_months',
+};
+
+const isRefillUnit = (unit: string): unit is RefillIntervalUnit =>
+  (REFILL_INTERVAL_UNITS as readonly string[]).includes(unit);
 
 /** A blank field is not zero: only a whole, non-negative number of credits may be saved. */
 export const parseCredits = (value: string): number | null => {
@@ -119,8 +137,21 @@ function BanPanel({ controls }: { controls: TAdminUserControls }) {
   );
 }
 
+/** "every 7 days" in the viewer's language; an unknown unit from a newer server is shown as sent. */
+function useRefillInterval(): (balance: TAdminBalance) => string {
+  const localize = useLocalize();
+  return ({ refillIntervalValue, refillIntervalUnit }) => {
+    const unit = refillIntervalUnit ?? '';
+    if (isRefillUnit(unit)) {
+      return localize(intervalKeys[unit], { 0: formatInt(refillIntervalValue) });
+    }
+    return `${refillIntervalValue ?? ''} ${unit}`.trim();
+  };
+}
+
 function BalancePanel({ controls }: { controls: TAdminUserControls }) {
   const localize = useLocalize();
+  const refillInterval = useRefillInterval();
   const setBalance = useSetUserBalance();
   const current = controls.balance?.tokenCredits ?? 0;
   const [credits, setCredits] = useState(String(current));
@@ -170,7 +201,7 @@ function BalancePanel({ controls }: { controls: TAdminUserControls }) {
               1: controls.balance.autoRefillEnabled
                 ? localize('com_admin_balance_refill_on', {
                     0: formatInt(controls.balance.refillAmount),
-                    1: `${controls.balance.refillIntervalValue ?? ''} ${controls.balance.refillIntervalUnit ?? ''}`.trim(),
+                    1: refillInterval(controls.balance),
                   })
                 : localize('com_admin_balance_refill_off'),
             })

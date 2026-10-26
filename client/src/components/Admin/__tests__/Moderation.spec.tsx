@@ -20,6 +20,14 @@ describe('admin moderation', () => {
     expect(parseCredits('1e3')).toBe(1000);
   });
 
+  it('localizes the auto-refill interval', async () => {
+    mocks.getAdminUserControls.mockResolvedValue(enforced);
+    renderAdmin(<Moderation userId="user-1" />);
+    expect(
+      await screen.findByText(/Auto-refill adds 10,000 every 1 day\(s\)\./),
+    ).toBeInTheDocument();
+  });
+
   it('never saves a cleared balance field as zero', async () => {
     mocks.getAdminUserControls.mockResolvedValue(enforced);
     renderAdmin(<Moderation userId="user-1" />);

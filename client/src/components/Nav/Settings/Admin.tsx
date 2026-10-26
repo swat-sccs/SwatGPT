@@ -8,7 +8,7 @@ export default function Admin() {
   return (
     <div className="flex items-center justify-between">
       <Label id="admin-dashboard-label">{localize('com_admin_settings_entry')}</Label>
-      <Button asChild variant="outline" aria-labelledby="admin-dashboard-label">
+      <Button asChild variant="outline">
         <Link to="/d/admin">
           {localize('com_ui_open_var', { 0: localize('com_admin_settings_entry') })}
           <ArrowRight className="size-4" aria-hidden="true" />
