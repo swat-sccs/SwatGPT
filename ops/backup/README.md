@@ -139,6 +139,7 @@ Alerts (`swatgpt-backup` group in `monitoring/prometheus/swatgpt-alerts.yml`, mi
 | `SwatGPTBackupMetricsMissing` (warning) | node_exporter is up but has no backup metrics for 2h (collector flag missing, or the timer never ran) |
 | `SwatGPTBackupRestoreTestStale` (warning) | No passing restore test in 8 days |
 | `SwatGPTBackupRestoreTestMissing` (warning) | 8 daily backups exist but the restore test has never run (verify timer not enabled) |
+| `SwatGPTBackupSizeDropped` (warning) | The newest `mongo.archive.gz` or `qdrant.snapshot` is under half its largest size in 7 days for 1h: a dump of an emptied database still succeeds, this catches it |
 
 ## Retention
 

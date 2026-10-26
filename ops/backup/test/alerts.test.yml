@@ -122,3 +122,59 @@ tests:
               summary: "No passing SwatGPT backup restore test in 8 days"
               description: "verify.sh last passed 9d 0h 0m 0s ago. Backups that have not been restored are not known to be good. See `journalctl -u swatgpt-backup-verify.service` on eagle."
               runbook_url: "https://github.com/swat-sccs/SwatGPT/blob/main/monitoring/README.md#swatgptbackuprestoreteststale"
+
+  - name: mongo archive halves overnight; a slow shrink and postgres do not alert
+    interval: 1m
+    input_series:
+      - series: 'swatgpt_backup_size_bytes{job="eagle", instance="eagle:9100", file="mongo.archive.gz"}'
+        values: '1000000x1440 400000x1440'
+      - series: 'swatgpt_backup_size_bytes{job="eagle", instance="eagle:9100", file="qdrant.snapshot"}'
+        values: '500000x1440 300000x1440'
+      - series: 'swatgpt_backup_size_bytes{job="eagle", instance="eagle:9100", file="postgres.dump"}'
+        values: '800000x1440 100000x1440'
+    alert_rule_test:
+      - eval_time: 23h
+        alertname: SwatGPTBackupSizeDropped
+        exp_alerts: []
+      - eval_time: 24h30m
+        alertname: SwatGPTBackupSizeDropped
+        exp_alerts: []
+      - eval_time: 26h
+        alertname: SwatGPTBackupSizeDropped
+        exp_alerts:
+          - exp_labels:
+              job: eagle
+              instance: eagle:9100
+              file: mongo.archive.gz
+              severity: warning
+              service: swatgpt
+            exp_annotations:
+              summary: "The newest backup's mongo.archive.gz is less than half its 7-day maximum"
+              description: "mongo.archive.gz in the newest complete backup is 390.6kiB, under half of its largest size in the last 7 days. A dropped collection or alias, or a dump taken against an empty database, looks exactly like this while every other backup metric stays green. Compare the size.* lines in the MANIFEST of the last backups under /srv/backup/swatgpt and the document or point counts in the verify.sh journal before trusting it."
+              runbook_url: "https://github.com/swat-sccs/SwatGPT/blob/main/monitoring/README.md#swatgptbackupsizedropped"
+
+  - name: a backup that grows, or a drop older than a week, raises nothing
+    interval: 5m
+    input_series:
+      - series: 'swatgpt_backup_size_bytes{job="eagle", instance="eagle:9100", file="qdrant.snapshot"}'
+        values: '1000000x288 2000000x288 300000x2304'
+    alert_rule_test:
+      - eval_time: 36h
+        alertname: SwatGPTBackupSizeDropped
+        exp_alerts: []
+      - eval_time: 3d
+        alertname: SwatGPTBackupSizeDropped
+        exp_alerts:
+          - exp_labels:
+              job: eagle
+              instance: eagle:9100
+              file: qdrant.snapshot
+              severity: warning
+              service: swatgpt
+            exp_annotations:
+              summary: "The newest backup's qdrant.snapshot is less than half its 7-day maximum"
+              description: "qdrant.snapshot in the newest complete backup is 293kiB, under half of its largest size in the last 7 days. A dropped collection or alias, or a dump taken against an empty database, looks exactly like this while every other backup metric stays green. Compare the size.* lines in the MANIFEST of the last backups under /srv/backup/swatgpt and the document or point counts in the verify.sh journal before trusting it."
+              runbook_url: "https://github.com/swat-sccs/SwatGPT/blob/main/monitoring/README.md#swatgptbackupsizedropped"
+      - eval_time: 9d12h
+        alertname: SwatGPTBackupSizeDropped
+        exp_alerts: []

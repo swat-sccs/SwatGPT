@@ -227,6 +227,7 @@ The staleness thresholds assume the default `SWATGPT_*_POLL_INTERVAL_SECONDS` in
 | `SwatGPTBackupMetricsMissing` | eagle's node_exporter is up but exports no `swatgpt_backup_*` metrics, for 2h | warning |
 | `SwatGPTBackupRestoreTestStale` | no passing `verify.sh` restore test in 8 days, for 1h | warning |
 | `SwatGPTBackupRestoreTestMissing` | at least 8 backups retained but `verify.sh` has never written metrics, for 1h | warning |
+| `SwatGPTBackupSizeDropped` | `swatgpt_backup_size_bytes` for `mongo.archive.gz` or `qdrant.snapshot` under 50% of its 7-day maximum, for 1h (a dump of an emptied database still "succeeds") | warning |
 
 Without a blackbox exporter, `/readyz` is covered indirectly: the compose `healthcheck` on the `api`
 service hits `/readyz` every 30 s (visible in `docker compose ps`), the deploy workflow polls it, and
@@ -398,6 +399,17 @@ failure as `SwatGPTBackupStale`.
 Backups exist but `verify.sh` has never written metrics. Enable the timer:
 `sudo systemctl enable --now swatgpt-backup-verify.timer` and run it once by hand
 (`ops/backup/README.md`, step 4).
+
+### SwatGPTBackupSizeDropped
+
+The newest `mongo.archive.gz` or `qdrant.snapshot` is under half the size of any backup in the
+last week, which is what a dropped collection, a `kb` alias pointing at an empty collection, or a
+dump taken during a restore looks like. On eagle, `grep '^size\.' /srv/backup/swatgpt/*/MANIFEST`
+shows when it shrank; compare `estimatedDocumentCount()` in MongoDB and `points_count` of `kb`
+in Qdrant with the counts in the last passing `journalctl -u swatgpt-backup-verify.service`. If
+data was lost, restore from the last large backup (`ops/backup/README.md`, restore runbook)
+before retention prunes it. A deliberate purge (for example a KB re-ingest with fewer chunks)
+clears after a week.
 
 ## Tests
 

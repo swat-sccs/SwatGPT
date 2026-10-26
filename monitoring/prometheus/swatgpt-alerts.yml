@@ -317,3 +317,16 @@ groups:
           summary: "The SwatGPT backup restore test has never run"
           description: "At least 8 daily backups exist on eagle but verify.sh has never written its metrics. Check that swatgpt-backup-verify.timer is enabled (`systemctl list-timers swatgpt-backup-verify.timer`)."
           runbook_url: "https://github.com/swat-sccs/SwatGPT/blob/main/monitoring/README.md#swatgptbackuprestoretestmissing"
+
+      - alert: SwatGPTBackupSizeDropped
+        expr: |
+          swatgpt_backup_size_bytes{job="eagle",file=~"mongo\\.archive\\.gz|qdrant\\.snapshot"}
+            < 0.5 * max_over_time(swatgpt_backup_size_bytes{job="eagle",file=~"mongo\\.archive\\.gz|qdrant\\.snapshot"}[7d])
+        for: 1h
+        labels:
+          severity: warning
+          service: swatgpt
+        annotations:
+          summary: "The newest backup's {{ $labels.file }} is less than half its 7-day maximum"
+          description: "{{ $labels.file }} in the newest complete backup is {{ $value | humanize1024 }}B, under half of its largest size in the last 7 days. A dropped collection or alias, or a dump taken against an empty database, looks exactly like this while every other backup metric stays green. Compare the size.* lines in the MANIFEST of the last backups under /srv/backup/swatgpt and the document or point counts in the verify.sh journal before trusting it."
+          runbook_url: "https://github.com/swat-sccs/SwatGPT/blob/main/monitoring/README.md#swatgptbackupsizedropped"
