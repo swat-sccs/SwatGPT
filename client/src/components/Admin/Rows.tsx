@@ -1,9 +1,10 @@
 import { Link } from 'react-router-dom';
 import { TableRow, TableCell, TableHead } from '@librechat/client';
 import type { TAdminConversationListItem } from 'librechat-data-provider';
-import { formatDate, formatInt } from './format';
+import { formatInt } from './format';
 import { useLocalize } from '~/hooks';
 import { ADMIN_ROOT } from './Nav';
+import When from './When';
 import Pill from './Pill';
 
 export const conversationPath = (conversationId: string) =>
@@ -63,7 +64,7 @@ export function ConversationRow({
         {item.flagged && <Pill tone="warning">{localize('com_admin_status_flagged')}</Pill>}
       </TableCell>
       <TableCell className="whitespace-nowrap text-text-secondary">
-        {formatDate(item.updatedAt)}
+        <When iso={item.updatedAt} />
       </TableCell>
     </TableRow>
   );

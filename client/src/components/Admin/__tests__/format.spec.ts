@@ -5,6 +5,7 @@ import {
   formatDate,
   formatBucket,
   floorToMinute,
+  formatRelative,
 } from '../format';
 
 const NOW = Date.parse('2026-10-05T12:34:56.789Z');
@@ -76,5 +77,22 @@ describe('admin format helpers', () => {
       const spanMs = Date.parse(to) - Date.parse(from);
       expect(spanMs).toBeGreaterThanOrEqual(durations[preset] * 24 * 60 * 60 * 1000);
     }
+  });
+
+  it('describes past instants relative to now in the largest fitting unit', () => {
+    const at = (offsetMs: number) => new Date(NOW + offsetMs).toISOString();
+    expect(formatRelative(at(-20 * 1000), NOW)).toBe('now');
+    expect(formatRelative(at(-5 * 60 * 1000), NOW)).toBe('5 minutes ago');
+    expect(formatRelative(at(-59 * 60 * 1000), NOW)).toBe('59 minutes ago');
+    expect(formatRelative(at(-3 * 60 * 60 * 1000), NOW)).toBe('3 hours ago');
+    expect(formatRelative(at(-23 * 60 * 60 * 1000 - 30 * 60 * 1000), NOW)).toBe('23 hours ago');
+    expect(formatRelative(at(-24 * 60 * 60 * 1000), NOW)).toBe('yesterday');
+    expect(formatRelative(at(-9 * 24 * 60 * 60 * 1000), NOW)).toBe('9 days ago');
+  });
+
+  it('describes future instants too', () => {
+    expect(formatRelative(new Date(NOW + 2 * 60 * 60 * 1000).toISOString(), NOW)).toBe(
+      'in 2 hours',
+    );
   });
 });

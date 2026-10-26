@@ -7,6 +7,7 @@ import { ActionError, useActionFailedToast } from './States';
 import { conversationPath } from './Rows';
 import { formatDate } from './format';
 import { useLocalize } from '~/hooks';
+import When from './When';
 import Pill from './Pill';
 
 type TResolveFlag = ReturnType<typeof useResolveFlag>;
@@ -40,9 +41,7 @@ function FlagItem({
           </Link>
         )}
       </div>
-      <time dateTime={flag.createdAt} className="text-xs text-text-tertiary">
-        {formatDate(flag.createdAt)}
-      </time>
+      <When iso={flag.createdAt} className="text-xs text-text-tertiary" />
       {flag.resolvedAt ? (
         <span className="text-xs text-text-secondary">
           {localize('com_admin_flag_resolved_at', { 0: formatDate(flag.resolvedAt) })}

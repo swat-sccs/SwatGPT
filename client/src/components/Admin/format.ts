@@ -39,6 +39,26 @@ export const formatMs = (ms: Nullable): string => {
 export const formatDate = (iso: string | null | undefined): string =>
   iso ? dateTime.format(new Date(iso)) : EMPTY_VALUE;
 
+const relative = new Intl.RelativeTimeFormat(undefined, { numeric: 'auto' });
+
+const RELATIVE_UNITS: ReadonlyArray<{ unit: Intl.RelativeTimeFormatUnit; ms: number }> = [
+  { unit: 'minute', ms: 60 * 1000 },
+  { unit: 'hour', ms: 60 * 60 * 1000 },
+  { unit: 'day', ms: 24 * 60 * 60 * 1000 },
+];
+
+/** "5 minutes ago" / "in 2 days", in the largest of minute, hour or day that fits. */
+export const formatRelative = (iso: string, now: number = Date.now()): string => {
+  const diff = new Date(iso).getTime() - now;
+  const magnitude = Math.abs(diff);
+  if (magnitude < RELATIVE_UNITS[0].ms) {
+    return relative.format(0, 'second');
+  }
+  const fit = RELATIVE_UNITS.filter((candidate) => magnitude >= candidate.ms).at(-1);
+  const { unit, ms } = fit ?? RELATIVE_UNITS[0];
+  return relative.format(Math.trunc(diff / ms), unit);
+};
+
 export const formatTick = (iso: string, bucket: TAdminUsageBucket): string =>
   (bucket === 'hour' ? hourTick : dayTick).format(new Date(iso));
 

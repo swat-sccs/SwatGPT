@@ -43,6 +43,7 @@ describe('admin flags', () => {
 
     const row = (await screen.findByText('Contains a phone number')).closest('li') as HTMLElement;
     expect(within(row).getByRole('link', { name: 'Open conversation' })).toBeInTheDocument();
+    expect(row.querySelector('time')).toHaveAttribute('datetime', flag.createdAt);
     fireEvent.click(within(row).getByRole('button', { name: 'Resolve' }));
 
     expect(await within(row).findByRole('alert')).toHaveTextContent(

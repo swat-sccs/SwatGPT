@@ -11,17 +11,18 @@ import {
   TableHead,
   TableHeader,
 } from '@librechat/client';
-import type { FormEvent } from 'react';
 import type { TAdminUsageUser, TAdminUsageUserSort } from 'librechat-data-provider';
+import type { FormEvent, ReactNode } from 'react';
 import type { TranslationKeys } from '~/hooks';
 import type { TRangePreset } from './format';
-import { formatDate, formatInt } from './format';
 import { Loading, ErrorState, Empty } from './States';
 import { RangePicker, useRange } from './Range';
 import { AdminCapability, Require } from './access';
 import { useAdminUsageUsers } from '~/data-provider';
 import { useLocalize } from '~/hooks';
+import { formatInt } from './format';
 import { ADMIN_ROOT } from './Nav';
+import When from './When';
 import Pill from './Pill';
 
 const PAGE_SIZE = 25;
@@ -33,11 +34,11 @@ const sortColumns: { sort: TAdminUsageUserSort; labelKey: TranslationKeys }[] = 
   { sort: 'lastActive', labelKey: 'com_admin_col_last_active' },
 ];
 
-const cellFor: Record<TAdminUsageUserSort, (user: TAdminUsageUser) => string> = {
+const cellFor: Record<TAdminUsageUserSort, (user: TAdminUsageUser) => ReactNode> = {
   requests: (user) => formatInt(user.requests),
   tokens: (user) => formatInt(user.promptTokens + user.completionTokens),
   errors: (user) => formatInt(user.errors),
-  lastActive: (user) => formatDate(user.lastActiveAt),
+  lastActive: (user) => <When iso={user.lastActiveAt} />,
 };
 
 export function UserRow({ user }: { user: TAdminUsageUser }) {
