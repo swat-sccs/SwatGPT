@@ -619,7 +619,7 @@ function filterRange(records: NormalizedRecord[], start: Date, end: Date): Norma
     const value = record.start ?? record.published;
     if (!value) return true;
     const date = new Date(value);
-    return !Number.isNaN(date.getTime()) && date >= start && date <= end;
+    return !Number.isNaN(date.getTime()) && overlapsWindow(date, parsedEnd(record.end, date), start, end);
   });
 }
 
@@ -628,9 +628,23 @@ function recordOverlapsRange(item: JsonObject, start: Date, end: Date): boolean 
   if (!rawStart) return true;
   const itemStart = new Date(rawStart);
   if (Number.isNaN(itemStart.getTime())) return true;
-  const itemEnd = typeof item.end === 'string' ? new Date(item.end) : itemStart;
-  const effectiveEnd = Number.isNaN(itemEnd.getTime()) ? itemStart : itemEnd;
-  return itemStart <= end && effectiveEnd >= start;
+  return overlapsWindow(itemStart, parsedEnd(typeof item.end === 'string' ? item.end : undefined, itemStart), start, end);
+}
+
+/**
+ * Overlap with the half-open window [start, end), matching the SQL retirement window and
+ * campusDayRange: an item that ends exactly at midnight belongs to the previous day, while a
+ * zero-length item counts when it starts inside the window.
+ */
+function overlapsWindow(itemStart: Date, itemEnd: Date, start: Date, end: Date): boolean {
+  if (itemStart >= end) return false;
+  return itemEnd > start || itemStart >= start;
+}
+
+function parsedEnd(value: string | undefined, fallback: Date): Date {
+  if (!value) return fallback;
+  const parsed = new Date(value);
+  return Number.isNaN(parsed.getTime()) ? fallback : parsed;
 }
 
 function diningLocationMatches(value: string, query?: string): boolean {

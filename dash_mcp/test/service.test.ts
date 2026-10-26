@@ -1,6 +1,6 @@
 import { describe, expect, it, vi } from 'vitest';
 import { loadConfig } from '../src/config.js';
-import { campusDayRange } from '../src/util.js';
+import { campusDayRange, campusWallTime, currentCampusDate } from '../src/util.js';
 import { SwatService, TRANSIT_PAIRS, TRANSIT_POLL_LIMIT } from '../src/service.js';
 import type { PgStore } from '../src/storage/store.js';
 import type { DashClient } from '../src/upstream/client.js';
@@ -177,6 +177,54 @@ describe('PostgreSQL-first service reads', () => {
     expect(result.items).toHaveLength(1);
     expect(result.meta.resolved_date).toBe('2026-09-16');
     expect(client.query).not.toHaveBeenCalled();
+  });
+
+  it('does not report hours that ended at midnight as the next day\'s hours', async () => {
+    const today = currentCampusDate();
+    const yesterday = new Date(campusWallTime(today, 0, 0).getTime() - 3_600_000);
+    const client = { query: vi.fn().mockRejectedValue(new Error('Dash offline')) } as unknown as DashClient;
+    const store = {
+      currentRecords: vi.fn().mockResolvedValue([
+        {
+          id: 'late-night', title: 'McCabe Library', source: 'McCabe Library',
+          start: new Date(yesterday.getTime() - 3 * 3_600_000).toISOString(), end: campusWallTime(today, 0, 0).toISOString(),
+        },
+        { id: 'opens-at-midnight', title: 'McCabe Library', source: 'McCabe Library', start: campusWallTime(today, 0, 0).toISOString() },
+      ]),
+      latestRecordObservedAt: vi.fn().mockResolvedValue(new Date().toISOString()),
+    } as unknown as PgStore;
+    const discovery = {
+      current: vi.fn().mockReturnValue({ hours: [{ place: 'McCabe Library', kind: 'libcal', sourceId: 'mccabe' }] }),
+    } as unknown as RegistryDiscovery;
+    const service = new SwatService(config(), client, discovery, store);
+
+    const todayResult = await service.getHours({ place: 'McCabe' });
+    const yesterdayResult = await service.getHours({ place: 'McCabe', date: currentCampusDate(yesterday) });
+
+    expect(todayResult.items.map((item) => item.id)).toEqual(['opens-at-midnight']);
+    expect(todayResult.meta.stale).toBe(false);
+    expect(yesterdayResult.items.map((item) => item.id)).toEqual(['late-night']);
+  });
+
+  it('applies the same half-open window to live event results', async () => {
+    const client = {
+      query: vi.fn().mockResolvedValue({ data: [
+        { id: 'at-start', title: 'Opening', startdate: '2026-09-16T00:00:00-04:00' },
+        { id: 'at-end', title: 'Next day', startdate: '2026-09-17T00:00:00-04:00' },
+        { id: 'spans', title: 'Overnight', startdate: '2026-09-15T22:00:00-04:00', enddate: '2026-09-16T02:00:00-04:00' },
+        { id: 'ended-at-midnight', title: 'Late', startdate: '2026-09-15T22:00:00-04:00', enddate: '2026-09-16T00:00:00-04:00' },
+      ] }),
+    } as unknown as DashClient;
+    const store = {
+      replaceSourceRecords: vi.fn().mockResolvedValue(undefined),
+      markDomainSynced: vi.fn().mockResolvedValue(undefined),
+      deactivateMissingSources: vi.fn().mockResolvedValue(0),
+    } as unknown as PgStore;
+    const service = new SwatService(config(), client, {} as RegistryDiscovery, store);
+
+    const result = await service.searchEvents({ start: '2026-09-16', end: '2026-09-16' }, true);
+
+    expect(result.items.map((item) => item.id)).toEqual(['at-start', 'spans']);
   });
 
   it('returns the resolved campus date and a truthful warning for a confirmed empty hours result', async () => {
