@@ -100,7 +100,9 @@ function Content() {
 
   const total = query.data?.total ?? 0;
   const users = query.data?.users ?? [];
-  const end = Math.min(offset + users.length, total);
+  const shownOffset = query.data?.offset ?? offset;
+  const end = Math.min(shownOffset + users.length, total);
+  const paging = query.isFetching;
 
   return (
     <div className="space-y-4">
@@ -124,7 +126,7 @@ function Content() {
 
       <section aria-busy={query.isFetching}>
         {query.isLoading && <Loading />}
-        {query.isError && <ErrorState onRetry={() => retry(query.refetch)} />}
+        {query.isError && <ErrorState error={query.error} onRetry={() => retry(query.refetch)} />}
         {query.data && users.length === 0 && <Empty />}
         {users.length > 0 && (
           <Table>
@@ -164,7 +166,7 @@ function Content() {
         <footer className="flex items-center justify-between text-sm text-text-secondary">
           <span className="tabular-nums">
             {localize('com_admin_pagination_range', {
-              0: formatInt(offset + 1),
+              0: formatInt(shownOffset + 1),
               1: formatInt(end),
               2: formatInt(total),
             })}
@@ -173,7 +175,7 @@ function Content() {
             <Button
               variant="outline"
               size="sm"
-              disabled={offset === 0}
+              disabled={paging || offset === 0}
               onClick={() => setOffset(Math.max(0, offset - PAGE_SIZE))}
             >
               {localize('com_admin_pagination_prev')}
@@ -181,7 +183,7 @@ function Content() {
             <Button
               variant="outline"
               size="sm"
-              disabled={end >= total}
+              disabled={paging || end >= total}
               onClick={() => setOffset(offset + PAGE_SIZE)}
             >
               {localize('com_admin_pagination_next')}

@@ -1,4 +1,5 @@
 import { screen, fireEvent, waitFor } from '@testing-library/react';
+import type { TAdminUsageUsersResponse } from 'librechat-data-provider';
 import { renderAdmin, mockCapabilities, pending, mocks } from '../testing/utils';
 import { user } from '../testing/fixtures';
 import Users from '../Users';
@@ -66,6 +67,35 @@ describe('admin users', () => {
       ),
     );
     expect(await screen.findByText('Showing 1–1 of 60')).toBeInTheDocument();
+  });
+
+  it('keeps the footer on the visible page until the next page arrives', async () => {
+    mockCapabilities();
+    let release: (value: TAdminUsageUsersResponse) => void = () => undefined;
+    const secondPage = new Promise<TAdminUsageUsersResponse>((resolve) => {
+      release = resolve;
+    });
+    mocks.getAdminUsageUsers
+      .mockResolvedValueOnce({ users: [user], total: 60, limit: 25, offset: 0 })
+      .mockReturnValueOnce(secondPage);
+    renderAdmin(<Users />);
+    expect(await screen.findByText('Showing 1–1 of 60')).toBeInTheDocument();
+
+    const next = screen.getByRole('button', { name: 'Next' });
+    fireEvent.click(next);
+    await waitFor(() => expect(next).toBeDisabled());
+    expect(screen.getByText('Showing 1–1 of 60')).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: 'Previous' })).toBeDisabled();
+
+    release({
+      users: [user, { ...user, id: 'user-2', name: 'Grace Hopper' }],
+      total: 60,
+      limit: 25,
+      offset: 25,
+    });
+    expect(await screen.findByText('Showing 26–27 of 60')).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: 'Previous' })).not.toBeDisabled();
+    expect(next).not.toBeDisabled();
   });
 
   it('rolls the range end forward when retrying after a failure', async () => {
