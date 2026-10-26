@@ -66,18 +66,25 @@ const presetDurations: Record<Exclude<TRangePreset, 'all'>, number> = {
 export const bucketFor = (preset: TRangePreset): TAdminUsageBucket =>
   preset === '24h' ? 'hour' : 'day';
 
+const bucketDurations: Record<TAdminUsageBucket, number> = { hour: HOUR_MS, day: DAY_MS };
+
 export const floorToMinute = (ms: number): number => Math.floor(ms / MINUTE_MS) * MINUTE_MS;
 
-/** Builds ISO bounds for a preset, aligned to the minute so query keys stay stable. */
+const floorToBucket = (ms: number, bucket: TAdminUsageBucket): number =>
+  Math.floor(ms / bucketDurations[bucket]) * bucketDurations[bucket];
+
+/**
+ * Builds ISO bounds for a preset. The end is aligned to the minute so query keys stay stable; the
+ * start is aligned to the preset's bucket (UTC day or hour) so the first bar covers a whole bucket
+ * instead of a misleadingly low partial one.
+ */
 export const rangeFor = (preset: TRangePreset, now: number = Date.now()): TAdminUsageRange => {
   const to = floorToMinute(now);
   if (preset === 'all') {
     return { to: new Date(to).toISOString(), all: true };
   }
-  return {
-    from: new Date(to - presetDurations[preset]).toISOString(),
-    to: new Date(to).toISOString(),
-  };
+  const from = floorToBucket(to - presetDurations[preset], bucketFor(preset));
+  return { from: new Date(from).toISOString(), to: new Date(to).toISOString() };
 };
 
 const toLocalInput = (iso: string): string => {

@@ -37,7 +37,7 @@ describe('useRange', () => {
     act(() => result.current.setPreset('7d'));
 
     expect(result.current.range).toEqual({
-      from: '2026-09-28T12:05:00.000Z',
+      from: '2026-09-28T00:00:00.000Z',
       to: '2026-10-05T12:05:00.000Z',
     });
     expect(result.current.bucket).toBe('day');
