@@ -3098,6 +3098,8 @@ class AgentClient extends BaseClient {
     } finally {
       /** The abort middleware empties `collectedUsage` in place; copy it before any await. */
       const usageSnapshot = [...this.collectedUsage];
+      /** Taken before the memory wait and Mongo bookkeeping so `durationMs` is the model run alone. */
+      const endedAt = Date.now();
       /** Capture calibration state from the run for persistence on the response message.
        *  Runs in finally so values are captured even on abort. */
       const ratio = this.run?.getCalibrationRatio() ?? 0;
@@ -3161,6 +3163,7 @@ class AgentClient extends BaseClient {
           ragChunks: this.kbRetrieval?.chunks,
           ragMs: this.kbRetrieval?.elapsedMs,
           timing: generationTiming,
+          endedAt,
           aborted: abortController?.signal?.aborted === true,
           error: runError,
           tenantId: this.options.req.user?.tenantId,
