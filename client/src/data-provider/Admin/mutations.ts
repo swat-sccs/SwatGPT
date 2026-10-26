@@ -1,6 +1,6 @@
 import { QueryKeys, dataService } from 'librechat-data-provider';
 import { useMutation, useQueryClient } from '@tanstack/react-query';
-import type { UseMutationResult } from '@tanstack/react-query';
+import type { QueryClient, UseMutationResult } from '@tanstack/react-query';
 import type {
   TAdminFlag,
   TAdminBanRequest,
@@ -30,6 +30,13 @@ const flagRelatedKeys = [
 
 const userUsageKeys = [QueryKeys.adminUsageUsers, QueryKeys.adminUsageUser];
 
+/** `flagged` on lists, summaries and user rows counts unresolved flags, so any change touches all. */
+const invalidateFlagRelated = (queryClient: QueryClient): void => {
+  for (const key of flagRelatedKeys) {
+    queryClient.invalidateQueries([key]);
+  }
+};
+
 export const useFlagConversation = (): UseMutationResult<
   TAdminFlag,
   unknown,
@@ -38,13 +45,7 @@ export const useFlagConversation = (): UseMutationResult<
   const queryClient = useQueryClient();
   return useMutation(
     ({ conversationId, payload }) => dataService.flagAdminConversation(conversationId, payload),
-    {
-      onSuccess: () => {
-        for (const key of flagRelatedKeys) {
-          queryClient.invalidateQueries([key]);
-        }
-      },
-    },
+    { onSuccess: () => invalidateFlagRelated(queryClient) },
   );
 };
 
@@ -58,10 +59,7 @@ export const useExportConversation = (): UseMutationResult<
 export const useResolveFlag = (): UseMutationResult<TAdminFlag, unknown, string> => {
   const queryClient = useQueryClient();
   return useMutation((flagId) => dataService.resolveAdminFlag(flagId), {
-    onSuccess: () => {
-      queryClient.invalidateQueries([QueryKeys.adminFlags]);
-      queryClient.invalidateQueries([QueryKeys.adminConversation]);
-    },
+    onSuccess: () => invalidateFlagRelated(queryClient),
   });
 };
 
