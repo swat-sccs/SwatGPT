@@ -22,10 +22,38 @@ interface RagConfig {
   qdrantUrl: string;
 }
 
+const CONFIG_VARS = ['TEI_EMBEDDINGS_URL', 'TEI_RERANK_URL', 'QDRANT_URL'] as const;
+
+let loggedConfig: string | undefined;
+
+/**
+ * Logs the KB configuration state once per distinct state: a partial set of variables
+ * is almost always a deployment mistake, so it is a warning naming the missing ones,
+ * while a complete set is noted at info and a fully unset one is a silent opt-out.
+ */
+function logConfigOnce(missing: string[]): void {
+  const signature = missing.join(',');
+  if (signature === loggedConfig) {
+    return;
+  }
+  loggedConfig = signature;
+  if (!missing.length) {
+    logger.info('[retrieveKbContext] KB retrieval enabled (TEI embeddings, TEI rerank, Qdrant)');
+    return;
+  }
+  if (missing.length === CONFIG_VARS.length) {
+    return;
+  }
+  logger.warn(
+    `[retrieveKbContext] KB retrieval disabled: partial configuration, missing ${missing.join(', ')}`,
+  );
+}
+
 function readConfig(): RagConfig | undefined {
   const embeddingsUrl = process.env.TEI_EMBEDDINGS_URL;
   const rerankUrl = process.env.TEI_RERANK_URL;
   const qdrantUrl = process.env.QDRANT_URL;
+  logConfigOnce(CONFIG_VARS.filter((name) => !process.env[name]));
   if (!embeddingsUrl || !rerankUrl || !qdrantUrl) {
     return undefined;
   }

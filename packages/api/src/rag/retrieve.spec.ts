@@ -49,6 +49,7 @@ function kbHit(index: number): QdrantHit {
 describe('retrieveKbContext', () => {
   let fetchMock: jest.SpyInstance;
   let warnSpy: jest.SpyInstance;
+  let infoSpy: jest.SpyInstance;
 
   beforeEach(() => {
     process.env.TEI_EMBEDDINGS_URL = EMBEDDINGS_URL;
@@ -56,6 +57,7 @@ describe('retrieveKbContext', () => {
     process.env.QDRANT_URL = QDRANT_URL;
     fetchMock = jest.spyOn(globalThis, 'fetch');
     warnSpy = jest.spyOn(logger, 'warn').mockImplementation(() => logger);
+    infoSpy = jest.spyOn(logger, 'info').mockImplementation(() => logger);
   });
 
   afterEach(() => {
@@ -455,14 +457,48 @@ describe('retrieveKbContext', () => {
 
   describe('feature off', () => {
     it.each(['TEI_EMBEDDINGS_URL', 'TEI_RERANK_URL', 'QDRANT_URL'])(
-      'returns undefined without fetching when %s is unset',
+      'returns undefined without fetching and warns once when %s is unset',
       async (name) => {
         delete process.env[name];
         await expect(retrieveKbContext(QUERY)).resolves.toBeUndefined();
+        await expect(retrieveKbContext(QUERY)).resolves.toBeUndefined();
         expect(fetchMock).not.toHaveBeenCalled();
-        expect(warnSpy).not.toHaveBeenCalled();
+        expect(warnSpy).toHaveBeenCalledTimes(1);
+        expect(warnSpy).toHaveBeenCalledWith(expect.stringContaining(`missing ${name}`));
       },
     );
+
+    it('names every missing variable in the single warning', async () => {
+      delete process.env.TEI_RERANK_URL;
+      delete process.env.QDRANT_URL;
+      await retrieveKbContext(QUERY);
+      await retrieveKbContext(QUERY);
+
+      expect(warnSpy).toHaveBeenCalledTimes(1);
+      expect(warnSpy).toHaveBeenCalledWith(
+        expect.stringContaining('missing TEI_RERANK_URL, QDRANT_URL'),
+      );
+      expect(infoSpy).not.toHaveBeenCalled();
+    });
+
+    it('stays silent when no variable is set, and logs once when all are', async () => {
+      delete process.env.TEI_EMBEDDINGS_URL;
+      delete process.env.TEI_RERANK_URL;
+      delete process.env.QDRANT_URL;
+      await expect(retrieveKbContext(QUERY)).resolves.toBeUndefined();
+      expect(warnSpy).not.toHaveBeenCalled();
+      expect(infoSpy).not.toHaveBeenCalled();
+
+      process.env.TEI_EMBEDDINGS_URL = EMBEDDINGS_URL;
+      process.env.TEI_RERANK_URL = RERANK_URL;
+      process.env.QDRANT_URL = QDRANT_URL;
+      mockServices({ hits: [] });
+      await retrieveKbContext(QUERY);
+      await retrieveKbContext(QUERY);
+      expect(infoSpy).toHaveBeenCalledTimes(1);
+      expect(infoSpy).toHaveBeenCalledWith(expect.stringContaining('KB retrieval enabled'));
+      expect(warnSpy).not.toHaveBeenCalled();
+    });
   });
 
   describe('trivial queries', () => {
