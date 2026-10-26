@@ -425,3 +425,8 @@ docker run --rm -v "$PWD:/r:ro" --entrypoint promtool prom/prometheus:v3.5.0 tes
 docker run --rm -v "$PWD/monitoring:/m:ro" --entrypoint promtool prom/prometheus:v3.5.0 check rules /m/prometheus/swatgpt-alerts.yml
 docker run --rm -v "$PWD/monitoring:/m:ro" --entrypoint amtool prom/alertmanager:v0.28.1 check-config /m/alertmanager/alertmanager.yml
 ```
+
+`.github/workflows/monitoring.yml` runs the same checks on every push and pull request that
+touches `monitoring/`, `ops/backup/` or the compose files, with the same pinned images.
+`swatgpt-alerts.test.yml` covers the retrieval ratio, vLLM queueing, app 5xx ratio, Dash MCP poll
+failures and snapshot staleness; `ops/backup/test/alerts.test.yml` covers the backup group.

@@ -64,3 +64,135 @@ tests:
               summary: "More than 20% of KB retrievals timed out or errored"
               description: "33.33% of retrievals in the last 10 minutes timed out or errored (needs at least 10 retrievals, so a quiet night cannot page). TEI or Qdrant outage signal; see the retrieval panels for the breakdown by result. 'empty' (nothing passed the rerank floor, normal for greetings and off-topic chat) is not counted; 'disabled' has its own alert."
               runbook_url: "https://github.com/swat-sccs/SwatGPT/blob/main/monitoring/README.md#swatgptretrievalfailureratiohigh"
+
+  # vLLM: a queue that clears within five minutes is fine; one that persists pages.
+  - name: vllm queueing
+    interval: 1m
+    input_series:
+      - series: 'vllm:num_requests_waiting{job="vllm", instance="loon:8000"}'
+        values: '0x10 2x3 0x10 3x30'
+    alert_rule_test:
+      - eval_time: 14m
+        alertname: SwatGPTVllmQueueing
+        exp_alerts: []
+      - eval_time: 27m
+        alertname: SwatGPTVllmQueueing
+        exp_alerts: []
+      - eval_time: 32m
+        alertname: SwatGPTVllmQueueing
+        exp_alerts:
+          - exp_labels: { severity: warning, service: swatgpt }
+            exp_annotations:
+              summary: "vLLM has had queued requests for 5 minutes"
+              description: "3 request(s) are waiting for a slot. Users see slow first tokens; check running requests, KV cache, and max-num-seqs."
+              runbook_url: "https://github.com/swat-sccs/SwatGPT/blob/main/monitoring/README.md#swatgptvllmqueueing"
+
+  # App 5xx: 1% stays quiet, 1 in 11 pages after five minutes; no traffic never pages.
+  - name: app 5xx ratio
+    interval: 1m
+    input_series:
+      - series: 'http_requests_total{job="swatgpt_app", instance="eagle:3080", status="200"}'
+        values: '0+100x30 3000+10x30'
+      - series: 'http_requests_total{job="swatgpt_app", instance="eagle:3080", status="500"}'
+        values: '0+1x30 30+1x30'
+    alert_rule_test:
+      - eval_time: 25m
+        alertname: SwatGPTApp5xxRateHigh
+        exp_alerts: []
+      - eval_time: 45m
+        alertname: SwatGPTApp5xxRateHigh
+        exp_alerts:
+          - exp_labels: { severity: warning, service: swatgpt }
+            exp_annotations:
+              summary: "LibreChat 5xx ratio above 2%"
+              description: "9.091% of HTTP responses in the last 5 minutes were 5xx. Check the app logs on eagle and the vLLM/TEI alerts first."
+              runbook_url: "https://github.com/swat-sccs/SwatGPT/blob/main/monitoring/README.md#swatgptapp5xxratehigh"
+
+  - name: app 5xx with no traffic at all
+    interval: 1m
+    input_series:
+      - series: 'http_requests_total{job="swatgpt_app", instance="eagle:3080", status="500"}'
+        values: '5x60'
+    alert_rule_test:
+      - eval_time: 30m
+        alertname: SwatGPTApp5xxRateHigh
+        exp_alerts: []
+
+  # Dash MCP polls: errors with no success for an hour page per kind; errors alongside
+  # successes do not, and configuration gets its three-hour window.
+  - name: mcp poll failing
+    interval: 1m
+    input_series:
+      - series: 'swatgpt_mcp_upstream_polls_total{job="swatgpt_mcp", instance="eagle:3001", kind="alerts", result="error"}'
+        values: '0+1x300'
+      - series: 'swatgpt_mcp_upstream_polls_total{job="swatgpt_mcp", instance="eagle:3001", kind="alerts", result="success"}'
+        values: '40x300'
+      - series: 'swatgpt_mcp_upstream_polls_total{job="swatgpt_mcp", instance="eagle:3001", kind="realtime", result="error"}'
+        values: '0+1x300'
+      - series: 'swatgpt_mcp_upstream_polls_total{job="swatgpt_mcp", instance="eagle:3001", kind="realtime", result="success"}'
+        values: '0+1x300'
+      - series: 'swatgpt_mcp_upstream_polls_total{job="swatgpt_mcp", instance="eagle:3001", kind="configuration", result="error"}'
+        values: '0x60 0+1x240'
+      - series: 'swatgpt_mcp_upstream_polls_total{job="swatgpt_mcp", instance="eagle:3001", kind="configuration", result="success"}'
+        values: '0+1x60 60x240'
+    alert_rule_test:
+      - eval_time: 10m
+        alertname: SwatGPTMcpPollFailing
+        exp_alerts: []
+      - eval_time: 30m
+        alertname: SwatGPTMcpPollFailing
+        exp_alerts:
+          - exp_labels: { kind: alerts, severity: warning, service: swatgpt }
+            exp_annotations:
+              summary: "Dash MCP alerts polling keeps failing with no success"
+              description: "Every alerts poll in the last hour (3 hours for configuration, which polls hourly) failed. A Dash outage or schema change usually breaks the live fallback too, so tools return stale or unavailable data. Check `docker compose logs swatgpt-mcp` for 'Polling job failed'."
+              runbook_url: "https://github.com/swat-sccs/SwatGPT/blob/main/monitoring/README.md#swatgptmcppollfailing"
+      - eval_time: 2h
+        alertname: SwatGPTMcpPollFailing
+        exp_alerts:
+          - exp_labels: { kind: alerts, severity: warning, service: swatgpt }
+            exp_annotations:
+              summary: "Dash MCP alerts polling keeps failing with no success"
+              description: "Every alerts poll in the last hour (3 hours for configuration, which polls hourly) failed. A Dash outage or schema change usually breaks the live fallback too, so tools return stale or unavailable data. Check `docker compose logs swatgpt-mcp` for 'Polling job failed'."
+              runbook_url: "https://github.com/swat-sccs/SwatGPT/blob/main/monitoring/README.md#swatgptmcppollfailing"
+      - eval_time: 4h30m
+        alertname: SwatGPTMcpPollFailing
+        exp_alerts:
+          - exp_labels: { kind: alerts, severity: warning, service: swatgpt }
+            exp_annotations:
+              summary: "Dash MCP alerts polling keeps failing with no success"
+              description: "Every alerts poll in the last hour (3 hours for configuration, which polls hourly) failed. A Dash outage or schema change usually breaks the live fallback too, so tools return stale or unavailable data. Check `docker compose logs swatgpt-mcp` for 'Polling job failed'."
+              runbook_url: "https://github.com/swat-sccs/SwatGPT/blob/main/monitoring/README.md#swatgptmcppollfailing"
+          - exp_labels: { kind: configuration, severity: warning, service: swatgpt }
+            exp_annotations:
+              summary: "Dash MCP configuration polling keeps failing with no success"
+              description: "Every configuration poll in the last hour (3 hours for configuration, which polls hourly) failed. A Dash outage or schema change usually breaks the live fallback too, so tools return stale or unavailable data. Check `docker compose logs swatgpt-mcp` for 'Polling job failed'."
+              runbook_url: "https://github.com/swat-sccs/SwatGPT/blob/main/monitoring/README.md#swatgptmcppollfailing"
+
+  # Snapshot age: weather/transit page past 15 minutes, hours/news/resources only past 45.
+  - name: mcp snapshot stale
+    interval: 1m
+    input_series:
+      - series: 'swatgpt_mcp_snapshot_age_seconds{job="swatgpt_mcp", instance="eagle:3001", domain="weather"}'
+        values: '1000x60'
+      - series: 'swatgpt_mcp_snapshot_age_seconds{job="swatgpt_mcp", instance="eagle:3001", domain="hours"}'
+        values: '1000x60'
+      - series: 'swatgpt_mcp_snapshot_age_seconds{job="swatgpt_mcp", instance="eagle:3001", domain="dining"}'
+        values: '90000x60'
+    alert_rule_test:
+      - eval_time: 10m
+        alertname: SwatGPTMcpSnapshotStale
+        exp_alerts: []
+      - eval_time: 20m
+        alertname: SwatGPTMcpSnapshotStale
+        exp_alerts:
+          - exp_labels:
+              job: swatgpt_mcp
+              instance: eagle:3001
+              domain: weather
+              severity: warning
+              service: swatgpt
+            exp_annotations:
+              summary: "Dash MCP weather snapshot is 16m 40s old"
+              description: "No fresh weather data has been stored for 3+ poll intervals even if polls report success (for hours, news and resources, an upstream schema change that parses to zero records looks like this; weather and transit store a row even when it is empty). Tools are serving stale data. Alerts, dining, events, sports and mind_candy are left out because they can be legitimately empty."
+              runbook_url: "https://github.com/swat-sccs/SwatGPT/blob/main/monitoring/README.md#swatgptmcpsnapshotstale"

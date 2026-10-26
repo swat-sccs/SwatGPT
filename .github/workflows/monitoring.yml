@@ -1,0 +1,64 @@
+name: Monitoring Rules
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - 'monitoring/**'
+      - 'ops/backup/**'
+      - 'docker-compose.yml'
+      - 'docker-compose.override.yml'
+      - '.github/workflows/monitoring.yml'
+  pull_request:
+    paths:
+      - 'monitoring/**'
+      - 'ops/backup/**'
+      - 'docker-compose.yml'
+      - 'docker-compose.override.yml'
+      - '.github/workflows/monitoring.yml'
+
+permissions:
+  contents: read
+
+env:
+  PROMETHEUS_IMAGE: prom/prometheus:v3.5.0
+  ALERTMANAGER_IMAGE: prom/alertmanager:v0.28.1
+
+jobs:
+  rules:
+    name: promtool and config tests
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v5
+
+      - name: promtool check rules
+        run: >-
+          docker run --rm -v "$PWD/monitoring:/m:ro" --entrypoint promtool "$PROMETHEUS_IMAGE"
+          check rules /m/prometheus/swatgpt-alerts.yml
+
+      - name: promtool test rules
+        run: |
+          docker run --rm -v "$PWD/monitoring:/m:ro" --entrypoint promtool "$PROMETHEUS_IMAGE" \
+            test rules /m/tests/swatgpt-alerts.test.yml
+          docker run --rm -v "$PWD:/r:ro" --entrypoint promtool "$PROMETHEUS_IMAGE" \
+            test rules /r/ops/backup/test/alerts.test.yml
+
+      - name: amtool check-config
+        run: >-
+          docker run --rm -v "$PWD/monitoring:/m:ro" --entrypoint amtool "$ALERTMANAGER_IMAGE"
+          check-config /m/alertmanager/alertmanager.yml
+
+      - name: Use Node.js 24.16.0
+        uses: actions/setup-node@v5
+        with:
+          node-version: '24.16.0'
+
+      - name: Hardening and install-script tests
+        # The tests only need js-yaml from the repo's dependencies; installing the whole
+        # monorepo for it would take minutes, so js-yaml is installed on its own and found
+        # through NODE_PATH.
+        run: |
+          mkdir -p "$RUNNER_TEMP/deps"
+          npm install --prefix "$RUNNER_TEMP/deps" --no-package-lock --no-audit --no-fund --ignore-scripts js-yaml@4.3.1
+          NODE_PATH="$RUNNER_TEMP/deps/node_modules" node --test "monitoring/tests/*.test.mjs"
