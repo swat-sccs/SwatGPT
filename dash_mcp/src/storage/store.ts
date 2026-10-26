@@ -83,7 +83,7 @@ export class PgStore {
   readonly pool: pg.Pool;
 
   constructor(databaseUrl: string) {
-    this.pool = new Pool({ connectionString: databaseUrl, max: 10, idleTimeoutMillis: 30_000 });
+    this.pool = new Pool({ connectionString: databaseUrl, max: 20, idleTimeoutMillis: 30_000, connectionTimeoutMillis: 5_000 });
     this.pool.on('error', (error) => log('error', 'Unexpected PostgreSQL pool error', { error: error.message }));
   }
 

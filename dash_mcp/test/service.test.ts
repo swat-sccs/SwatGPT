@@ -1,7 +1,7 @@
 import { describe, expect, it, vi } from 'vitest';
 import { loadConfig } from '../src/config.js';
 import { campusDayRange, campusWallTime, currentCampusDate } from '../src/util.js';
-import { SwatService, TRANSIT_PAIRS, TRANSIT_POLL_LIMIT } from '../src/service.js';
+import { PERSIST_CONCURRENCY, SwatService, TRANSIT_PAIRS, TRANSIT_POLL_LIMIT } from '../src/service.js';
 import type { PgStore } from '../src/storage/store.js';
 import type { DashClient } from '../src/upstream/client.js';
 import type { RegistryDiscovery } from '../src/upstream/discovery.js';
@@ -277,6 +277,34 @@ describe('PostgreSQL-first service reads', () => {
     await service.getDining({ date: '2026-09-08', limit: 100 }, true);
 
     expect(store.replaceSourceRecords).toHaveBeenCalledWith('dining', 'Dining Center', [], undefined, undefined);
+  });
+});
+
+describe('persist fan-out', () => {
+  it('holds at most PERSIST_CONCURRENCY write transactions open during a poll', async () => {
+    const places = Array.from({ length: 12 }, (_, index) => `Place ${index}`);
+    const client = { query: vi.fn().mockResolvedValue({ data: [] }) } as unknown as DashClient;
+    let open = 0;
+    let peak = 0;
+    const store = {
+      replaceSourceRecords: vi.fn().mockImplementation(async () => {
+        open += 1;
+        peak = Math.max(peak, open);
+        await new Promise((resolve) => setTimeout(resolve, 5));
+        open -= 1;
+      }),
+      markDomainSynced: vi.fn().mockResolvedValue(undefined),
+      deactivateMissingSources: vi.fn().mockResolvedValue(0),
+    } as unknown as PgStore;
+    const discovery = {
+      current: vi.fn().mockReturnValue({ hours: places.map((place) => ({ place, kind: 'google', sourceId: place })) }),
+    } as unknown as RegistryDiscovery;
+    const service = new SwatService(config(), client, discovery, store);
+
+    await service.getHours({ limit: 100 }, true);
+
+    expect(store.replaceSourceRecords).toHaveBeenCalledTimes(places.length);
+    expect(peak).toBe(PERSIST_CONCURRENCY);
   });
 });
 

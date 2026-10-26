@@ -1,3 +1,4 @@
+import pLimit from 'p-limit';
 import type { Config } from './config.js';
 import { FULL_SYNC_SCOPE, PgStore } from './storage/store.js';
 import type {
@@ -20,6 +21,9 @@ export const TRANSIT_POLL_LIMIT = 10;
 export const TRANSIT_PAIRS: ReadonlyArray<{ origin: TransitStation; destination: TransitStation }> = transitStations.flatMap(
   (origin) => transitStations.filter((destination) => destination !== origin).map((destination) => ({ origin, destination })),
 );
+
+/** Write transactions a poll may hold at once, leaving pool connections for chat-path reads. */
+export const PERSIST_CONCURRENCY = 3;
 
 /** Above the number of hours sources the Dash lists, so a default read returns every place. */
 export const HOURS_DEFAULT_LIMIT = 60;
@@ -46,6 +50,8 @@ type EventsCoverage =
   | { kind: 'live'; days: number; warning?: string };
 
 export class SwatService {
+  private readonly persistLimit = pLimit(PERSIST_CONCURRENCY);
+
   constructor(
     readonly config: Config,
     readonly client: DashClient,
@@ -569,7 +575,7 @@ export class SwatService {
     }
     await Promise.all([...grouped.entries()].map(([key, items]) => {
       const source = sourceInfo.get(key)!;
-      return this.store.replaceSourceRecords(source.domain, source.source, items, undefined, window);
+      return this.persistLimit(() => this.store.replaceSourceRecords(source.domain, source.source, items, undefined, window));
     }));
     const keep = new Map<Domain, string[]>();
     for (const { domain, source } of sourceInfo.values()) keep.set(domain, [...(keep.get(domain) ?? []), source]);
