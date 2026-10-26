@@ -1,4 +1,4 @@
-import { useState } from 'react';
+import { useId, useState } from 'react';
 import {
   Bar,
   Line,
@@ -201,7 +201,7 @@ function DataTable({ points, bucket }: { points: TAdminUsagePoint[]; bucket: TAd
       <TableBody>
         {points.map((point) => (
           <TableRow key={point.t}>
-            <TableCell className="p-2">{formatTick(point.t, bucket)}</TableCell>
+            <TableCell className="whitespace-nowrap p-2">{formatBucket(point.t, bucket)}</TableCell>
             {tableColumns.map((column) => (
               <TableCell key={column.key} className="p-2 text-right tabular-nums">
                 {formatInt(point[column.key])}
@@ -222,6 +222,7 @@ export default function Chart({
   bucket: TAdminUsageBucket;
 }) {
   const localize = useLocalize();
+  const tableId = useId();
   const [showTable, setShowTable] = useState(false);
 
   if (points.length === 0) {
@@ -248,11 +249,14 @@ export default function Chart({
         variant="ghost"
         size="sm"
         aria-expanded={showTable}
+        aria-controls={tableId}
         onClick={() => setShowTable((value) => !value)}
       >
         {localize(showTable ? 'com_admin_chart_hide_table' : 'com_admin_chart_show_table')}
       </Button>
-      {showTable && <DataTable points={points} bucket={bucket} />}
+      <div id={tableId} hidden={!showTable}>
+        {showTable && <DataTable points={points} bucket={bucket} />}
+      </div>
     </section>
   );
 }
