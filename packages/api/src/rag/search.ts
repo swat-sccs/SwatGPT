@@ -8,6 +8,10 @@ export interface KbPayload {
   section?: string;
   doc_type?: string;
   chunk_index?: number;
+  /** Catalog documents: the academic year the entry describes, e.g. `2026-2027`. */
+  catalog_year?: string;
+  /** ISO date the source page was scraped. */
+  scraped_at?: string;
 }
 
 export interface KbCandidate {

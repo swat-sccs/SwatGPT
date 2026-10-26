@@ -16,9 +16,20 @@ const location = (chunk: KbPayload, separator: string): string =>
 /** Rebuilds the exact text the ingest pipeline embedded (ingest.py `embed_text`). */
 export const embedText = (chunk: KbPayload): string => `${location(chunk, ' › ')}\n\n${chunk.text}`;
 
+/** Freshness note so the model can qualify catalog-year or possibly stale details. */
+function freshness(chunk: KbPayload): string {
+  if (chunk.catalog_year) {
+    return ` (catalog ${chunk.catalog_year})`;
+  }
+  if (chunk.scraped_at) {
+    return ` (as of ${chunk.scraped_at})`;
+  }
+  return '';
+}
+
 /** Entries are unnumbered so the model links the source URL instead of citing "[n]". */
 function formatEntry(chunk: KbPayload): string {
-  return `## ${location(chunk, ' — ')}\nSource: ${chunk.source}\n${chunk.text}`;
+  return `## ${location(chunk, ' — ')}${freshness(chunk)}\nSource: ${chunk.source}\n${chunk.text}`;
 }
 
 export function formatContext(chunks: KbPayload[]): string {

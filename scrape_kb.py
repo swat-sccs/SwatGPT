@@ -2,7 +2,7 @@
 
 Each article in the main namespace is fetched via the MediaWiki API, converted from
 rendered HTML to markdown, and saved under information/ with YAML frontmatter
-(title, source URL, page id, content hash, categories) for RAG ingestion.
+(title, source URL, page id, content hash, scrape date, categories) for RAG ingestion.
 
 Usage: python scrape_kb.py
 Dependencies: requests, html2text
@@ -17,6 +17,7 @@ import re
 import sys
 import time
 import hashlib
+from datetime import date
 from pathlib import Path
 
 import requests
@@ -26,6 +27,7 @@ API = "https://kb.swarthmore.edu/api.php"
 BASE = "https://kb.swarthmore.edu"
 OUT_DIR = Path(__file__).parent / "information"
 SLEEP = 0.15
+SCRAPED_AT = date.today().isoformat()
 MAX_PRUNE_RATIO = float(os.environ.get("MAX_PRUNE_RATIO", "0.2"))
 
 session = requests.Session()
@@ -126,6 +128,7 @@ def frontmatter(title: str, url: str, pageid: int, categories: list[str], body: 
         f"source: {url}",
         f"pageid: {pageid}",
         f"content_hash: {hashlib.sha256(body.encode('utf-8')).hexdigest()}",
+        f'scraped_at: "{SCRAPED_AT}"',
     ]
     if categories:
         lines.append("categories:")

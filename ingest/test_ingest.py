@@ -78,6 +78,32 @@ def chunk_file(path):
     )
 
 
+class PayloadFieldsTest(unittest.TestCase):
+    def setUp(self):
+        self.tmp = tempfile.TemporaryDirectory()
+        self.addCleanup(self.tmp.cleanup)
+        self.root = Path(self.tmp.name)
+
+    def payload(self, extra):
+        path = self.root / "doc.md"
+        path.write_text(
+            f"---\ntitle: Doc\nsource: https://kb.swarthmore.edu/wiki/Doc\n{extra}\n---\n\n# Doc\n\nBody text.\n"
+        )
+        return chunk_file(path)[0]["payload"]
+
+    def test_scraped_at_is_stored_as_an_iso_string(self):
+        self.assertEqual(self.payload('scraped_at: "2026-09-01"')["scraped_at"], "2026-09-01")
+        self.assertEqual(self.payload("scraped_at: 2026-09-01")["scraped_at"], "2026-09-01")
+
+    def test_catalog_year_and_hash_are_kept_and_unknown_fields_dropped(self):
+        payload = self.payload("catalog_year: 2026-2027\ncontent_hash: abc\npageid: 7\nbogus: 1")
+        self.assertEqual(payload["catalog_year"], "2026-2027")
+        self.assertEqual(payload["content_hash"], "abc")
+        self.assertEqual(payload["pageid"], 7)
+        self.assertNotIn("bogus", payload)
+        self.assertNotIn("scraped_at", payload)
+
+
 class SectionPathTest(unittest.TestCase):
     """The H1 repeats the frontmatter title and must not become part of the breadcrumb."""
 

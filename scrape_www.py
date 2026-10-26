@@ -3,7 +3,7 @@
 URLs come from the Drupal sitemap (https://www.swarthmore.edu/sitemap.xml, pages 1-2),
 filtered to an allowlist of informational sections. Main content is extracted with
 trafilatura (strips nav/menu/footer boilerplate) and saved under information/www/
-with YAML frontmatter (title, source URL, section, content hash) for RAG ingestion.
+with YAML frontmatter (title, source URL, section, content hash, scrape date) for RAG ingestion.
 
 Usage: python scrape_www.py  (RESUME=1 keeps pages already on disk)
 Dependencies: requests, trafilatura
@@ -18,6 +18,7 @@ import sys
 import time
 import html
 import hashlib
+from datetime import date
 from pathlib import Path
 from urllib.parse import urlparse
 
@@ -31,6 +32,7 @@ MIN_BODY_CHARS = 300
 SLEEP = 0.25
 RESUME = os.environ.get("RESUME") == "1"
 MAX_PRUNE_RATIO = float(os.environ.get("MAX_PRUNE_RATIO", "0.2"))
+SCRAPED_AT = date.today().isoformat()
 
 # Sections scraped in full (every page under the path prefix).
 # Current-student-focused only: applicant/prospective sections (admissions-aid,
@@ -216,6 +218,7 @@ def frontmatter(title: str, url: str, section: str, body: str) -> str:
         f"source: {url}",
         f"section: {section}",
         f"content_hash: {content_hash}",
+        f'scraped_at: "{SCRAPED_AT}"',
         "---",
     ])
 

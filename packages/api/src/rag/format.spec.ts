@@ -25,6 +25,19 @@ describe('formatContext', () => {
     );
   });
 
+  it('appends the catalog year or the scrape date to the entry heading', () => {
+    expect(formatContext([{ ...chunk, catalog_year: '2026-2027' }])).toContain(
+      '## McCabe Library — Hours (catalog 2026-2027)\nSource: https://kb.swarthmore.edu/wiki/McCabe',
+    );
+    expect(formatContext([{ ...chunk, scraped_at: '2026-09-01' }])).toContain(
+      '## McCabe Library — Hours (as of 2026-09-01)\nSource:',
+    );
+    expect(
+      formatContext([{ ...chunk, catalog_year: '2026-2027', scraped_at: '2026-09-01' }]),
+    ).toContain('(catalog 2026-2027)\nSource:');
+    expect(formatContext([chunk])).toContain('## McCabe Library — Hours\nSource:');
+  });
+
   it('does not number entries', () => {
     expect(formatContext([chunk, chunk])).not.toMatch(/\[\d+\]/);
   });
@@ -39,8 +52,14 @@ describe('formatContext', () => {
 
 describe('contextEntrySources', () => {
   it('reads entry sources in order and ignores retrieval notes', () => {
-    const context = formatContext([chunk, { ...chunk, section: undefined, source: 'https://b' }]);
-    expect(contextEntrySources(context)).toEqual(['https://kb.swarthmore.edu/wiki/McCabe', 'https://b']);
+    const context = formatContext([
+      chunk,
+      { ...chunk, section: undefined, source: 'https://b', scraped_at: '2026-09-01' },
+    ]);
+    expect(contextEntrySources(context)).toEqual([
+      'https://kb.swarthmore.edu/wiki/McCabe',
+      'https://b',
+    ]);
     expect(contextEntrySources(formatRetrievalNote('empty', 'question'))).toEqual([]);
     expect(contextEntrySources(undefined)).toEqual([]);
   });

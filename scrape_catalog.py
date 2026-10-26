@@ -23,6 +23,7 @@ import re
 import sys
 import time
 import hashlib
+from datetime import date
 from html import unescape
 from functools import partial
 from collections.abc import Callable
@@ -37,6 +38,7 @@ REQUEST_PACING = 1.0
 THROTTLE_INITIAL_WAIT = 60
 THROTTLE_MAX_WAIT = 480
 RESUME = os.environ.get("RESUME") == "1"
+SCRAPED_AT = date.today().isoformat()
 KINDS = ("course", "program", "policy")
 POLICY_SECTIONS = (
     "educational program",
@@ -158,7 +160,12 @@ class Writer:
         self.seen.add(filename)
         body_text = f"# {title}\n\n{body}\n"
         digest = hashlib.sha256(body_text.encode("utf-8")).hexdigest()
-        fields = [*fields, ("catalog_year", self.catalog_year), ("content_hash", digest)]
+        fields = [
+            *fields,
+            ("catalog_year", self.catalog_year),
+            ("content_hash", digest),
+            ("scraped_at", quote(SCRAPED_AT)),
+        ]
         (OUT_DIR / filename).write_text(f"{frontmatter(fields)}\n\n{body_text}", encoding="utf-8")
         self.counts[kind] = self.counts.get(kind, 0) + 1
         return filename

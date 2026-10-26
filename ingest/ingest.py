@@ -11,6 +11,7 @@ import sys
 import time
 import uuid
 import argparse
+from datetime import date
 from pathlib import Path
 
 import httpx
@@ -40,7 +41,16 @@ TOKEN_RE = re.compile(r"[a-z0-9]+")
 CHUNK_SIZE = 512
 CHUNK_OVERLAP = 64
 GROUPS = (("", "kb"), ("www", "www"), ("catalog", "course"))
-OPTIONAL_FIELDS = ("content_hash", "categories", "pageid", "dept", "number", "credits", "catalog_year")
+OPTIONAL_FIELDS = (
+    "content_hash",
+    "categories",
+    "pageid",
+    "dept",
+    "number",
+    "credits",
+    "catalog_year",
+    "scraped_at",
+)
 SMOKE_QUERIES = (
     "How do I connect to eduroam wifi?",
     "When is Sharples dining hall open?",
@@ -74,6 +84,11 @@ def section_path(node, title):
     return " › ".join(parts)
 
 
+def payload_value(value):
+    """YAML turns an unquoted `scraped_at: 2026-09-01` into a date; the payload wants the ISO string."""
+    return value.isoformat() if isinstance(value, date) else value
+
+
 def chunk_doc(path, doc_type, post, md_parser, splitter, duplicate_sources):
     meta = post.metadata
     title = str(meta.get("title", path.stem))
@@ -82,7 +97,7 @@ def chunk_doc(path, doc_type, post, md_parser, splitter, duplicate_sources):
     base_payload = {"title": title, "source": source, "doc_type": doc_type}
     for field in OPTIONAL_FIELDS:
         if field in meta and meta[field] is not None:
-            base_payload[field] = meta[field]
+            base_payload[field] = payload_value(meta[field])
 
     chunks = []
     nodes = md_parser.get_nodes_from_documents([Document(text=post.content)])

@@ -47,11 +47,13 @@ class TitleQuotingTest(unittest.TestCase):
         text = scrape_kb.frontmatter(QUOTED_TITLE, "https://kb.swarthmore.edu/wiki/Printing", 7, ["Printing"], "body")
         self.assertIn(QUOTED_YAML, text.splitlines())
         self.assertIn(f"content_hash: {hashlib.sha256(b'body').hexdigest()}", text.splitlines())
+        self.assertIn(f'scraped_at: "{scrape_kb.SCRAPED_AT}"', text.splitlines())
         self.assertEqual(text.splitlines()[-1], "---")
 
     def test_www_frontmatter_escapes_quotes_and_backslashes(self):
         text = scrape_www.frontmatter(QUOTED_TITLE, f"{WWW}/registrar", "registrar", "body")
         self.assertIn(QUOTED_YAML, text.splitlines())
+        self.assertIn(f'scraped_at: "{scrape_www.SCRAPED_AT}"', text.splitlines())
 
     def test_catalog_quote_escapes_quotes_and_backslashes(self):
         self.assertEqual(f"title: {scrape_catalog.quote(QUOTED_TITLE)}", QUOTED_YAML)
@@ -314,6 +316,7 @@ class ScrapeCatalogTest(TempOutDir):
         scrape_catalog.main()
         self.assertEqual(self.files(), self.expected_files())
         self.assertIn("catalog_year: 2027-2028", self.read("cpsc-035-data-structures.md"))
+        self.assertIn(f'scraped_at: "{scrape_catalog.SCRAPED_AT}"', self.read("cpsc-035-data-structures.md"))
         self.assertIn("Fresh 2027", self.read("cpsc-035-data-structures.md"))
 
     def test_same_year_rerun_refreshes_content(self):
