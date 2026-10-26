@@ -2,10 +2,12 @@ import express from 'express';
 import request from 'supertest';
 import { logger } from '@librechat/data-schemas';
 import type { RerankResult } from './rerank';
+import type { SparseQuery } from './lexical';
 import type { KbPayload } from './search';
 import { retrieveKbContext, retrieveKbContextDetailed } from './retrieve';
 import { createMetrics } from '~/app/metrics';
 import { embedText, contextEntrySources } from './format';
+import { buildSparseQuery } from './lexical';
 
 const EMBEDDINGS_URL = 'http://tei-embed.test';
 const RERANK_URL = 'http://tei-rerank.test';
@@ -368,6 +370,39 @@ describe('retrieveKbContext', () => {
         'https://kb.swarthmore.edu/wiki/Article_10',
         'https://kb.swarthmore.edu/wiki/Article_0',
       ]);
+    });
+
+    it('reserves the lexical slot for the current turn, not the combined query', async () => {
+      const dense = [0, 1, 2, 3, 4, 5, 6, 7, 8].map(kbHit);
+      const currentTokens = buildSparseQuery(current)?.indices.length;
+      mockServices({
+        qdrant: ({ using, query }) => {
+          if (using === 'dense') {
+            return dense;
+          }
+          const isCurrent = (query as SparseQuery).indices.length === currentTokens;
+          return isCurrent ? [kbHit(101)] : [kbHit(100)];
+        },
+        scores: [
+          { index: 0, score: 0.95 },
+          { index: 1, score: 0.5 },
+          { index: 2, score: 0.6 },
+          ...[3, 4, 5, 6, 7, 8, 9, 10].map((index, offset) => ({
+            index,
+            score: 0.94 - offset * 0.01,
+          })),
+        ],
+      });
+      const context = await retrieveKbContext({ userText: current, retrievalQuery: combined });
+
+      expect(requestBody(5)).toMatchObject({
+        texts: [0, 101, 100, 1, 2, 3, 4, 5, 6, 7, 8].map((index) =>
+          embedText(kbHit(index).payload as KbPayload),
+        ),
+      });
+      expect(context).toContain('Title 101');
+      expect(context).not.toContain('Title 100');
+      expect(context).not.toContain('Title 7');
     });
 
     it('runs a single search when the query is not a follow-up', async () => {

@@ -60,16 +60,25 @@ export interface KbSearchQuery {
   sparse?: SparseQuery;
 }
 
+/** Position of the current turn in `queries`; a follow-up's combined query comes after it. */
+const CURRENT_QUERY = 0;
+
 interface ChannelResult {
+  /** Index into `queries` of the retrieval query this channel answered. */
+  query: number;
   lexical: boolean;
   points: QdrantPoint[];
 }
 
-/** Best (lowest) 1-based rank of each point across the lexical channels. */
+/**
+ * Best (lowest) 1-based rank of each point in the current turn's lexical channel.
+ * The combined follow-up query's lexical hits stay in the pool but never claim the
+ * guaranteed slot: on a short follow-up they mostly name the previous topic.
+ */
 function lexicalRanks(channels: ChannelResult[]): Map<string | number, number> {
   const ranks = new Map<string | number, number>();
-  for (const { lexical, points } of channels) {
-    if (!lexical) {
+  for (const { query, lexical, points } of channels) {
+    if (!lexical || query !== CURRENT_QUERY) {
       continue;
     }
     points.forEach((point, index) => {
@@ -112,7 +121,8 @@ function mergeChannels(channels: ChannelResult[]): KbCandidate[] {
  * orders the pool. The lexical channel surfaces chunks whose titles or text
  * literally mention query terms (campus entities like "Cornell") even when the
  * dense channel is dominated by the topical part of the query; `lexicalRank`
- * records each candidate's best position in a lexical channel.
+ * records each candidate's position in the current turn's (`queries[0]`) lexical
+ * channel.
  */
 export async function searchKb(
   baseUrl: string,
@@ -120,14 +130,19 @@ export async function searchKb(
   signal: AbortSignal,
 ): Promise<KbCandidate[]> {
   const channels = await Promise.all(
-    queries.flatMap(({ vector, sparse }): Promise<ChannelResult>[] => [
-      queryChannel(baseUrl, 'dense', vector, signal).then((points) => ({ lexical: false, points })),
+    queries.flatMap(({ vector, sparse }, query): Promise<ChannelResult>[] => [
+      queryChannel(baseUrl, 'dense', vector, signal).then((points) => ({
+        query,
+        lexical: false,
+        points,
+      })),
       sparse
         ? queryChannel(baseUrl, 'sparse', sparse, signal).then((points) => ({
+            query,
             lexical: true,
             points,
           }))
-        : Promise.resolve({ lexical: true, points: [] }),
+        : Promise.resolve({ query, lexical: true, points: [] }),
     ]),
   );
   return mergeChannels(channels);

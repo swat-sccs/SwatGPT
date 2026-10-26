@@ -57,6 +57,7 @@ export function buildKbQueries(messages: KbQueryMessage[]): KbQueries {
 
 /** The queries one KB retrieval runs: Qdrant is searched with each `search` query, the merged pool is reranked against `rerank`. */
 export interface KbRetrievalQueries {
+  /** The current turn alone first, then (for a follow-up) the turn combined with the previous one. */
   search: string[];
   rerank: string;
 }
