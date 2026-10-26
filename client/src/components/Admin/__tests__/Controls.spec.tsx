@@ -43,6 +43,27 @@ describe('admin controls', () => {
     );
   });
 
+  it('resumes without persisting a half-typed notice', async () => {
+    mockCapabilities();
+    mocks.getAdminPause.mockResolvedValue({ ...pause, paused: true });
+    mocks.setAdminPause.mockImplementation(async (payload) => ({
+      ...pause,
+      paused: payload.paused,
+      message: payload.message ?? pause.message,
+    }));
+    renderAdmin(<Controls />);
+    expect(await screen.findByText('Paused')).toBeInTheDocument();
+
+    const field = screen.getByLabelText('Message shown to users');
+    fireEvent.change(field, { target: { value: 'Back in a few min' } });
+    fireEvent.click(screen.getByRole('switch'));
+
+    await waitFor(() => expect(mocks.setAdminPause).toHaveBeenCalledWith({ paused: false }));
+    expect(await screen.findByText('Running')).toBeInTheDocument();
+    expect(field).toHaveValue('Back in a few min');
+    expect(screen.getByRole('button', { name: 'Save message' })).not.toBeDisabled();
+  });
+
   it('shows a pause failure inside the confirm dialog and clears it on reopen', async () => {
     const showToast = jest.fn();
     mockCapabilities();

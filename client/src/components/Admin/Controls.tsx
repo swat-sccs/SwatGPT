@@ -25,7 +25,7 @@ function Pause({ state }: { state: TAdminPauseState }) {
       setConfirmOpen(true);
       return;
     }
-    setPause.mutate({ paused: false, message });
+    setPause.mutate({ paused: false });
   };
 
   const confirmPause = () => {
