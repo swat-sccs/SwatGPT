@@ -37,7 +37,9 @@ function createReqRes(
     params: overrides.params ?? {},
     query: overrides.query ?? {},
     body: {},
-    user: { _id: new Types.ObjectId(), role: 'ADMIN' },
+    headers: { 'user-agent': 'jest', 'x-request-id': 'req-usage' },
+    ip: '10.0.0.3',
+    user: { _id: new Types.ObjectId(), role: 'ADMIN', name: 'Admin' },
   } as unknown as ServerRequest;
   const json = jest.fn();
   const status = jest.fn().mockReturnValue({ json });
@@ -63,6 +65,7 @@ function createDeps(overrides: Partial<AdminUsageDeps> = {}): AdminUsageDeps {
       .fn()
       .mockImplementation((ids: string[]) => Promise.resolve(ids.map(() => false))),
     hasCapability: jest.fn().mockResolvedValue(true),
+    recordAuditEntry: jest.fn().mockResolvedValue(undefined),
     ...overrides,
   };
 }
@@ -412,6 +415,66 @@ describe('createAdminUsageHandlers', () => {
         expect.objectContaining({ id: (req.user as { _id: Types.ObjectId })._id.toString() }),
         SystemCapabilities.READ_CONVERSATIONS,
       );
+    });
+
+    it('audits conversation.listed when titles are disclosed', async () => {
+      const deps = createDeps({
+        findUser: jest.fn().mockResolvedValue(user),
+        findRecentConversations: jest.fn().mockResolvedValue([conversation]),
+      });
+      const { req, res, status } = createReqRes({
+        params: { id: userId.toString() },
+        query: { from: FROM, to: TO },
+      });
+      await createAdminUsageHandlers(deps).user(req, res);
+      expect(status).toHaveBeenCalledWith(200);
+      expect(deps.recordAuditEntry).toHaveBeenCalledTimes(1);
+      expect((deps.recordAuditEntry as jest.Mock).mock.calls[0][0]).toMatchObject({
+        action: 'conversation.listed',
+        outcome: 'success',
+        actor: { type: 'user', id: (req.user as { _id: Types.ObjectId })._id.toString() },
+        target: { type: 'user', id: userId.toString(), name: 'alice@swarthmore.edu' },
+        metadata: {
+          returned: 1,
+          conversationIds: 'c1',
+          ownerIds: userId.toString(),
+          userId: userId.toString(),
+          from: FROM,
+          to: TO,
+          page: 'recent',
+        },
+        context: { ip: '10.0.0.3', userAgent: 'jest', requestId: 'req-usage' },
+      });
+    });
+
+    it('does not audit when no titles are disclosed', async () => {
+      const hidden = createDeps({
+        findUser: jest.fn().mockResolvedValue(user),
+        findRecentConversations: jest.fn().mockResolvedValue([conversation]),
+        hasCapability: jest.fn().mockResolvedValue(false),
+      });
+      const first = createReqRes({ params: { id: userId.toString() } });
+      await createAdminUsageHandlers(hidden).user(first.req, first.res);
+      expect(hidden.recordAuditEntry).not.toHaveBeenCalled();
+
+      const empty = createDeps({ findUser: jest.fn().mockResolvedValue(user) });
+      const second = createReqRes({ params: { id: userId.toString() } });
+      await createAdminUsageHandlers(empty).user(second.req, second.res);
+      expect(second.status).toHaveBeenCalledWith(200);
+      expect(empty.recordAuditEntry).not.toHaveBeenCalled();
+    });
+
+    it('withholds the detail when the fail-closed list audit fails', async () => {
+      const deps = createDeps({
+        findUser: jest.fn().mockResolvedValue(user),
+        findRecentConversations: jest.fn().mockResolvedValue([conversation]),
+        recordAuditEntry: jest.fn().mockRejectedValue(new Error('audit down')),
+        auditFailClosed: true,
+      });
+      const { req, res, status, json } = createReqRes({ params: { id: userId.toString() } });
+      await createAdminUsageHandlers(deps).user(req, res);
+      expect(status).toHaveBeenCalledWith(500);
+      expect(JSON.stringify(json.mock.calls[0][0])).not.toContain('Lunch');
     });
 
     it('withholds conversation titles from callers without read:conversations', async () => {

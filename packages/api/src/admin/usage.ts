@@ -10,7 +10,9 @@ import type {
   UsageSummary,
   UsageUserRow,
   IConversation,
+  AuditTarget,
   UsageUserSort,
+  AuditLogMethods,
   GenerationMethods,
   UsageTimeseriesPoint,
 } from '@librechat/data-schemas';
@@ -27,9 +29,12 @@ import type {
 import type { FilterQuery, Model } from 'mongoose';
 import type { Response } from 'express';
 import type { HasCapabilityFn } from '~/middleware/capabilities';
+import type { OversightAuditDeps } from '~/oversight/audit';
 import type { ServerRequest } from '~/types/http';
+import { createOversightAudit, resolveActor } from '~/oversight/audit';
 import { parsePagination } from './pagination';
 
+const SCOPE = 'adminUsage';
 const HOUR_MS = 3_600_000;
 const DAY_MS = 24 * HOUR_MS;
 const DEFAULT_RANGE_MS = DAY_MS;
@@ -49,7 +54,7 @@ export interface ConversationStats {
   down: number;
 }
 
-export interface AdminUsageDeps {
+export interface AdminUsageDeps extends OversightAuditDeps {
   getUsageSummary: GenerationMethods['getUsageSummary'];
   getUsageTimeseries: GenerationMethods['getUsageTimeseries'];
   getUsageByUser: GenerationMethods['getUsageByUser'];
@@ -67,6 +72,8 @@ export interface AdminUsageDeps {
   areUsersBanned: (userIds: string[]) => Promise<boolean[]>;
   /** Gates conversation titles in the user detail view on `read:conversations`. */
   hasCapability: HasCapabilityFn;
+  /** Writes the `conversation.listed` entry when the detail view discloses titles. */
+  recordAuditEntry: AuditLogMethods['recordAuditEntry'];
 }
 
 type Handler = (req: ServerRequest, res: Response) => Promise<Response>;
@@ -263,11 +270,17 @@ function toIso(date: Date | undefined): string {
 }
 
 function fail(res: Response, scope: string, error: unknown): Response {
-  logger.error(`[adminUsage] ${scope} error:`, error);
+  logger.error(`[${SCOPE}] ${scope} error:`, error);
   return res.status(500).json({ error: `Failed to load usage ${scope}` });
 }
 
+function userTarget(user: IUser, id: string): AuditTarget {
+  return { type: 'user', id, name: user.email || user.username || user.name || id };
+}
+
 export function createAdminUsageHandlers(deps: AdminUsageDeps): AdminUsageHandlers {
+  const emitAudit = createOversightAudit(deps, SCOPE);
+
   async function summary(req: ServerRequest, res: Response): Promise<Response> {
     const parsed = parseRange(req.query);
     if (parsed.error !== undefined) {
@@ -391,7 +404,7 @@ export function createAdminUsageHandlers(deps: AdminUsageDeps): AdminUsageHandle
         SystemCapabilities.READ_CONVERSATIONS,
       );
     } catch (error) {
-      logger.warn('[adminUsage] read:conversations check failed; hiding titles', error);
+      logger.warn(`[${SCOPE}] read:conversations check failed; hiding titles`, error);
       return false;
     }
   }
@@ -431,6 +444,35 @@ export function createAdminUsageHandlers(deps: AdminUsageDeps): AdminUsageHandle
       ]);
       if (!found) {
         return res.status(404).json({ error: 'User not found' });
+      }
+      if (conversations?.length) {
+        const actor = resolveActor(req);
+        if (!actor) {
+          return res.status(401).json({ error: 'Authentication required' });
+        }
+        try {
+          await emitAudit({
+            action: 'conversation.listed',
+            actor,
+            target: userTarget(found, id),
+            metadata: {
+              returned: conversations.length,
+              conversationIds: conversations.map((c) => c.conversationId).join(','),
+              ownerIds: id,
+              userId: id,
+              from: parsed.value.range.from.toISOString(),
+              to: parsed.value.range.to.toISOString(),
+              page: 'recent',
+            },
+            req,
+          });
+        } catch (auditError) {
+          logger.error(
+            `[${SCOPE}] list audit failed (fail-closed); withholding titles`,
+            auditError,
+          );
+          return res.status(500).json({ error: 'Failed to record audit entry' });
+        }
       }
       const owner = { id, name: found.name ?? '', email: found.email ?? '' };
       const detail: TAdminUsageUserDetail = {

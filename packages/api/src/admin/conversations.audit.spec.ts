@@ -18,10 +18,10 @@ let mongoServer: MongoMemoryServer;
 let recordAuditEntry: ReturnType<typeof createMethods>['recordAuditEntry'];
 let AuditLog: Model<IAuditLog>;
 
-function searchRequest(search: string) {
+function searchRequest(query: Record<string, string>) {
   const req = {
     params: {},
-    query: { search },
+    query,
     body: {},
     headers: { 'user-agent': 'jest', 'x-request-id': 'req-search' },
     ip: '10.0.0.2',
@@ -60,7 +60,7 @@ describe('admin conversation search auditing (real audit log)', () => {
       auditFailClosed: true,
     };
     const handlers = createAdminConversationsHandlers(deps);
-    const { req, res, status, json } = searchRequest('immigration status');
+    const { req, res, status, json } = searchRequest({ search: 'immigration status' });
 
     await handlers.listConversations(req, res);
 
@@ -77,6 +77,49 @@ describe('admin conversation search auditing (real audit log)', () => {
       target: { type: 'search', name: 'immigration status' },
       metadata: { query: 'immigration status', scopeSize: 0, returned: 0 },
       context: { requestId: 'req-search', ip: '10.0.0.2' },
+    });
+  });
+
+  it('persists a conversation.listed entry when a plain list returns titles', async () => {
+    const ownerId = new Types.ObjectId().toString();
+    const item = {
+      conversationId: 'c7',
+      title: 'Housing',
+      user: { id: ownerId, name: 'Owner', email: 'owner@swarthmore.edu' },
+      model: 'qwen',
+      messageCount: 1,
+      promptTokens: 1,
+      completionTokens: 1,
+      errors: 0,
+      flagged: false,
+      feedback: { up: 0, down: 0 },
+      createdAt: '2026-09-01T12:00:00.000Z',
+      updatedAt: '2026-09-01T12:00:00.000Z',
+    };
+    const deps = {
+      listConversationsAdmin: jest.fn().mockResolvedValue({ items: [item], nextCursor: null }),
+      getConversationAdmin: jest.fn(),
+      findConversationOwner: jest.fn(),
+      searchMessagesAdmin: jest.fn(),
+      searchMessageTextAdmin: jest.fn(),
+      createFlagAdmin: jest.fn(),
+      deleteFlag: jest.fn(),
+      recordAuditEntry,
+      auditFailClosed: true,
+    };
+    const handlers = createAdminConversationsHandlers(deps);
+    const { req, res, status } = searchRequest({ userId: ownerId });
+
+    await handlers.listConversations(req, res);
+
+    expect(status).toHaveBeenCalledWith(200);
+    const entry = await AuditLog.findOne({ action: 'conversation.listed' }).lean();
+    expect(entry).toMatchObject({
+      category: 'conversation',
+      outcome: 'success',
+      actor: { type: 'user', id: adminId.toString(), name: 'Admin' },
+      target: { type: 'list', id: ownerId, name: 'user' },
+      metadata: { returned: 1, conversationIds: 'c7', ownerIds: ownerId, userId: ownerId },
     });
   });
 });

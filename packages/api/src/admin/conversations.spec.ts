@@ -126,7 +126,7 @@ const validCursor = Buffer.from(
 
 describe('createAdminConversationsHandlers', () => {
   describe('listConversations', () => {
-    it('passes parsed filters to the data layer and never audits', async () => {
+    it('passes parsed filters to the data layer and does not audit an empty page', async () => {
       const deps = createDeps();
       const handlers = createAdminConversationsHandlers(deps);
       const { req, res, status, json } = createReqRes({
@@ -160,6 +160,63 @@ describe('createAdminConversationsHandlers', () => {
         conversationIds: undefined,
       });
       expect(deps.recordAuditEntry).not.toHaveBeenCalled();
+    });
+
+    it('audits conversation.listed with the surfaced ids and owners for a non-empty page', async () => {
+      const item = detail().conversation;
+      const deps = createDeps({
+        listConversationsAdmin: jest.fn().mockResolvedValue({ items: [item], nextCursor: 'n' }),
+      });
+      const handlers = createAdminConversationsHandlers(deps);
+      const { req, res, status, json } = createReqRes({ query: { userId: ownerId } });
+
+      await handlers.listConversations(req, res);
+
+      expect(status).toHaveBeenCalledWith(200);
+      expect(json).toHaveBeenCalledWith({ conversations: [item], nextCursor: 'n' });
+      expect(deps.recordAuditEntry).toHaveBeenCalledTimes(1);
+      expect((deps.recordAuditEntry as jest.Mock).mock.calls[0][0]).toMatchObject({
+        action: 'conversation.listed',
+        outcome: 'success',
+        actor: { type: 'user', id: adminId.toString(), name: 'Admin' },
+        target: { type: 'list', id: ownerId, name: 'user' },
+        metadata: {
+          returned: 1,
+          conversationIds: 'c1',
+          ownerIds: ownerId,
+          userId: ownerId,
+          page: 'first',
+        },
+        context: { ip: '10.0.0.1', userAgent: 'jest', requestId: 'req-1' },
+      });
+    });
+
+    it('withholds a non-empty page when the list audit fails closed', async () => {
+      const deps = createDeps({
+        listConversationsAdmin: jest
+          .fn()
+          .mockResolvedValue({ items: [detail().conversation], nextCursor: null }),
+        recordAuditEntry: jest.fn().mockRejectedValue(new Error('audit down')),
+        auditFailClosed: true,
+      });
+      const handlers = createAdminConversationsHandlers(deps);
+      const { req, res, status, json } = createReqRes();
+
+      await handlers.listConversations(req, res);
+
+      expect(status).toHaveBeenCalledWith(500);
+      expect(json.mock.calls[0][0]).toEqual({ error: 'Failed to record audit entry' });
+    });
+
+    it('returns 401 for a plain list without a user', async () => {
+      const deps = createDeps();
+      const handlers = createAdminConversationsHandlers(deps);
+      const { req, res, status } = createReqRes({ user: null });
+
+      await handlers.listConversations(req, res);
+
+      expect(status).toHaveBeenCalledWith(401);
+      expect(deps.listConversationsAdmin).not.toHaveBeenCalled();
     });
 
     it.each([

@@ -2,6 +2,7 @@ const express = require('express');
 const { ViolationTypes } = require('librechat-data-provider');
 const { SystemCapabilities } = require('@librechat/data-schemas');
 const {
+  isEnabled,
   createBanService,
   USAGE_USER_FIELDS,
   createUsageFlagReaders,
@@ -34,6 +35,9 @@ const handlers = createAdminUsageHandlers({
   isUserBanned: banService.isBanned,
   areUsersBanned: banService.areBanned,
   hasCapability,
+  recordAuditEntry: db.recordAuditEntry,
+  /** Opt-in: withhold conversation titles if the audit entry can't be persisted. */
+  auditFailClosed: isEnabled(process.env.AUDIT_LOG_FAIL_CLOSED),
 });
 
 router.use(requireJwtAuth, requireAdminAccess, requireReadUsage);
