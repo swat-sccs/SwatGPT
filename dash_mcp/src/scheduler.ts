@@ -5,6 +5,7 @@ import { log } from './util.js';
 
 export class PollScheduler {
   private readonly timers = new Map<string, NodeJS.Timeout>();
+  private readonly running = new Set<Promise<void>>();
   private stopped = false;
 
   constructor(private readonly config: Config, private readonly service: SwatService) {}
@@ -21,29 +22,29 @@ export class PollScheduler {
     this.schedule('retention', 86_400_000, () => this.service.pruneHistory());
   }
 
-  stop() {
+  /** Jobs currently executing. */
+  get activeJobs(): number {
+    return this.running.size;
+  }
+
+  /** Cancels every future run and resolves once the jobs already executing have finished. */
+  async stop(): Promise<void> {
     this.stopped = true;
     for (const timer of this.timers.values()) clearTimeout(timer);
     this.timers.clear();
+    await Promise.allSettled([...this.running]);
   }
 
   private schedule(name: string, intervalMs: number, task: () => Promise<void>) {
-    const run = async () => {
+    const run = () => {
       if (this.stopped) return;
-      try {
-        const acquired = await this.service.store.withJobLock(name, async () => task());
-        metrics.recordPoll(name, acquired ? 'success' : 'skipped');
-        if (!acquired) log('debug', 'Skipped poll because another instance owns the lock', { job: name });
-      } catch (error) {
-        metrics.recordPoll(name, 'error');
-        log('error', 'Polling job failed', { job: name, error: error instanceof Error ? error.message : String(error) });
-      } finally {
-        if (!this.stopped) {
-          const jitter = Math.floor(Math.random() * Math.min(5_000, intervalMs * 0.05));
-          const timer = setTimeout(run, intervalMs + jitter);
-          this.timers.set(name, timer);
-        }
-      }
+      const job: Promise<void> = this.execute(name, task).finally(() => {
+        this.running.delete(job);
+        if (this.stopped) return;
+        const jitter = Math.floor(Math.random() * Math.min(5_000, intervalMs * 0.05));
+        this.timers.set(name, setTimeout(run, intervalMs + jitter));
+      });
+      this.running.add(job);
     };
     let initialDelay = 250 + Math.floor(Math.random() * 1_000);
     if (name === 'configuration') {
@@ -54,7 +55,17 @@ export class PollScheduler {
         // Startup remains available from PostgreSQL; retry missing discovery promptly.
       }
     }
-    const timer = setTimeout(run, initialDelay);
-    this.timers.set(name, timer);
+    this.timers.set(name, setTimeout(run, initialDelay));
+  }
+
+  private async execute(name: string, task: () => Promise<void>): Promise<void> {
+    try {
+      const acquired = await this.service.store.withJobLock(name, async () => task());
+      metrics.recordPoll(name, acquired ? 'success' : 'skipped');
+      if (!acquired) log('debug', 'Skipped poll because another instance owns the lock', { job: name });
+    } catch (error) {
+      metrics.recordPoll(name, 'error');
+      log('error', 'Polling job failed', { job: name, error: error instanceof Error ? error.message : String(error) });
+    }
   }
 }

@@ -10,6 +10,9 @@ import { DashClient } from './upstream/client.js';
 import { RegistryDiscovery } from './upstream/discovery.js';
 import { log, setLogLevel } from './util.js';
 
+/** Longest a graceful shutdown may take before the process exits regardless. */
+const SHUTDOWN_DEADLINE_MS = 8_000;
+
 async function main() {
   const config = loadConfig();
   setLogLevel(config.logLevel);
@@ -27,17 +30,34 @@ async function main() {
   scheduler.start();
 
   let stopping = false;
-  const shutdown = async (signal: string) => {
+  const onSignal = (signal: NodeJS.Signals) => {
     if (stopping) return;
     stopping = true;
-    log('info', 'Shutting down', { signal });
-    scheduler.stop();
-    await http.close();
-    await store.close();
-    process.exit(0);
+    const deadline = setTimeout(() => {
+      log('error', 'Shutdown exceeded its deadline; exiting', { deadlineMs: SHUTDOWN_DEADLINE_MS });
+      process.exit(1);
+    }, SHUTDOWN_DEADLINE_MS);
+    deadline.unref();
+    shutdown(signal, scheduler, http, store).then(
+      (code) => process.exit(code),
+      (error) => {
+        log('error', 'Shutdown failed', { error: describe(error) });
+        process.exit(1);
+      },
+    );
   };
-  process.on('SIGTERM', () => void shutdown('SIGTERM'));
-  process.on('SIGINT', () => void shutdown('SIGINT'));
+  process.on('SIGTERM', onSignal);
+  process.on('SIGINT', onSignal);
+}
+
+/** Stops polling and the listener together, then the pool once no job can still use it. */
+async function shutdown(signal: string, scheduler: PollScheduler, http: SwatHttpServer, store: PgStore): Promise<number> {
+  log('info', 'Shutting down', { signal });
+  const steps = await Promise.allSettled([scheduler.stop(), http.close()]);
+  steps.push(...await Promise.allSettled([store.close()]));
+  const failures = steps.filter((step): step is PromiseRejectedResult => step.status === 'rejected');
+  for (const failure of failures) log('error', 'Shutdown step failed', { error: describe(failure.reason) });
+  return failures.length ? 1 : 0;
 }
 
 /** Lets the container watchdog target the server itself instead of the unkillable PID 1. */
@@ -46,12 +66,16 @@ async function recordPid(): Promise<void> {
     await writeFile(DEFAULT_PID_FILE, String(process.pid), 'utf8');
   } catch (error) {
     log('warn', 'Could not write the PID file; the watchdog will fall back to signalling PID 1', {
-      path: DEFAULT_PID_FILE, error: error instanceof Error ? error.message : String(error),
+      path: DEFAULT_PID_FILE, error: describe(error),
     });
   }
 }
 
+function describe(error: unknown): string {
+  return error instanceof Error ? error.stack ?? error.message : String(error);
+}
+
 main().catch((error) => {
-  log('error', 'Fatal startup error', { error: error instanceof Error ? error.stack ?? error.message : String(error) });
+  log('error', 'Fatal startup error', { error: describe(error) });
   process.exit(1);
 });
