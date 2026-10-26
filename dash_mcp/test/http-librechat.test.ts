@@ -36,7 +36,7 @@ describe('LibreChat streamable-http handshake', () => {
       items: [{ place: 'Sharples Dining Hall' }],
       meta: { stale: false },
     });
-    expect(hours).toHaveBeenCalledWith({ place: 'Sharples', limit: 30 });
+    expect(hours).toHaveBeenCalledWith({ place: 'Sharples', limit: 60 });
     expect(performance.now() - started).toBeLessThan(500);
 
     await client.close();

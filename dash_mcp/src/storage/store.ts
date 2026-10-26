@@ -73,6 +73,9 @@ const MIGRATIONS: ReadonlyArray<[number, string]> = [
   `],
 ];
 
+/** Feeds whose readers want the newest entry first; every other domain is read soonest first. */
+const NEWEST_FIRST_DOMAINS: ReadonlySet<Domain> = new Set<Domain>(['news', 'alerts']);
+
 /** The `domain_sync` scope recorded by a poll that read the whole domain. */
 export const FULL_SYNC_SCOPE = '*';
 
@@ -220,9 +223,17 @@ export class PgStore {
     );
   }
 
+  /**
+   * Active rows in the order a reader wants them: soonest first for scheduled domains, newest
+   * first for feeds. `last_seen_at` alone is identical across a whole poll, so a limit applied
+   * to it would truncate an arbitrary subset.
+   */
   async currentRecords(domain: Domain, limit = 100): Promise<JsonObject[]> {
+    const order = NEWEST_FIRST_DOMAINS.has(domain)
+      ? 'COALESCE(published_at, event_start) DESC NULLS FIRST'
+      : 'COALESCE(event_start, published_at) ASC NULLS LAST';
     const result = await this.pool.query<{ payload: JsonObject }>(
-      'SELECT payload FROM source_records WHERE domain=$1 AND active=true ORDER BY last_seen_at DESC LIMIT $2',
+      `SELECT payload FROM source_records WHERE domain=$1 AND active=true ORDER BY ${order}, last_seen_at DESC, id ASC LIMIT $2`,
       [domain, limit],
     );
     return result.rows.map((row) => row.payload);

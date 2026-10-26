@@ -2,6 +2,7 @@ import { McpServer } from '@modelcontextprotocol/server';
 import { z } from 'zod';
 import { metrics } from '../metrics.js';
 import { domains } from '../types.js';
+import { HOURS_DEFAULT_LIMIT, HOURS_MAX_LIMIT } from '../service.js';
 import type { SwatService } from '../service.js';
 
 const date = z.string().regex(/^\d{4}-\d{2}-\d{2}$/, 'Use YYYY-MM-DD').optional();
@@ -32,7 +33,7 @@ export function createMcpServer(service: SwatService): McpServer {
       place: z.string().trim().min(1).max(100).optional(),
       category: z.string().trim().min(1).max(100).optional(),
       date,
-      limit: limit(30),
+      limit: limit(HOURS_DEFAULT_LIMIT, HOURS_MAX_LIMIT),
     }), (input) => service.getHours(input), toolTimeoutMs);
 
   register(server, 'get_dining_menus', 'Get public dining menus by location, date, meal, or text query. Sharples and DCC resolve to Dining Center. Results are cache-first and refresh from the public Dash when matching data is missing or stale.',

@@ -3,6 +3,7 @@ import { loadConfig } from '../src/config.js';
 import { PgStore } from '../src/storage/store.js';
 import { SwatService, TRANSIT_PAIRS } from '../src/service.js';
 import { campusDayRange, currentCampusDate } from '../src/util.js';
+import type { NormalizedRecord } from '../src/types.js';
 import type { DashClient } from '../src/upstream/client.js';
 import type { RegistryDiscovery } from '../src/upstream/discovery.js';
 
@@ -173,6 +174,42 @@ describe.skipIf(!databaseUrl)('PostgreSQL-backed service cache', () => {
       JOIN source_records sr ON sr.id = rv.record_id ORDER BY sr.external_id
     `);
     expect(versions.rows).toEqual([{ external_id: 'fresh', title: 'only' }, { external_id: 'kept', title: 'v2' }]);
+  });
+
+  it('serves the soonest events and the newest news when a limit truncates the snapshot', async () => {
+    const record = (id: string, fields: Partial<NormalizedRecord>) => ({
+      domain: 'events' as const, source: 'SwatCentral', externalId: id, title: id, searchText: id, payload: {}, ...fields,
+    });
+    const day = (offset: number) => new Date(Date.UTC(2030, 0, 1 + offset)).toISOString();
+    const shuffled = [7, 2, 9, 0, 5, 3, 8, 1, 6, 4];
+    await store.replaceSourceRecords('events', 'SwatCentral', [
+      record('undated', {}),
+      ...shuffled.map((offset) => record(`event-${offset}`, { start: day(offset) })),
+    ]);
+    await store.replaceSourceRecords('news', 'News', shuffled.map((offset) => record(`post-${offset}`, {
+      domain: 'news', source: 'News', published: day(offset),
+    })));
+
+    expect((await store.currentRecords('events', 3)).map((item) => item.id)).toEqual(['event-0', 'event-1', 'event-2']);
+    expect((await store.currentRecords('news', 3)).map((item) => item.id)).toEqual(['post-9', 'post-8', 'post-7']);
+    expect((await store.currentRecords('events')).at(-1)?.id).toBe('undated');
+  });
+
+  it('returns every hours source on a default read even when the registry lists more than 30', async () => {
+    const places = Array.from({ length: 40 }, (_, index) => `Place ${index}`);
+    const client = { query: vi.fn().mockImplementation(diningResponse) } as unknown as DashClient;
+    const discovery = {
+      current: () => ({ hours: places.map((place) => ({ place, category: 'Offices', kind: 'google', sourceId: place })) }),
+    } as unknown as RegistryDiscovery;
+    const service = new SwatService(config(), client, discovery, store);
+    await service.getHours({ date: today, limit: 100 }, true);
+    vi.mocked(client.query).mockClear();
+
+    const result = await service.getHours({});
+
+    expect(result.items).toHaveLength(40);
+    expect(result.meta.truncated).toBe(false);
+    expect(client.query).not.toHaveBeenCalled();
   });
 
   it('retires only the named domain\'s missing sources', async () => {

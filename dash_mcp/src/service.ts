@@ -21,6 +21,10 @@ export const TRANSIT_PAIRS: ReadonlyArray<{ origin: TransitStation; destination:
   (origin) => transitStations.filter((destination) => destination !== origin).map((destination) => ({ origin, destination })),
 );
 
+/** Above the number of hours sources the Dash lists, so a default read returns every place. */
+export const HOURS_DEFAULT_LIMIT = 60;
+export const HOURS_MAX_LIMIT = 100;
+
 /** Days ahead the scheduled content poll keeps in the events snapshot. */
 export const EVENTS_POLL_DAYS = 30;
 /** Furthest ahead the Dash `CampusEvents` query can list. */
@@ -136,7 +140,7 @@ export class SwatService {
 
   async getHours(input: HoursInput, refresh = false): Promise<FeedResult<JsonObject>> {
     const fetchedAt = new Date();
-    const limit = input.limit ?? 30;
+    const limit = input.limit ?? HOURS_DEFAULT_LIMIT;
     const resolvedDate = input.date ?? currentCampusDate(fetchedAt);
     const range = campusDayRange(resolvedDate);
     if (refresh) {
