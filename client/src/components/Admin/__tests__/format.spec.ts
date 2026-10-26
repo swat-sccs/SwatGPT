@@ -6,6 +6,7 @@ import {
   formatBucket,
   floorToMinute,
   formatRelative,
+  toCsv,
 } from '../format';
 
 const NOW = Date.parse('2026-10-05T12:34:56.789Z');
@@ -94,5 +95,18 @@ describe('admin format helpers', () => {
     expect(formatRelative(new Date(NOW + 2 * 60 * 60 * 1000).toISOString(), NOW)).toBe(
       'in 2 hours',
     );
+  });
+  it('writes RFC 4180 rows, quoting only fields that need it', () => {
+    expect(
+      toCsv([
+        ['id', 'name'],
+        ['u1', 'Ada Lovelace'],
+      ]),
+    ).toBe('id,name\r\nu1,Ada Lovelace\r\n');
+    expect(toCsv([['Lovelace, Ada', 'says "hi"', 'two\nlines', 'x\ry']])).toBe(
+      '"Lovelace, Ada","says ""hi""","two\nlines","x\ry"\r\n',
+    );
+    expect(toCsv([[1, true, null, undefined, '']])).toBe('1,true,,,\r\n');
+    expect(toCsv([])).toBe('');
   });
 });

@@ -158,6 +158,7 @@
   "com_admin_untitled": "Untitled conversation",
   "com_admin_updated_at": "Updated {{0}}",
   "com_admin_user_all_conversations": "All conversations",
+  "com_admin_users_download_csv": "Download CSV",
   "com_admin_users_search_placeholder": "Search by name or email",
   "com_agents_agent_card_label": "{{name}} agent. {{description}}",
   "com_agents_all": "All Agents",

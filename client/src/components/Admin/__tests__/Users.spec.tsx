@@ -2,7 +2,7 @@ import { screen, fireEvent, waitFor } from '@testing-library/react';
 import type { TAdminUsageUsersResponse } from 'librechat-data-provider';
 import { renderAdmin, mockCapabilities, pending, mocks } from '../testing/utils';
 import { user } from '../testing/fixtures';
-import Users from '../Users';
+import Users, { usersCsv } from '../Users';
 
 describe('admin users', () => {
   it('shows a loading state', async () => {
@@ -115,6 +115,63 @@ describe('admin users', () => {
     expect(mocks.getAdminUsageUsers).toHaveBeenLastCalledWith(
       expect.objectContaining({ to: '2026-10-01T13:05:00.000Z' }),
     );
+  });
+
+  it('serialises the visible users with a header row', () => {
+    const [header, row] = usersCsv([{ ...user, name: 'Lovelace, Ada' }]).split('\r\n');
+    expect(header).toBe(
+      'id,name,username,email,role,requests,errors,promptTokens,completionTokens,conversations,flagged,lastActiveAt,banned',
+    );
+    expect(row).toBe(
+      'user-1,"Lovelace, Ada",ada,ada@swarthmore.edu,USER,42,2,300000,5000,9,1,2026-09-08T12:00:00.000Z,false',
+    );
+  });
+
+  describe('csv download', () => {
+    const originalCreateObjectURL = URL.createObjectURL;
+    const originalRevokeObjectURL = URL.revokeObjectURL;
+    let downloads: Array<{ href: string; download: string | null }>;
+    let clickSpy: jest.SpyInstance;
+
+    beforeEach(() => {
+      downloads = [];
+      URL.createObjectURL = jest.fn(() => 'blob:users-1');
+      URL.revokeObjectURL = jest.fn();
+      clickSpy = jest.spyOn(HTMLAnchorElement.prototype, 'click').mockImplementation(function (
+        this: HTMLAnchorElement,
+      ) {
+        downloads.push({ href: this.href, download: this.getAttribute('download') });
+      });
+    });
+
+    afterEach(() => {
+      clickSpy.mockRestore();
+      URL.createObjectURL = originalCreateObjectURL;
+      URL.revokeObjectURL = originalRevokeObjectURL;
+    });
+
+    it('downloads the current page as a CSV file', async () => {
+      mockCapabilities();
+      mocks.getAdminUsageUsers.mockResolvedValue({ users: [user], total: 1, limit: 25, offset: 0 });
+      renderAdmin(<Users />);
+      await screen.findByText('Ada Lovelace');
+
+      fireEvent.click(screen.getByRole('button', { name: 'Download CSV' }));
+
+      await waitFor(() => expect(downloads).toHaveLength(1));
+      const blob = (URL.createObjectURL as jest.Mock).mock.calls[0][0] as Blob;
+      expect(blob.type).toBe('text/csv;charset=utf-8');
+      expect(blob.size).toBe(usersCsv([user]).length);
+      expect(downloads[0]).toEqual({ href: 'blob:users-1', download: 'swatgpt-users-7d-1-1.csv' });
+    });
+
+    it('offers nothing to download for an empty page', async () => {
+      mockCapabilities();
+      mocks.getAdminUsageUsers.mockResolvedValue({ users: [], total: 0, limit: 25, offset: 0 });
+      renderAdmin(<Users />);
+      await screen.findByText('Nothing to show');
+      expect(screen.getByRole('button', { name: 'Download CSV' })).toBeDisabled();
+    });
   });
 
   it('shows an empty state', async () => {

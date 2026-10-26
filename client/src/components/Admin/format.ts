@@ -117,3 +117,19 @@ export const fromLocalInput = (value: string): string | undefined =>
   value ? new Date(value).toISOString() : undefined;
 
 export const toDateInput = (iso: string | undefined): string => (iso ? toLocalInput(iso) : '');
+
+type CsvValue = string | number | boolean | null | undefined;
+
+const CSV_SPECIAL = /[",\r\n]/;
+
+const csvField = (value: CsvValue): string => {
+  if (value == null) {
+    return '';
+  }
+  const text = String(value);
+  return CSV_SPECIAL.test(text) ? `"${text.replace(/"/g, '""')}"` : text;
+};
+
+/** RFC 4180: comma-separated, CRLF-terminated rows, quoting only fields that need it. */
+export const toCsv = (rows: ReadonlyArray<ReadonlyArray<CsvValue>>): string =>
+  rows.map((row) => row.map(csvField).join(',') + '\r\n').join('');

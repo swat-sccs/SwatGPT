@@ -1,6 +1,6 @@
 import { useState } from 'react';
 import { Link } from 'react-router-dom';
-import { ArrowDown } from 'lucide-react';
+import { ArrowDown, Download } from 'lucide-react';
 import {
   Table,
   Input,
@@ -19,8 +19,9 @@ import { Loading, ErrorState, Empty } from './States';
 import { RangePicker, useRange } from './Range';
 import { AdminCapability, Require } from './access';
 import { useAdminUsageUsers } from '~/data-provider';
+import { formatInt, toCsv } from './format';
+import { triggerDownload } from '~/utils';
 import { useLocalize } from '~/hooks';
-import { formatInt } from './format';
 import { ADMIN_ROOT } from './Nav';
 import When from './When';
 import Pill from './Pill';
@@ -33,6 +34,25 @@ const sortColumns: { sort: TAdminUsageUserSort; labelKey: TranslationKeys }[] = 
   { sort: 'errors', labelKey: 'com_admin_col_errors' },
   { sort: 'lastActive', labelKey: 'com_admin_col_last_active' },
 ];
+
+const CSV_COLUMNS = [
+  'id',
+  'name',
+  'username',
+  'email',
+  'role',
+  'requests',
+  'errors',
+  'promptTokens',
+  'completionTokens',
+  'conversations',
+  'flagged',
+  'lastActiveAt',
+  'banned',
+] as const satisfies ReadonlyArray<keyof TAdminUsageUser>;
+
+export const usersCsv = (users: TAdminUsageUser[]): string =>
+  toCsv([CSV_COLUMNS, ...users.map((user) => CSV_COLUMNS.map((column) => user[column]))]);
 
 const cellFor: Record<TAdminUsageUserSort, (user: TAdminUsageUser) => ReactNode> = {
   requests: (user) => formatInt(user.requests),
@@ -105,11 +125,28 @@ function Content() {
   const end = Math.min(shownOffset + users.length, total);
   const paging = query.isFetching;
 
+  const download = () => {
+    const blob = new Blob([usersCsv(users)], { type: 'text/csv;charset=utf-8' });
+    const name = `swatgpt-users-${preset}-${shownOffset + 1}-${end}.csv`;
+    triggerDownload(URL.createObjectURL(blob), name);
+  };
+
   return (
     <div className="space-y-4">
       <header className="flex flex-wrap items-center justify-between gap-3">
         <h2 className="text-xl font-semibold">{localize('com_admin_nav_users')}</h2>
-        <RangePicker preset={preset} setPreset={changePreset} />
+        <div className="flex flex-wrap items-center gap-2">
+          <RangePicker preset={preset} setPreset={changePreset} />
+          <Button
+            variant="outline"
+            size="sm"
+            disabled={paging || users.length === 0}
+            onClick={download}
+          >
+            <Download className="size-4" aria-hidden="true" />
+            {localize('com_admin_users_download_csv')}
+          </Button>
+        </div>
       </header>
 
       <form role="search" onSubmit={submitSearch} className="flex max-w-md gap-2">
