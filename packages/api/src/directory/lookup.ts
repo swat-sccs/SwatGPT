@@ -1,4 +1,5 @@
 import { logger } from '@librechat/data-schemas';
+import type { DirectoryIntent } from './intent';
 import type { DirectoryLoader } from './store';
 import type { DirectoryLookup } from './match';
 import { formatDirectoryContext } from './format';
@@ -52,12 +53,30 @@ function auditReverseLookup(lookup: DirectoryLookup, requester?: DirectoryReques
   logger.info('[directory] reverse lookup', { userId: requester?.userId ?? 'unknown', ...audit });
 }
 
+/** Audits a person lookup the same way: who asked, how many matched, and whether the phrasing was explicit. */
+function auditPersonLookup(
+  intent: DirectoryIntent,
+  lookup: DirectoryLookup,
+  requester?: DirectoryRequester,
+): void {
+  if (intent.kind !== 'person' || lookup.kind !== 'person') {
+    return;
+  }
+  logger.info('[directory] person lookup', {
+    userId: requester?.userId ?? 'unknown',
+    kind: intent.roommates ? 'roommates' : 'person',
+    total: lookup.total,
+    explicit: intent.explicit,
+  });
+}
+
 /**
  * Resolves a housing question ("where does Jane Doe live?") against the
  * in-memory student directory and returns a context block for the model, or
  * `undefined` when the message is not a directory question. Fail-open: any
- * error yields `undefined` so the chat message is never affected. Reverse
- * lookups are capped at `MAX_RESIDENTS` and logged with the requester's id.
+ * error yields `undefined` so the chat message is never affected. Every
+ * lookup is logged with the requester's id and counts (never student data);
+ * reverse lookups are additionally capped at `MAX_RESIDENTS`.
  */
 export async function resolveDirectoryContext(
   text: string,
@@ -80,6 +99,7 @@ export async function resolveDirectoryContext(
     if (!lookup) {
       return undefined;
     }
+    auditPersonLookup(intent, lookup, requester);
     auditReverseLookup(lookup, requester);
     return formatDirectoryContext(lookup);
   } catch (error) {

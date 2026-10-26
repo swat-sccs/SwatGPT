@@ -17,15 +17,37 @@ interface DirectoryState {
 
 const state: DirectoryState = { loadedAt: 0 };
 
+/** Usernames listed in `DIRECTORY_OPTOUT_UIDS` (comma-separated) are dropped before indexing. */
+function optOutUids(): ReadonlySet<string> {
+  const raw = process.env.DIRECTORY_OPTOUT_UIDS ?? '';
+  return new Set(
+    raw
+      .split(',')
+      .map((uid) => uid.trim().toLowerCase())
+      .filter(Boolean),
+  );
+}
+
+function withoutOptOuts(entries: DirectoryEntry[]): DirectoryEntry[] {
+  const optedOut = optOutUids();
+  if (optedOut.size === 0) {
+    return entries;
+  }
+  return entries.filter((entry) => !optedOut.has(entry.uid.toLowerCase()));
+}
+
 function refresh(load: DirectoryLoader): Promise<DirectoryIndex | undefined> {
   if (state.loading) {
     return state.loading;
   }
   state.loading = load()
-    .then((entries) => {
+    .then((loaded) => {
+      const entries = withoutOptOuts(loaded);
       state.index = entries.length > 0 ? buildIndex(entries) : undefined;
       state.loadedAt = entries.length > 0 ? Date.now() : Date.now() - REFRESH_MS + RETRY_MS;
-      logger.info(`[directory] loaded ${entries.length} directory entries`);
+      logger.info(
+        `[directory] loaded ${entries.length} directory entries (${loaded.length - entries.length} opted out)`,
+      );
       return state.index;
     })
     .catch((error: unknown) => {

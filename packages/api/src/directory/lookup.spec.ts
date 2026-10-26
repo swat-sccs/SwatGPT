@@ -225,6 +225,26 @@ describe('resolveDirectoryContext', () => {
     expect(JSON.stringify(audits)).not.toMatch(/dana\d|Resident|Dana 1/);
   });
 
+  it('audits person lookups with the requester, counts and phrasing but no student data', async () => {
+    const requester = { userId: 'user-123' };
+    await resolveDirectoryContext('Where does Jane Doe live?', load, requester);
+    await resolveDirectoryContext('where does Alex live', load, requester);
+    await resolveDirectoryContext('Where does Taylor Swift live?', load, requester);
+    await resolveDirectoryContext('Where is Jane Doe?', load, requester);
+    await resolveDirectoryContext("who are Jane Doe's roommates", load, requester);
+    await resolveDirectoryContext('Where is Parrish Hall?', load, requester);
+
+    const audits = info.mock.calls.filter(([message]) => message === '[directory] person lookup');
+    expect(audits.map(([, meta]) => meta)).toEqual([
+      { userId: 'user-123', kind: 'person', total: 1, explicit: true },
+      { userId: 'user-123', kind: 'person', total: 2, explicit: true },
+      { userId: 'user-123', kind: 'person', total: 0, explicit: true },
+      { userId: 'user-123', kind: 'person', total: 1, explicit: false },
+      { userId: 'user-123', kind: 'roommates', total: 1, explicit: true },
+    ]);
+    expect(JSON.stringify(audits)).not.toMatch(/jane|doe|alex|swift|Willets/i);
+  });
+
   it('audits reverse lookups without a requester as unknown', async () => {
     await resolveDirectoryContext('Who lives in Willets 214?', load);
     expect(info).toHaveBeenCalledWith('[directory] reverse lookup', {

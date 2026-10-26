@@ -22,13 +22,45 @@ async function flush(): Promise<void> {
   await new Promise((resolve) => setImmediate(resolve));
 }
 
+const roe: DirectoryEntry = {
+  uid: 'JRoe1',
+  firstName: 'John',
+  lastName: 'Roe',
+  gradYear: 2028,
+  dorm: 'Willets',
+  room: '214',
+  dormHidden: false,
+};
+
 beforeEach(() => {
   resetDirectoryStore();
+  delete process.env.DIRECTORY_OPTOUT_UIDS;
   jest.useFakeTimers({ doNotFake: ['setImmediate', 'nextTick'] });
 });
 
 afterEach(() => {
   jest.useRealTimers();
+});
+
+describe('DIRECTORY_OPTOUT_UIDS', () => {
+  it('drops listed usernames before indexing, ignoring case and spacing', async () => {
+    process.env.DIRECTORY_OPTOUT_UIDS = ' jroe1 ,nobody1,';
+    const index = await getDirectoryIndex(jest.fn(async () => [jane, roe]));
+    expect(index?.entries.map((entry) => entry.uid)).toEqual(['jdoe1']);
+    expect(index?.byUid.has('jroe1')).toBe(false);
+    expect(index?.byDorm.get('willets')).toEqual([0]);
+  });
+
+  it('yields no index when every entry is opted out', async () => {
+    process.env.DIRECTORY_OPTOUT_UIDS = 'jdoe1';
+    expect(await getDirectoryIndex(jest.fn(async () => [jane]))).toBeUndefined();
+  });
+
+  it('keeps every entry when the list is unset or empty', async () => {
+    process.env.DIRECTORY_OPTOUT_UIDS = '';
+    const index = await getDirectoryIndex(jest.fn(async () => [jane, roe]));
+    expect(index?.entries).toHaveLength(2);
+  });
 });
 
 describe('getDirectoryIndex', () => {
