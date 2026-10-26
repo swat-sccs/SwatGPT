@@ -89,7 +89,7 @@ export function buildIndex(entries: ReadonlyArray<DirectoryEntry>): DirectoryInd
     if (lastTokens.length > 1) {
       push(byLast, lastTokens.join(' '), index);
     }
-    if (!entry.dorm) {
+    if (!entry.dorm || entry.dormHidden) {
       return;
     }
     const dormKey = normalizeKey(entry.dorm);
@@ -154,9 +154,12 @@ function looksLikeName(tokens: string[]): boolean {
   );
 }
 
+/** Only rooms both students show in Cygnet count; a hidden dorm never places anyone in a room. */
 function sameRoom(a: DirectoryEntry, b: DirectoryEntry): boolean {
   return (
     a.uid !== b.uid &&
+    !a.dormHidden &&
+    !b.dormHidden &&
     !!a.dorm &&
     !!a.room &&
     a.dorm === b.dorm &&
