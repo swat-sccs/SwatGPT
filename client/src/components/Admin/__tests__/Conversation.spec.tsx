@@ -128,6 +128,49 @@ describe('admin conversation reader', () => {
     expect(within(await screen.findByRole('dialog')).queryByRole('alert')).not.toBeInTheDocument();
   });
 
+  describe('copy link', () => {
+    const writeText = jest.fn();
+
+    beforeEach(() => {
+      writeText.mockReset();
+      Object.defineProperty(navigator, 'clipboard', { value: { writeText }, configurable: true });
+    });
+
+    it('copies the absolute permalink and confirms with a toast', async () => {
+      const showToast = jest.fn();
+      writeText.mockResolvedValue(undefined);
+      mockCapabilities();
+      mocks.getAdminConversation.mockResolvedValue(conversationDetail);
+      renderAdmin(<Conversation />, { ...routeOptions, showToast });
+
+      fireEvent.click(await screen.findByRole('button', { name: 'Copy link' }));
+
+      await waitFor(() =>
+        expect(showToast).toHaveBeenCalledWith({ message: 'Link copied', status: 'success' }),
+      );
+      expect(writeText).toHaveBeenCalledWith(
+        `${window.location.origin}/d/admin/conversations/convo-1`,
+      );
+    });
+
+    it('reports a clipboard failure', async () => {
+      const showToast = jest.fn();
+      writeText.mockRejectedValue(new Error('denied'));
+      mockCapabilities();
+      mocks.getAdminConversation.mockResolvedValue(conversationDetail);
+      renderAdmin(<Conversation />, { ...routeOptions, showToast });
+
+      fireEvent.click(await screen.findByRole('button', { name: 'Copy link' }));
+
+      await waitFor(() =>
+        expect(showToast).toHaveBeenCalledWith({
+          message: 'Failed to copy to clipboard',
+          status: 'error',
+        }),
+      );
+    });
+  });
+
   it('hides the export button without export:conversations', async () => {
     mockCapabilities(['access:admin', 'read:conversations']);
     mocks.getAdminConversation.mockResolvedValue(conversationDetail);

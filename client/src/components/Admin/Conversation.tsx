@@ -1,6 +1,6 @@
 import { useState } from 'react';
 import { Link, useParams } from 'react-router-dom';
-import { Flag, Download } from 'lucide-react';
+import { Flag, Link2, Download } from 'lucide-react';
 import { Button, useToastContext } from '@librechat/client';
 import type { TAdminConversationExport } from '~/data-provider';
 import { useAdminConversation, useExportConversation } from '~/data-provider';
@@ -9,8 +9,8 @@ import { formatDate, formatInt } from './format';
 import { Loading, ErrorState } from './States';
 import FlagDialog, { FlagList } from './Flag';
 import { triggerDownload } from '~/utils';
+import { conversationPath, userPath } from './Rows';
 import { useLocalize } from '~/hooks';
-import { userPath } from './Rows';
 import Message from './Message';
 import Pill from './Pill';
 
@@ -45,6 +45,24 @@ function ExportButton({ conversationId }: { conversationId: string }) {
   );
 }
 
+function CopyLinkButton({ conversationId }: { conversationId: string }) {
+  const localize = useLocalize();
+  const { showToast } = useToastContext();
+
+  const copy = () =>
+    navigator.clipboard
+      .writeText(new URL(conversationPath(conversationId), window.location.origin).href)
+      .then(() => showToast({ message: localize('com_ui_link_copied'), status: 'success' }))
+      .catch(() => showToast({ message: localize('com_ui_copy_failed'), status: 'error' }));
+
+  return (
+    <Button variant="outline" size="sm" onClick={copy}>
+      <Link2 className="size-4" aria-hidden="true" />
+      {localize('com_ui_copy_link')}
+    </Button>
+  );
+}
+
 function Content({ conversationId }: { conversationId: string }) {
   const localize = useLocalize();
   const { has } = useAdminAccess();
@@ -70,7 +88,8 @@ function Content({ conversationId }: { conversationId: string }) {
               <Pill tone="warning">{localize('com_admin_status_flagged')}</Pill>
             )}
           </h2>
-          <div className="flex gap-2">
+          <div className="flex flex-wrap gap-2">
+            <CopyLinkButton conversationId={conversationId} />
             {has(AdminCapability.EXPORT) && <ExportButton conversationId={conversationId} />}
             <Button variant="outline" size="sm" onClick={() => setFlagOpen(true)}>
               <Flag className="size-4" aria-hidden="true" />
