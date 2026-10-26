@@ -1,6 +1,7 @@
 import { z } from 'zod';
 
-const bool = z.string().optional().transform((value) => value !== 'false' && value !== '0');
+const bool = (fallback: boolean) => z.enum(['true', 'false', '1', '0']).default(fallback ? 'true' : 'false')
+  .transform((value) => value === 'true' || value === '1');
 const positiveInt = (fallback: number) => z.coerce.number().int().positive().default(fallback);
 const nonNegativeInt = (fallback: number) => z.coerce.number().int().min(0).default(fallback);
 
@@ -12,12 +13,12 @@ const EnvSchema = z.object({
   MCP_TOOL_TIMEOUT_MS: positiveInt(5_000),
   MCP_SESSION_IDLE_SECONDS: positiveInt(1_800),
   MCP_MAX_SESSIONS: positiveInt(256),
-  DATABASE_URL: z.string().min(1).default('postgres://swatgpt:swatgpt@localhost:5432/swatgpt'),
+  DATABASE_URL: z.string().min(1, 'DATABASE_URL is required'),
   DASH_BASE_URL: z.string().url().default('https://dash.swarthmore.edu'),
   UPSTREAM_TIMEOUT_MS: positiveInt(10_000),
   UPSTREAM_RETRIES: z.coerce.number().int().min(0).max(5).default(2),
   UPSTREAM_CONCURRENCY: positiveInt(6),
-  POLLING_ENABLED: bool,
+  POLLING_ENABLED: bool(true),
   ALERT_POLL_INTERVAL_SECONDS: positiveInt(60),
   REALTIME_POLL_INTERVAL_SECONDS: positiveInt(300),
   CONTENT_POLL_INTERVAL_SECONDS: positiveInt(900),
