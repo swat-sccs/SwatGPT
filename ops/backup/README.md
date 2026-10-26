@@ -21,7 +21,8 @@ Meilisearch is not backed up. It is a derived index of MongoDB, and LibreChat re
 Qdrant can also be rebuilt by re-running `ingest/ingest.py`. The snapshot just makes a restore
 take minutes instead of a re-scrape.
 
-Each run writes to `$BACKUP_ROOT/.tmp-<name>.XXXXXX`, writes `MANIFEST` and `SHA256SUMS`, fsyncs,
+Each run writes to `$BACKUP_ROOT/.tmp-<name>.XXXXXX`, writes `MANIFEST` (components, timestamps,
+the Qdrant collection, `files.paths`, and artifact sizes) and `SHA256SUMS`, fsyncs,
 then renames the directory to `$BACKUP_ROOT/<YYYY-MM-DDTHHMMSSZ>` (UTC) and moves the `latest`
 symlink atomically. A failed or killed run never publishes a partial directory and never prunes.
 The next run deletes any leftover `.tmp-*` directory. Files are mode 0600 (`umask 077`) because
@@ -247,7 +248,8 @@ script:
 3. runs `mongorestore --stopOnError`, `pg_restore --exit-on-error`, and a Qdrant snapshot upload;
 4. fails unless the `LibreChat` database has collections, Postgres has tables, and the
    collection has points, logging per-collection document counts;
-5. lists the files archive;
+5. checks that every top-level path recorded at backup time (`files.paths` in `MANIFEST`) is in
+   the files archive, so an archive of the wrong directories fails even with valid checksums;
 6. removes the containers and the scratch data, and records the metrics.
 
 It shares the backup lock (waiting up to an hour), so it never reads a backup while one is being
@@ -274,8 +276,8 @@ service names as production, data on tmpfs), seeds it, and checks:
 - a failure mid-run: non-zero exit, nothing published, no leftover work dir, snapshot still
   deleted, `last_success` unchanged;
 - the concurrency lock;
-- `verify.sh` cleaning up after a killed run, passing, and failing on a checksum mismatch and on a truncated archive with valid
-  checksums;
+- `verify.sh` cleaning up after a killed run, passing, and failing on a checksum mismatch, on a
+  truncated archive with valid checksums, and on a files archive that lacks a recorded path;
 - every restore command in this runbook.
 
 It needs Docker with the `mongo:8.0.20`, `postgres:16` (override with `TEST_POSTGRES_IMAGE`),

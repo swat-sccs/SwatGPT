@@ -165,6 +165,7 @@ test_happy_path() {
   check "last_success_timestamp equals the manifest completion time" \
     [ "$(metric swatgpt_backup.prom swatgpt_backup_last_success_timestamp)" == "$(awk -F= '$1 == "completed_epoch" { print $2 }' "$latest/MANIFEST")" ]
   check "size metrics are exported per artifact" grep -q 'swatgpt_backup_size_bytes{file="mongo.archive.gz"}' "$TEXTFILE_DIR/swatgpt_backup.prom"
+  check "MANIFEST records the archived paths" grep -qx 'files.paths=uploads client/public/images data' "$latest/MANIFEST"
 }
 
 test_failure_keeps_previous() {
@@ -226,6 +227,20 @@ test_verify() {
   mv "$TMP/sums" "$truncated/SHA256SUMS"
   check "verify fails on a truncated mongo archive with valid checksums" bash -c "! '$BACKUP_DIR/verify.sh' '$truncated' >/dev/null 2>&1"
   check "failed verify keeps the previous success timestamp" [ "$(metric swatgpt_backup_verify.prom swatgpt_backup_last_verify_success_timestamp)" -gt 0 ]
+
+  local wrong="$TMP/wrongcontent" stage="$TMP/stage"
+  cp -a "$(readlink -f "$BACKUP_ROOT/latest")" "$wrong"
+  mkdir -p "$stage/uploads"
+  echo upload >"$stage/uploads/a.txt"
+  tar -C "$stage" -czf "$wrong/files.tar.gz" uploads
+  (cd "$wrong" && find . -maxdepth 1 -type f ! -name SHA256SUMS -printf '%f\n' | sort | xargs sha256sum -- >"$TMP/sums")
+  mv "$TMP/sums" "$wrong/SHA256SUMS"
+  if out=$("$BACKUP_DIR/verify.sh" "$wrong" 2>&1); then
+    fail "verify fails on a files archive missing recorded paths"
+  else
+    pass "verify fails on a files archive missing recorded paths"
+  fi
+  check "verify names the missing paths" grep -q 'archive is missing client/public/images data' <<<"$out"
 }
 
 test_runbook_restore() {

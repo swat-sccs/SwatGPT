@@ -86,10 +86,19 @@ verify_qdrant() {
   log "qdrant: $collection restored with $points points"
 }
 
+# verify_files DIR: every top-level path recorded at backup time (files.paths in MANIFEST) must be
+# in the archive; counting entries would pass an archive of the wrong directories.
 verify_files() {
-  local dir=$1 entries
-  entries=$(tar -tzf "$dir/files.tar.gz" | wc -l)
-  log "files: archive lists $entries entries"
+  local dir=$1 expected path listing
+  local -a missing=()
+  expected=$(manifest_value "$dir" files.paths)
+  [[ -n "$expected" ]] || die "files: MANIFEST has no files.paths, so the archive's contents cannot be checked"
+  listing=$(tar -tzf "$dir/files.tar.gz")
+  for path in $expected; do
+    grep -qE "^${path}(/|$)" <<<"$listing" || missing+=("$path")
+  done
+  (( ${#missing[@]} == 0 )) || die "files: archive is missing ${missing[*]}"
+  log "files: archive lists $(wc -l <<<"$listing") entries and covers $expected"
 }
 
 # remove_scratch DIR: restored data is owned by the containers' users, so empty DIR from inside a container.

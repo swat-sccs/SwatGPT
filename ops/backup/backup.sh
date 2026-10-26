@@ -114,6 +114,7 @@ write_manifest() {
     printf 'started_epoch=%s\n' "$STARTED_AT"
     printf 'completed_epoch=%s\n' "$(date +%s)"
     [[ -n "$QDRANT_COLLECTION" ]] && printf 'qdrant_collection=%s\nqdrant_alias=%s\n' "$QDRANT_COLLECTION" "$QDRANT_ALIAS"
+    [[ " $BACKUP_COMPONENTS " == *" files "* ]] && printf 'files.paths=%s\n' "$FILES_PATHS"
     for file in "$dir"/*; do
       printf 'size.%s=%s\n' "$(basename "$file")" "$(stat -c %s "$file")"
     done
