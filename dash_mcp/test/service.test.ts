@@ -1,5 +1,6 @@
 import { describe, expect, it, vi } from 'vitest';
 import { loadConfig } from '../src/config.js';
+import { metrics } from '../src/metrics.js';
 import { campusDayRange, campusWallTime, currentCampusDate } from '../src/util.js';
 import { PERSIST_CONCURRENCY, SwatService, TRANSIT_PAIRS, TRANSIT_POLL_LIMIT } from '../src/service.js';
 import type { PgStore } from '../src/storage/store.js';
@@ -305,6 +306,34 @@ describe('persist fan-out', () => {
 
     expect(store.replaceSourceRecords).toHaveBeenCalledTimes(places.length);
     expect(peak).toBe(PERSIST_CONCURRENCY);
+  });
+});
+
+describe('scheduled content poll', () => {
+  it('records each domain\'s poll result so one broken feed does not hide the others', async () => {
+    const client = {
+      query: vi.fn().mockImplementation((operation: string) => operation === 'CampusNews'
+        ? Promise.reject(new Error('RSS gateway timeout'))
+        : Promise.resolve({ data: [] })),
+    } as unknown as DashClient;
+    const store = {
+      replaceSourceRecords: vi.fn().mockResolvedValue(undefined),
+      markDomainSynced: vi.fn().mockResolvedValue(undefined),
+      deactivateMissingSources: vi.fn().mockResolvedValue(0),
+    } as unknown as PgStore;
+    const discovery = {
+      current: vi.fn().mockReturnValue({ hours: [], dining: [], news: [], resources: [] }),
+    } as unknown as RegistryDiscovery;
+    const service = new SwatService(config(), client, discovery, store);
+
+    await expect(service.syncContent()).rejects.toThrow('news: RSS gateway timeout');
+
+    const rendered = await metrics.render();
+    expect(rendered).toMatch(/swatgpt_mcp_upstream_polls_total\{kind="content:news",result="error"\} [1-9]/);
+    expect(rendered).toMatch(/swatgpt_mcp_upstream_polls_total\{kind="content:hours",result="success"\} [1-9]/);
+    expect(rendered).toMatch(/swatgpt_mcp_upstream_polls_total\{kind="content:resources",result="success"\} [1-9]/);
+    expect(rendered).toMatch(/swatgpt_mcp_upstream_last_success_timestamp_seconds\{kind="content:hours"\}/);
+    expect(rendered).not.toMatch(/swatgpt_mcp_upstream_last_success_timestamp_seconds\{kind="content:news"\}/);
   });
 });
 

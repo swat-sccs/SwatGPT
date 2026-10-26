@@ -1,5 +1,6 @@
 import pLimit from 'p-limit';
 import type { Config } from './config.js';
+import { metrics } from './metrics.js';
 import { FULL_SYNC_SCOPE, PgStore } from './storage/store.js';
 import type {
   ArchiveQuery, DashboardRegistry, Domain, FeedResult, JsonObject, NormalizedRecord, TimeWindow, TransitStation,
@@ -519,19 +520,23 @@ export class SwatService {
   }
 
   async syncRealtime(): Promise<void> {
-    assertPollResults(await Promise.allSettled([
-      this.getWeather(7, true),
-      ...TRANSIT_PAIRS.map((pair) => this.getTransit({ ...pair, limit: TRANSIT_POLL_LIMIT }, true)),
-    ]));
+    await runDomainPolls('realtime', [
+      ['weather', this.getWeather(7, true)],
+      ['transit', Promise.all(TRANSIT_PAIRS.map((pair) => this.getTransit({ ...pair, limit: TRANSIT_POLL_LIMIT }, true)))],
+    ]);
   }
 
   async syncContent(): Promise<void> {
     const today = currentCampusDate();
-    assertPollResults(await Promise.allSettled([
-      this.getHours({ date: today, limit: 100 }, true), this.getDining({ date: today, limit: 100 }, true),
-      this.searchEvents({ limit: 100 }, true), this.searchNews({ limit: 100 }, true), this.getSports({ limit: 100 }, true),
-      this.getMindCandy(true), this.getResources(undefined, 100, true),
-    ]));
+    await runDomainPolls('content', [
+      ['hours', this.getHours({ date: today, limit: 100 }, true)],
+      ['dining', this.getDining({ date: today, limit: 100 }, true)],
+      ['events', this.searchEvents({ limit: 100 }, true)],
+      ['news', this.searchNews({ limit: 100 }, true)],
+      ['sports', this.getSports({ limit: 100 }, true)],
+      ['mind_candy', this.getMindCandy(true)],
+      ['resources', this.getResources(undefined, 100, true)],
+    ]);
   }
 
   /** Bounds a live read-through so it finishes inside the MCP tool timeout. */
@@ -612,11 +617,18 @@ export class SwatService {
   }
 }
 
-function assertPollResults(results: PromiseSettledResult<unknown>[]): void {
-  const failures = results.filter((result): result is PromiseRejectedResult => result.status === 'rejected');
-  if (failures.length) {
-    throw new Error(`${failures.length} polling request(s) failed: ${failures.map((failure) => failure.reason instanceof Error ? failure.reason.message : String(failure.reason)).join('; ')}`);
-  }
+/**
+ * Waits for every domain poll of a job, records a `<job>:<domain>` poll result per domain so
+ * one broken feed does not hide the others' health, then fails the job if any domain failed.
+ */
+async function runDomainPolls(job: string, polls: ReadonlyArray<[Domain, Promise<unknown>]>): Promise<void> {
+  const results = await Promise.allSettled(polls.map(([, poll]) => poll));
+  const failures = results.flatMap((result, index) => {
+    const domain = polls[index]![0];
+    metrics.recordPoll(`${job}:${domain}`, result.status === 'fulfilled' ? 'success' : 'error');
+    return result.status === 'rejected' ? [`${domain}: ${errorMessage(result.reason)}`] : [];
+  });
+  if (failures.length) throw new Error(`${failures.length} polling request(s) failed: ${failures.join('; ')}`);
 }
 
 function filterRange(records: NormalizedRecord[], start: Date, end: Date): NormalizedRecord[] {
