@@ -8,6 +8,7 @@ import { retrieveKbContext, retrieveKbContextDetailed } from './retrieve';
 import { createMetrics } from '~/app/metrics';
 import { embedText, contextEntrySources } from './format';
 import { buildSparseQuery } from './lexical';
+import { retrievalCache } from './cache';
 
 const EMBEDDINGS_URL = 'http://tei-embed.test';
 const RERANK_URL = 'http://tei-rerank.test';
@@ -54,6 +55,7 @@ describe('retrieveKbContext', () => {
   let infoSpy: jest.SpyInstance;
 
   beforeEach(() => {
+    retrievalCache.clear();
     process.env.TEI_EMBEDDINGS_URL = EMBEDDINGS_URL;
     process.env.TEI_RERANK_URL = RERANK_URL;
     process.env.QDRANT_URL = QDRANT_URL;
@@ -428,6 +430,60 @@ describe('retrieveKbContext', () => {
     });
   });
 
+  describe('retrieval cache', () => {
+    const hits = [0, 1, 2].map(kbHit);
+    const scores: RerankResult[] = [
+      { index: 0, score: 0.9 },
+      { index: 1, score: 0.8 },
+      { index: 2, score: 0.2 },
+    ];
+
+    it('serves a repeated query from the cache without calling any service', async () => {
+      jest.useFakeTimers();
+      mockServices({ hits, scores });
+      const first = await retrieveKbContextDetailed(QUERY);
+      const second = await retrieveKbContextDetailed(QUERY);
+
+      expect(first.cached).toBeUndefined();
+      expect(second).toMatchObject({
+        result: 'hit',
+        chunks: 2,
+        cached: true,
+        context: first.context,
+      });
+      expect(fetchMock).toHaveBeenCalledTimes(4);
+
+      jest.advanceTimersByTime(60_000);
+      const third = await retrieveKbContextDetailed(QUERY);
+      expect(third.cached).toBeUndefined();
+      expect(fetchMock).toHaveBeenCalledTimes(8);
+    });
+
+    it('caches empty results but never failures', async () => {
+      mockServices({ hits: [] });
+      await retrieveKbContextDetailed(QUERY);
+      const empty = await retrieveKbContextDetailed(QUERY);
+      expect(empty).toMatchObject({ result: 'empty', chunks: 0, cached: true });
+      expect(fetchMock).toHaveBeenCalledTimes(3);
+
+      mockServices({ searchResponse: errorResponse(500) });
+      await retrieveKbContextDetailed('is the registrar open today?');
+      await retrieveKbContextDetailed('is the registrar open today?');
+      expect(warnSpy).toHaveBeenCalledTimes(2);
+    });
+
+    it('keys the cache on the search and rerank queries, so follow-ups do not share entries', async () => {
+      mockServices({ hits, scores });
+      await retrieveKbContextDetailed({ userText: QUERY, retrievalQuery: QUERY });
+      const followup = await retrieveKbContextDetailed({
+        userText: QUERY,
+        retrievalQuery: `When is Sharples open?\n${QUERY}`,
+      });
+      expect(followup.cached).toBeUndefined();
+      expect(fetchMock).toHaveBeenCalledTimes(10);
+    });
+  });
+
   describe('score floor', () => {
     it('returns undefined when no rerank score reaches the floor', async () => {
       mockServices({
@@ -591,6 +647,18 @@ describe('retrieveKbContext', () => {
       const metrics = await scrapeMetrics();
       expect(metrics).toMatch(/rag_retrieval_total\{result="hit"\} 2/);
       expect(metrics).toMatch(/rag_retrieval_duration_seconds_count\{result="hit"\} 2/);
+      expect(metrics).toMatch(/rag_chunks_returned_sum 6/);
+    });
+
+    it('records a cached hit in the metrics like a fresh one', async () => {
+      mockServices({ hits, scores });
+      await retrieveKbContextDetailed(QUERY);
+      const cached = await retrieveKbContextDetailed(QUERY);
+
+      expect(cached.cached).toBe(true);
+      expect(fetchMock).toHaveBeenCalledTimes(4);
+      const metrics = await scrapeMetrics();
+      expect(metrics).toMatch(/rag_retrieval_total\{result="hit"\} 2/);
       expect(metrics).toMatch(/rag_chunks_returned_sum 6/);
     });
 

@@ -5,6 +5,7 @@ import type { KbCandidate, KbPayload } from './search';
 import type { RerankResult } from './rerank';
 import { embedText, formatContext } from './format';
 import { recordRagRetrieval } from '~/app/metrics';
+import { cacheKey, retrievalCache } from './cache';
 import { resolveRetrievalQueries } from './query';
 import { buildSparseQuery } from './lexical';
 import { rerankChunks } from './rerank';
@@ -92,6 +93,8 @@ export interface KbRetrieval {
   /** Wall-clock time spent in retrieval, including the fail-open path. */
   elapsedMs: number;
   result: KbRetrievalResult;
+  /** Set when the chunks came from the short-TTL in-process cache instead of the pipeline. */
+  cached?: true;
 }
 
 const NO_RETRIEVAL: KbRetrieval = { chunks: 0, elapsedMs: 0, result: 'disabled' };
@@ -130,6 +133,8 @@ async function runPipeline(
  * for how follow-ups search and how queries are length-capped.
  * Fail-open by design — any error, timeout, or missing configuration yields no
  * `context` (with `result` explaining why) so a RAG failure never fails the chat message.
+ * Successful results (`hit`, `empty`) are served from a short-TTL in-process cache for
+ * repeated queries; failures are never cached.
  * Every attempt past the blank-query check is recorded in the Prometheus RAG metrics;
  * a blank query returns `empty` without recording anything.
  */
@@ -144,8 +149,6 @@ export async function retrieveKbContextDetailed(query: string | KbQueries): Prom
     return NO_RETRIEVAL;
   }
   const startedAt = process.hrtime.bigint();
-  const controller = new AbortController();
-  const timer = setTimeout(() => controller.abort(), TOTAL_BUDGET_MS);
   const finish = (result: KbRetrievalResult, top: KbPayload[] = []): KbRetrieval => {
     const elapsedMs = elapsedSince(startedAt);
     recordRagRetrieval(result, elapsedMs / 1000, top.length);
@@ -156,8 +159,16 @@ export async function retrieveKbContextDetailed(query: string | KbQueries): Prom
       result,
     };
   };
+  const key = cacheKey(queries);
+  const cached = retrievalCache.get(key);
+  if (cached) {
+    return { ...finish(cached.length ? 'hit' : 'empty', cached), cached: true };
+  }
+  const controller = new AbortController();
+  const timer = setTimeout(() => controller.abort(), TOTAL_BUDGET_MS);
   try {
     const top = await runPipeline(config, queries, controller.signal);
+    retrievalCache.set(key, top);
     return finish(top.length ? 'hit' : 'empty', top);
   } catch (error) {
     const message = error instanceof Error ? error.message : String(error);
