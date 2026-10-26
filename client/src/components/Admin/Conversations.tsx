@@ -1,4 +1,5 @@
 import { useState } from 'react';
+import { useSearchParams } from 'react-router-dom';
 import { Label, Input, Button, Switch, Table, TableBody, TableHeader } from '@librechat/client';
 import type { FormEvent } from 'react';
 import type { TAdminConversationsQuery } from 'librechat-data-provider';
@@ -23,6 +24,31 @@ const initialFilters: Filters = { limit: PAGE_SIZE, sort: 'updatedAt' };
 const errorIds: Record<FilterField, string> = {
   userId: 'admin-convo-user-error',
   range: 'admin-convo-range-error',
+};
+
+const isOn = (value: string | null): true | undefined =>
+  value === '1' || value === 'true' ? true : undefined;
+
+/** The shareable subset of the filters: who, and whether only flagged or errored threads. */
+export const filtersFromParams = (params: URLSearchParams): Filters => ({
+  ...initialFilters,
+  userId: params.get('userId') || undefined,
+  flagged: isOn(params.get('flagged')),
+  errors: isOn(params.get('errors')),
+});
+
+export const paramsFromFilters = (filters: Filters): URLSearchParams => {
+  const params = new URLSearchParams();
+  if (filters.userId) {
+    params.set('userId', filters.userId);
+  }
+  if (filters.flagged) {
+    params.set('flagged', '1');
+  }
+  if (filters.errors) {
+    params.set('errors', '1');
+  }
+  return params;
 };
 
 /** Server-side rules mirrored here so a predictable 400 never replaces the list with an error. */
@@ -57,8 +83,9 @@ function FieldError({ id, labelKey }: { id: string; labelKey?: TranslationKeys }
 
 function Content() {
   const localize = useLocalize();
-  const [draft, setDraft] = useState<Filters>(initialFilters);
-  const [filters, setFilters] = useState<Filters>(initialFilters);
+  const [params, setParams] = useSearchParams();
+  const [draft, setDraft] = useState<Filters>(() => filtersFromParams(params));
+  const [filters, setFilters] = useState<Filters>(draft);
   const [errors, setErrors] = useState<FilterErrors>({});
   const query = useAdminConversations(filters);
 
@@ -69,7 +96,9 @@ function Content() {
     if (Object.keys(invalid).length > 0) {
       return;
     }
-    setFilters(normalizeFilters(draft));
+    const next = normalizeFilters(draft);
+    setFilters(next);
+    setParams(paramsFromFilters(next), { replace: true });
   };
 
   const update = (patch: Partial<Filters>) => {

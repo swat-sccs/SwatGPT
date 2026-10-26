@@ -1,7 +1,19 @@
+import { useLocation } from 'react-router-dom';
 import { screen, fireEvent, waitFor } from '@testing-library/react';
 import { renderAdmin, mockCapabilities, pending, mocks } from '../testing/utils';
+import Conversations, {
+  filtersFromParams,
+  paramsFromFilters,
+  normalizeFilters,
+  validateFilters,
+} from '../Conversations';
 import { conversation } from '../testing/fixtures';
-import Conversations, { normalizeFilters, validateFilters } from '../Conversations';
+
+const USER_ID = '507f1f77bcf86cd799439011';
+
+function Search() {
+  return <output data-testid="search">{useLocation().search}</output>;
+}
 
 describe('admin conversations', () => {
   it('shows a loading state', async () => {
@@ -122,6 +134,47 @@ describe('admin conversations', () => {
       'search must be at most 200 characters',
     );
     expect(screen.queryByRole('button', { name: 'Retry' })).not.toBeInTheDocument();
+  });
+
+  it('round-trips the shareable filters through the query string', () => {
+    const params = new URLSearchParams({ userId: USER_ID, flagged: '1', errors: 'true' });
+    const filters = filtersFromParams(params);
+    expect(filters).toEqual(
+      expect.objectContaining({ userId: USER_ID, flagged: true, errors: true, limit: 25 }),
+    );
+    expect(paramsFromFilters(filters).toString()).toBe(`userId=${USER_ID}&flagged=1&errors=1`);
+    expect(paramsFromFilters(filtersFromParams(new URLSearchParams())).toString()).toBe('');
+    expect(filtersFromParams(new URLSearchParams({ flagged: '0' })).flagged).toBeUndefined();
+  });
+
+  it('seeds the filters from the URL and writes them back on apply', async () => {
+    mockCapabilities();
+    mocks.getAdminConversations.mockResolvedValue({ conversations: [], nextCursor: null });
+    renderAdmin(
+      <>
+        <Conversations />
+        <Search />
+      </>,
+      { route: `/d/admin/conversations?userId=${USER_ID}&flagged=1` },
+    );
+    await screen.findByText('Nothing to show');
+    expect(mocks.getAdminConversations).toHaveBeenCalledWith(
+      expect.objectContaining({ userId: USER_ID, flagged: true }),
+    );
+    expect(screen.getByLabelText('User ID')).toHaveValue(USER_ID);
+    expect(screen.getByRole('switch', { name: 'Flagged only' })).toBeChecked();
+
+    fireEvent.click(screen.getByRole('switch', { name: 'Flagged only' }));
+    fireEvent.click(screen.getByRole('switch', { name: 'Errors only' }));
+    fireEvent.click(screen.getByRole('button', { name: 'Apply filters' }));
+
+    await waitFor(() =>
+      expect(screen.getByTestId('search')).toHaveTextContent(`?userId=${USER_ID}&errors=1`),
+    );
+    expect(mocks.getAdminConversations).toHaveBeenLastCalledWith(
+      expect.objectContaining({ userId: USER_ID, errors: true }),
+    );
+    expect(mocks.getAdminConversations.mock.calls.at(-1)?.[0]?.flagged).toBeUndefined();
   });
 
   it('shows an empty state', async () => {

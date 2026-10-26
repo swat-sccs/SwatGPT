@@ -26,6 +26,10 @@ describe('admin user detail', () => {
       expect.objectContaining({ bucket: 'day', from: expect.any(String), to: expect.any(String) }),
     );
     expect(screen.getByText('Dining hall hours')).toBeInTheDocument();
+    expect(screen.getByRole('link', { name: 'All conversations' })).toHaveAttribute(
+      'href',
+      '/d/admin/conversations?userId=user-1',
+    );
     expect(await screen.findByText(/Current balance: 50,000 credits/)).toBeInTheDocument();
 
     fireEvent.change(screen.getByLabelText('Reason'), { target: { value: 'spam' } });

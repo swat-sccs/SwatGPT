@@ -12,6 +12,9 @@ export const conversationPath = (conversationId: string) =>
 
 export const userPath = (userId: string) => `${ADMIN_ROOT}/users/${encodeURIComponent(userId)}`;
 
+export const userConversationsPath = (userId: string) =>
+  `${ADMIN_ROOT}/conversations?userId=${encodeURIComponent(userId)}`;
+
 export function ConversationHeadRow({ showOwner = true }: { showOwner?: boolean }) {
   const localize = useLocalize();
   return (

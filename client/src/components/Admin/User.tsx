@@ -1,9 +1,9 @@
-import { useParams } from 'react-router-dom';
+import { Link, useParams } from 'react-router-dom';
 import { Table, TableBody, TableHeader } from '@librechat/client';
+import { ConversationHeadRow, ConversationRow, userConversationsPath } from './Rows';
+import { AdminCapability, Require, useAdminAccess } from './access';
 import { Loading, ErrorState, Empty } from './States';
 import { RangePicker, useRange } from './Range';
-import { AdminCapability, Require, useAdminAccess } from './access';
-import { ConversationHeadRow, ConversationRow } from './Rows';
 import { useAdminUsageUser } from '~/data-provider';
 import { useLocalize } from '~/hooks';
 import Moderation from './Moderation';
@@ -47,12 +47,20 @@ function Content({ userId }: { userId: string }) {
           <Chart points={detail.timeseries.points} bucket={detail.timeseries.bucket} />
           {!detail.conversationsHidden && (
             <section aria-labelledby="admin-user-conversations">
-              <h3
-                id="admin-user-conversations"
-                className="mb-2 text-sm font-medium text-text-secondary"
-              >
-                {localize('com_admin_section_recent_conversations')}
-              </h3>
+              <div className="mb-2 flex flex-wrap items-baseline justify-between gap-2">
+                <h3
+                  id="admin-user-conversations"
+                  className="text-sm font-medium text-text-secondary"
+                >
+                  {localize('com_admin_section_recent_conversations')}
+                </h3>
+                <Link
+                  to={userConversationsPath(userId)}
+                  className="text-xs text-text-secondary hover:underline"
+                >
+                  {localize('com_admin_user_all_conversations')}
+                </Link>
+              </div>
               {detail.recentConversations.length === 0 ? (
                 <Empty />
               ) : (
