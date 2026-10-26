@@ -12,7 +12,7 @@ Chat-facing tools normally read the latest PostgreSQL snapshot, which acts as a 
 
 `LOG_LEVEL` (`debug`, `info`, `warn`, or `error`; default `info`) sets the minimum severity written to stderr as NDJSON.
 
-The container probes its HTTP health endpoint every 30 seconds. After three consecutive failed or timed-out probes, its watchdog force-terminates the unresponsive server process; Compose's `restart: unless-stopped` policy then restarts it. `HEALTHCHECK_PROBE_TIMEOUT_MS` and `HEALTHCHECK_FAILURE_THRESHOLD` can tune the 4-second probe timeout and three-failure threshold.
+The container probes its HTTP health endpoint every 30 seconds. After three consecutive failed or timed-out probes, its watchdog sends SIGKILL to the server PID recorded in `/tmp/swatgpt-mcp.pid` at startup (or SIGTERM to the container init when that file is missing); the container exits and Compose's `restart: unless-stopped` policy restarts it. The Compose services run with `init: true` so that signal is delivered and reaped correctly; a plain `docker run` without `--init` cannot be restarted this way because the kernel ignores signals aimed at PID 1. `HEALTHCHECK_PROBE_TIMEOUT_MS` and `HEALTHCHECK_FAILURE_THRESHOLD` can tune the 4-second probe timeout and three-failure threshold.
 
 ## Quick start
 

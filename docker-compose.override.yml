@@ -71,6 +71,7 @@ services:
     build:
       context: ./dash_mcp
     restart: unless-stopped
+    init: true
     logging: *logging
     read_only: true
     tmpfs:

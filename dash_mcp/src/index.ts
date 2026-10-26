@@ -1,4 +1,6 @@
+import { writeFile } from 'node:fs/promises';
 import { loadConfig } from './config.js';
+import { DEFAULT_PID_FILE } from './healthcheck.js';
 import { SwatHttpServer } from './http.js';
 import { metrics } from './metrics.js';
 import { PollScheduler } from './scheduler.js';
@@ -21,6 +23,7 @@ async function main() {
 
   await service.initialize();
   await http.listen();
+  await recordPid();
   scheduler.start();
 
   let stopping = false;
@@ -35,6 +38,17 @@ async function main() {
   };
   process.on('SIGTERM', () => void shutdown('SIGTERM'));
   process.on('SIGINT', () => void shutdown('SIGINT'));
+}
+
+/** Lets the container watchdog target the server itself instead of the unkillable PID 1. */
+async function recordPid(): Promise<void> {
+  try {
+    await writeFile(DEFAULT_PID_FILE, String(process.pid), 'utf8');
+  } catch (error) {
+    log('warn', 'Could not write the PID file; the watchdog will fall back to signalling PID 1', {
+      path: DEFAULT_PID_FILE, error: error instanceof Error ? error.message : String(error),
+    });
+  }
 }
 
 main().catch((error) => {

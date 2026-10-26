@@ -21,6 +21,7 @@ services:
     build:
       context: ${SWATGPT_MCP_PATH:?Set SWATGPT_MCP_PATH to the dash_mcp repository}
     restart: unless-stopped
+    init: true
     depends_on:
       swatgpt-postgres:
         condition: service_healthy

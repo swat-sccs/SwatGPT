@@ -17,6 +17,7 @@ services:
   swatgpt-mcp:
     build: .
     restart: unless-stopped
+    init: true
     depends_on:
       swatgpt-postgres:
         condition: service_healthy
