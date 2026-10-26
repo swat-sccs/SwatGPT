@@ -56,23 +56,47 @@ export function selectTop(candidates: Candidate[], scores: RerankScore[]): KbChu
   return top.map((result) => candidates[result.index].chunk);
 }
 
+/** Position of the current turn in the production search queries (`resolveRetrievalQueries`). */
+const CURRENT_QUERY = 0;
+
 /**
- * Candidate pool for local mode: the lexical channel's top 20 plus, in oracle mode,
- * the best-matching chunks of the documents the question was written from, so the
+ * Deduplicated union of one lexical channel per search query, filled round-robin by
+ * rank as production `mergeChannels` does; only the current turn's channel sets
+ * `lexicalRank`, so the combined follow-up query cannot claim the guaranteed slot.
+ */
+function mergeLexical(corpus: Corpus, channels: LexicalHit[][]): Map<number, Candidate> {
+  const byId = new Map<number, Candidate>();
+  const depth = Math.max(0, ...channels.map((hits) => hits.length));
+  for (let rank = 0; rank < depth; rank++) {
+    channels.forEach((hits, query) => {
+      const hit = hits[rank];
+      if (!hit || byId.has(hit.chunk)) {
+        return;
+      }
+      const lexicalRank = query === CURRENT_QUERY ? hit.rank : undefined;
+      byId.set(hit.chunk, { chunk: corpus.chunks[hit.chunk], lexicalRank });
+    });
+  }
+  return byId;
+}
+
+/**
+ * Candidate pool for local mode: the lexical top 20 of every production search query
+ * (the current turn, plus the combined query on a follow-up) plus, in oracle mode, the
+ * best-matching chunks of the documents the question was written from, so the
  * reranker always sees the gold material next to realistic distractors.
  */
 export function buildCandidates(
   corpus: Corpus,
-  query: string,
+  search: string[],
   goldDocs: string[],
   oracle: boolean,
 ): Candidate[] {
-  const lexical = searchLexical(corpus.index, query, CHANNEL_LIMIT);
-  const gold = oracle ? goldHits(corpus, query, goldDocs) : [];
-  const byId = new Map<number, Candidate>();
-  for (const hit of lexical) {
-    byId.set(hit.chunk, { chunk: corpus.chunks[hit.chunk], lexicalRank: hit.rank });
-  }
+  const byId = mergeLexical(
+    corpus,
+    search.map((query) => searchLexical(corpus.index, query, CHANNEL_LIMIT)),
+  );
+  const gold = oracle ? goldHits(corpus, search[search.length - 1] ?? '', goldDocs) : [];
   for (const hit of gold) {
     if (!byId.has(hit.chunk)) {
       byId.set(hit.chunk, { chunk: corpus.chunks[hit.chunk] });
@@ -127,9 +151,10 @@ export function createLocalRetriever(
   rerankUrl: string,
   oracle: boolean,
 ): Retriever {
-  return async ({ retrievalQuery: query }, goldDocs) => {
+  return async (queries, goldDocs) => {
     const startedAt = performance.now();
-    const candidates = buildCandidates(corpus, query, goldDocs, oracle);
+    const { search, rerank: query } = librechatApi.resolveRetrievalQueries(queries);
+    const candidates = buildCandidates(corpus, search, goldDocs, oracle);
     if (!candidates.length) {
       const context = librechatApi.formatRetrievalNote('empty', query);
       return { context, result: 'empty', sources: [], elapsedMs: elapsedSince(startedAt) };

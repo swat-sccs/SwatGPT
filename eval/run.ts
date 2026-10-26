@@ -225,7 +225,7 @@ function modeNotes(mode: RetrievalMode, oracle: boolean, env: EvalEnv): string[]
     ];
   }
   return [
-    `Retrieval: LOCAL approximation — Qdrant was not reachable/selected, so candidates come from BM25 over the information/ markdown (production tokenizer)${
+    `Retrieval: LOCAL approximation — Qdrant was not reachable/selected, so candidates come from BM25 over the information/ markdown (production tokenizer) for each production search query, merged round-robin${
       oracle ? " plus up to 12 chunks of the question's source documents" : ''
     }, reranked by the production TEI reranker with the production selection rule and formatContext. No dense channel; chunking approximates the ingest splitter.`,
     ...shared,

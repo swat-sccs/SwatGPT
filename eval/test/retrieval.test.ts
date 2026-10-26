@@ -79,7 +79,7 @@ describe('buildCandidates', () => {
   };
 
   it('adds every gold chunk to the lexical top 20 in oracle mode', () => {
-    const pool = buildCandidates(corpus, 'print', ['gold.md'], true);
+    const pool = buildCandidates(corpus, ['print'], ['gold.md'], true);
     assert.equal(pool.length, 22);
     const ids = new Set(pool.map((candidate) => candidate.chunk.id));
     assert.ok(ids.has(1) && ids.has(2));
@@ -87,14 +87,30 @@ describe('buildCandidates', () => {
 
   it('never exceeds the 32-candidate TEI batch limit', () => {
     assert.equal(
-      buildCandidates(corpus, 'gold text poster', ['noise.md'], true).length <= 32,
+      buildCandidates(corpus, ['gold text poster'], ['noise.md'], true).length <= 32,
       true,
     );
   });
 
   it('uses only the lexical channel without the oracle', () => {
-    const pool = buildCandidates(corpus, 'print', ['gold.md'], false);
+    const pool = buildCandidates(corpus, ['print'], ['gold.md'], false);
     assert.equal(pool.length, 20);
     assert.ok(pool.every((candidate) => candidate.lexicalRank !== undefined));
+  });
+
+  it('merges one channel per search query round-robin, ranking only the current turn', () => {
+    const pool = buildCandidates(corpus, ['poster', 'GarnetPrint poster'], [], false);
+    assert.deepEqual(
+      pool.map((candidate) => [candidate.chunk.id, candidate.lexicalRank]),
+      [
+        [1, 1],
+        [0, undefined],
+      ],
+    );
+    const followup = buildCandidates(corpus, ['unrelated', 'print unrelated'], [], false);
+    assert.equal(followup[0].chunk.id, 2);
+    assert.equal(followup[0].lexicalRank, 1);
+    assert.equal(followup.length, 20);
+    assert.ok(followup.slice(1).every((candidate) => candidate.lexicalRank === undefined));
   });
 });

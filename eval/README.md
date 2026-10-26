@@ -66,15 +66,18 @@ answered anyway, then missing facts). The Markdown report prints the five worst 
   `kb` collection is reachable.
 - `local` is used when Qdrant is not reachable (for example from loon, since Qdrant only
   listens inside eagle's compose network). Candidates are the BM25 top 20 over the
-  `information/` markdown, using the production sparse tokenizer, plus up to 12 chunks from
-  the question's own source documents ("oracle"; turn off with `--no-oracle`). They are
+  `information/` markdown for each query production searches with (the current turn, plus
+  the combined query on a follow-up), merged round-robin with the production sparse
+  tokenizer, plus up to 12 chunks from the question's own source documents ("oracle";
+  turn off with `--no-oracle`). They are
   reranked by the production TEI reranker and pass through the production selection rule
   (score floor 0.3, top 8, one lexical slot) and `formatContext`. There is no dense channel,
   and chunking only approximates the ingest splitter, so local mode measures **generation
   quality given realistic context**, not production retrieval.
 - `auto` (default) probes `QDRANT_URL` and picks `live` when it answers.
 
-Both modes build the follow-up retrieval query with production `buildKbQueries`. Neither
+Both modes build the follow-up retrieval queries with production `buildKbQueries` and
+`resolveRetrievalQueries`. Neither
 mode sends the Dash MCP tools, MCP server instructions or the directory block, so live-data
 questions (menus, hours today) are out of scope.
 
