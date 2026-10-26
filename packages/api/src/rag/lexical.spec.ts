@@ -1,4 +1,14 @@
-import { buildSparseQuery } from './lexical';
+import { buildSparseQuery, tokenize } from './lexical';
+
+describe('tokenize', () => {
+  it.each([
+    ['CS cs, a!', ['cs', 'cs']],
+    ['McCabe Café 2nd-floor', ['mccabe', 'caf', '2nd', 'floor']],
+    ['a I ?', []],
+  ])('%j', (text, tokens) => {
+    expect(tokenize(text)).toEqual(tokens);
+  });
+});
 
 /**
  * Golden values computed by `sparse_vector` in `ingest/ingest.py`. The Qdrant

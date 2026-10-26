@@ -14,3 +14,9 @@ export const librechatApi = require('@librechat/api') as LibreChatApi;
 
 /** Retrieval inputs production derives from the conversation (`buildKbQueries`). */
 export type KbQueries = ReturnType<LibreChatApi['buildKbQueries']>;
+
+/** A KB chunk as production stores and formats it. */
+export type KbPayload = ReturnType<LibreChatApi['selectTopChunks']>[number];
+
+/** One TEI rerank score, as production's `selectTopChunks` consumes it. */
+export type RerankScore = Parameters<LibreChatApi['selectTopChunks']>[1][number];

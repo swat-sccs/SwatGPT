@@ -1,14 +1,13 @@
+import type { KbPayload, KbQueries, RerankScore } from './runtime.ts';
 import type { KbChunk, Retrieval, RetrievalMode } from './types.ts';
 import type { Corpus, LexicalHit } from './corpus.ts';
-import type { KbQueries } from './runtime.ts';
 import type { EvalEnv } from './env.ts';
 import { searchLexical } from './corpus.ts';
 import { librechatApi } from './runtime.ts';
 
-/** Mirrors `packages/api/src/rag/retrieve.ts` and `search.ts`. */
-const RERANK_SCORE_FLOOR = 0.3;
-const TOP_CHUNKS = 8;
-const LEXICAL_TOP = 3;
+export type { RerankScore };
+
+/** Mirrors `packages/api/src/rag/search.ts`. */
 const CHANNEL_LIMIT = 20;
 const CANDIDATE_LIMIT = 32;
 const GOLD_CHUNKS = 12;
@@ -22,11 +21,6 @@ export interface Candidate {
   lexicalRank?: number;
 }
 
-export interface RerankScore {
-  index: number;
-  score: number;
-}
-
 const elapsedSince = (startedAt: number): number => performance.now() - startedAt;
 
 /** Source URLs of the entries in a formatted KB context block. */
@@ -34,26 +28,19 @@ export function contextSources(context: string | undefined): string[] {
   return librechatApi.contextEntrySources(context);
 }
 
-/** Same selection rule as production `selectTopChunks`: score floor, top 8, one lexical slot. */
-export function selectTop(candidates: Candidate[], scores: RerankScore[]): KbChunk[] {
-  const eligible = scores
-    .filter(
-      (result) => result.score >= RERANK_SCORE_FLOOR && candidates[result.index] !== undefined,
-    )
-    .sort((a, b) => b.score - a.score);
-  const top = eligible.slice(0, TOP_CHUNKS);
-  const lexicalRank = (result: RerankScore): number =>
-    candidates[result.index].lexicalRank ?? Number.POSITIVE_INFINITY;
-  const isLexical = (result: RerankScore): boolean => lexicalRank(result) <= LEXICAL_TOP;
-  const guaranteed = eligible
-    .filter(isLexical)
-    .reduce<
-      RerankScore | undefined
-    >((best, result) => (best && lexicalRank(best) <= lexicalRank(result) ? best : result), undefined);
-  if (guaranteed && top.length === TOP_CHUNKS && !top.some(isLexical)) {
-    top[top.length - 1] = guaranteed;
-  }
-  return top.map((result) => candidates[result.index].chunk);
+const toPayload = (chunk: KbChunk): KbPayload => ({
+  text: chunk.text,
+  title: chunk.title,
+  source: chunk.source,
+  section: chunk.section,
+});
+
+/** Production's selection rule (`selectTopChunks`): score floor, top 8, one lexical slot. */
+export function selectTop(candidates: Candidate[], scores: RerankScore[]): KbPayload[] {
+  return librechatApi.selectTopChunks(
+    candidates.map(({ chunk, lexicalRank }) => ({ payload: toPayload(chunk), lexicalRank })),
+    scores,
+  );
 }
 
 /** Position of the current turn in the production search queries (`resolveRetrievalQueries`). */
@@ -139,13 +126,6 @@ async function rerank(url: string, query: string, texts: string[]): Promise<Rera
   return (await response.json()) as RerankScore[];
 }
 
-const toPayload = (chunk: KbChunk) => ({
-  text: chunk.text,
-  title: chunk.title,
-  source: chunk.source,
-  section: chunk.section,
-});
-
 export function createLocalRetriever(
   corpus: Corpus,
   rerankUrl: string,
@@ -166,7 +146,7 @@ export function createLocalRetriever(
       const top = selectTop(candidates, await rerank(rerankUrl, query, texts));
       const result = top.length ? 'hit' : 'empty';
       const context = top.length
-        ? librechatApi.formatContext(top.map(toPayload))
+        ? librechatApi.formatContext(top)
         : librechatApi.formatRetrievalNote(result, query);
       const sources = top.map((chunk) => chunk.source);
       return { context, result, sources, elapsedMs: elapsedSince(startedAt) };

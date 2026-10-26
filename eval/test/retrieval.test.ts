@@ -4,7 +4,7 @@ import type { KbChunk } from '../lib/types.ts';
 import type { Candidate } from '../lib/retrieval.ts';
 import type { Corpus } from '../lib/corpus.ts';
 import { buildCandidates, contextSources, selectTop } from '../lib/retrieval.ts';
-import { buildIndex } from '../lib/corpus.ts';
+import { buildIndex, tokenize } from '../lib/corpus.ts';
 import { librechatApi } from '../lib/runtime.ts';
 import { emptyKnownLinks } from '../lib/links.ts';
 
@@ -26,8 +26,8 @@ describe('selectTop', () => {
     const top = selectTop(candidates, scores);
     assert.equal(top.length, 8);
     assert.deepEqual(
-      top.map((entry) => entry.id),
-      [0, 1, 2, 3, 4, 5, 6, 7],
+      top.map((entry) => entry.title),
+      [0, 1, 2, 3, 4, 5, 6, 7].map((id) => `Title ${id}`),
     );
   });
 
@@ -39,7 +39,31 @@ describe('selectTop', () => {
     const scores = candidates.map((_, index) => ({ index, score: 0.95 - index * 0.05 }));
     const top = selectTop(candidates, scores);
     assert.equal(top.length, 8);
-    assert.equal(top[7].id, 9);
+    assert.equal(top[7].title, 'Title 9');
+  });
+
+  it('is the production selection applied to the production payload of each chunk', () => {
+    const candidates: Candidate[] = Array.from({ length: 10 }, (_, id) => ({
+      chunk: { ...chunk(id), section: id % 2 ? 'Hours' : undefined },
+      lexicalRank: id === 9 ? 1 : undefined,
+    }));
+    const scores = candidates.map((_, index) => ({ index, score: 0.95 - index * 0.05 }));
+    const expected = librechatApi.selectTopChunks(
+      candidates.map(({ chunk: entry, lexicalRank }) => ({
+        payload: { text: entry.text, title: entry.title, source: entry.source, section: entry.section },
+        lexicalRank,
+      })),
+      scores,
+    );
+    assert.deepEqual(selectTop(candidates, scores), expected);
+    assert.equal(expected[7].title, 'Title 9');
+  });
+});
+
+describe('tokenize', () => {
+  it('is the production sparse-channel tokenizer', () => {
+    assert.equal(tokenize, librechatApi.tokenize);
+    assert.deepEqual(tokenize('McCabe Café 2nd-floor'), ['mccabe', 'caf', '2nd', 'floor']);
   });
 });
 

@@ -69,7 +69,7 @@ function readConfig(): RagConfig | undefined {
  * mentioning Cornell) would otherwise lose every slot to near-duplicate
  * topical chunks.
  */
-function selectTopChunks(candidates: KbCandidate[], scores: RerankResult[]): KbPayload[] {
+export function selectTopChunks(candidates: KbCandidate[], scores: RerankResult[]): KbPayload[] {
   const eligible = scores.filter(
     (result) => result.score >= RERANK_SCORE_FLOOR && candidates[result.index] !== undefined,
   );

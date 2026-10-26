@@ -3,6 +3,7 @@ import { readdir, readFile } from 'node:fs/promises';
 import type { KnownLinks } from './links.ts';
 import type { KbChunk } from './types.ts';
 import { addKnownText, emptyKnownLinks } from './links.ts';
+import { librechatApi } from './runtime.ts';
 
 /** Roughly the ingest splitter's 512-token chunks with 64-token overlap, in characters. */
 const CHUNK_CHARS = 1800;
@@ -10,8 +11,6 @@ const CHUNK_OVERLAP = 220;
 const HEADING = /^#{1,6}\s+(.+?)\s*#*\s*$/;
 const BM25_K1 = 1.2;
 const BM25_B = 0.75;
-const TOKEN_PATTERN = /[a-z0-9]+/g;
-const MIN_TOKEN_LENGTH = 2;
 
 export interface KbDocument {
   path: string;
@@ -44,11 +43,8 @@ export interface LexicalHit {
   rank: number;
 }
 
-/** Same tokenizer as production's sparse channel (`packages/api/src/rag/lexical.ts`). */
-export function tokenize(text: string): string[] {
-  const tokens = text.toLowerCase().match(TOKEN_PATTERN) ?? [];
-  return tokens.filter((token) => token.length >= MIN_TOKEN_LENGTH);
-}
+/** Production's sparse-channel tokenizer (`packages/api/src/rag/lexical.ts`), so BM25 sees the same terms. */
+export const { tokenize } = librechatApi;
 
 function unquote(value: string): string {
   const trimmed = value.trim();

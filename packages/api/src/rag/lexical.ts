@@ -21,7 +21,8 @@ function fnv1a(token: string): number {
   return hash >>> 0;
 }
 
-function tokenize(text: string): string[] {
+/** Lowercase ASCII alphanumeric runs of at least two characters; shared with the eval's BM25 index. */
+export function tokenize(text: string): string[] {
   const tokens = text.toLowerCase().match(TOKEN_PATTERN) ?? [];
   return tokens.filter((token) => token.length >= MIN_TOKEN_LENGTH);
 }
