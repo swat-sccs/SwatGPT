@@ -2,7 +2,7 @@ import { McpServer } from '@modelcontextprotocol/server';
 import { z } from 'zod';
 import { metrics } from '../metrics.js';
 import { domains } from '../types.js';
-import { HOURS_DEFAULT_LIMIT, HOURS_MAX_LIMIT } from '../service.js';
+import { HOURS_DEFAULT_LIMIT, HOURS_MAX_LIMIT, OPEN_NOW_DEFAULT_LIMIT } from '../service.js';
 import type { SwatService } from '../service.js';
 
 const date = z.string().regex(/^\d{4}-\d{2}-\d{2}$/, 'Use YYYY-MM-DD').optional();
@@ -35,6 +35,12 @@ export function createMcpServer(service: SwatService): McpServer {
       date,
       limit: limit(HOURS_DEFAULT_LIMIT, HOURS_MAX_LIMIT),
     }), (input) => service.getHours(input), toolTimeoutMs);
+
+  register(server, 'get_open_now', 'Which campus places are open right now (campus time), derived from today\'s hours: each place reports open (true, false, or null when today has no timed hours), closes_at, opens_at, and its hours spans. Omit place to list every place; open places come first.',
+    z.object({
+      place: z.string().trim().min(1).max(100).optional(),
+      limit: limit(OPEN_NOW_DEFAULT_LIMIT, HOURS_MAX_LIMIT),
+    }), (input) => service.getOpenNow(input), toolTimeoutMs);
 
   register(server, 'get_dining_menus', 'Get public dining menus by location, date, meal, or text query. Sharples and DCC resolve to Dining Center. Results are cache-first and refresh from the public Dash when matching data is missing or stale.',
     z.object({

@@ -4,7 +4,7 @@ SwatGPT MCP is an unofficial, read-only Model Context Protocol server for public
 
 ## Data and tools
 
-The server discovers current Dash configuration and exposes alerts, weather, campus hours, dining menus, events, news, SEPTA departures, sports, Mind Candy, campus resources, archive search, and synchronization status. It does not expose arbitrary GraphQL queries or private Dash sessions.
+The server discovers current Dash configuration and exposes alerts, weather, campus hours, which places are open right now (`get_open_now`, derived from today's hours), dining menus, events, news, SEPTA departures, sports, Mind Candy, campus resources, archive search, and synchronization status. It does not expose arbitrary GraphQL queries or private Dash sessions.
 
 Chat-facing tools normally read the latest PostgreSQL snapshot, which acts as a shared, persistent cache across MCP instances. Background polling refreshes that snapshot. Dining, campus hours, events, and transit lookups additionally use a bounded read-through path: when the requested date, place, meal, window, or route is absent from the snapshot or the snapshot is stale, the MCP fetches the public Dash GraphQL feed and writes the result back to PostgreSQL. A deadline of roughly 4.5 seconds (the tool timeout minus a margin) keeps an upstream outage from holding a LibreChat response open, and stale cached data remains available as fallback. Each response includes source, retrieval time, data time, truncation, and stale-data metadata. Historical entity versions are retained indefinitely by default (`ARCHIVE_RETENTION_DAYS` prunes them daily when set); high-frequency weather and transit observations default to 30 days and sync-run history to `SYNC_RUN_RETENTION_DAYS` (30).
 

@@ -44,6 +44,21 @@ type DiningInput = { location?: string; date?: string; meal?: string; query?: st
 type DiningFilters = { meal?: string; query?: string };
 type HoursInput = { place?: string; category?: string; date?: string; limit?: number };
 type EventsInput = { query?: string; start?: string; end?: string; limit?: number };
+type OpenNowInput = { place?: string; limit?: number };
+type HoursSpan = { title: string; start: string; end: string };
+
+/** One place's open/closed state at a campus instant, derived from its hours rows for the day. */
+export interface OpenNowItem extends JsonObject {
+  place: string;
+  category?: string;
+  /** null when the place has no timed hours rows for the day (e.g. only an announcement). */
+  open: boolean | null;
+  closes_at?: string;
+  opens_at?: string;
+  hours: HoursSpan[];
+}
+
+export const OPEN_NOW_DEFAULT_LIMIT = 50;
 type PersistOptions = { window?: TimeWindow; exhaustive?: boolean };
 type EventsCoverage =
   | { kind: 'covered'; warning?: string }
@@ -186,6 +201,18 @@ export class SwatService {
           .filter(Boolean).join(' '),
       ), resolvedDate, input);
     }
+  }
+
+  /** Derives which places are open at this campus instant from today's hours (cache-first, like getHours). */
+  async getOpenNow(input: OpenNowInput): Promise<FeedResult<OpenNowItem>> {
+    const now = new Date();
+    const hours = await this.getHours({ place: input.place, limit: HOURS_MAX_LIMIT });
+    const places = openStatusByPlace(hours.items, now);
+    const limit = input.limit ?? OPEN_NOW_DEFAULT_LIMIT;
+    const bounded = places.slice(0, limit);
+    return { items: bounded, meta: {
+      ...hours.meta, total: places.length, returned: bounded.length, truncated: places.length > bounded.length,
+    } };
   }
 
   /**
@@ -663,6 +690,37 @@ function parsedEnd(value: string | undefined, fallback: Date): Date {
   if (!value) return fallback;
   const parsed = new Date(value);
   return Number.isNaN(parsed.getTime()) ? fallback : parsed;
+}
+
+/** Groups hours rows by place and ranks open places first, then the ones opening soonest. */
+export function openStatusByPlace(items: JsonObject[], now: Date): OpenNowItem[] {
+  const byPlace = new Map<string, OpenNowItem>();
+  for (const item of items) {
+    const place = typeof item.source === 'string' ? item.source : 'Unknown place';
+    const category = asObject(item.details)?.campus_category;
+    const entry = byPlace.get(place) ?? { place, ...(typeof category === 'string' ? { category } : {}), open: null, hours: [] };
+    byPlace.set(place, entry);
+    const start = typeof item.start === 'string' ? new Date(item.start) : undefined;
+    if (!start || Number.isNaN(start.getTime())) continue;
+    const end = parsedEnd(typeof item.end === 'string' ? item.end : undefined, start);
+    entry.hours.push({ title: typeof item.title === 'string' ? item.title : place, start: start.toISOString(), end: end.toISOString() });
+    if (start <= now && now < end) {
+      entry.open = true;
+      if (!entry.closes_at || end.toISOString() > entry.closes_at) entry.closes_at = end.toISOString();
+      continue;
+    }
+    if (entry.open === null) entry.open = false;
+    if (start > now && (!entry.opens_at || start.toISOString() < entry.opens_at)) entry.opens_at = start.toISOString();
+  }
+  return [...byPlace.values()].sort(compareOpenStatus);
+}
+
+function compareOpenStatus(a: OpenNowItem, b: OpenNowItem): number {
+  const rank = (item: OpenNowItem) => item.open ? 0 : item.opens_at ? 1 : item.open === false ? 2 : 3;
+  const byRank = rank(a) - rank(b);
+  if (byRank) return byRank;
+  const byTime = (a.opens_at ?? '').localeCompare(b.opens_at ?? '');
+  return byTime || a.place.localeCompare(b.place);
 }
 
 function diningLocationMatches(value: string, query?: string): boolean {

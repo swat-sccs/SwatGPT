@@ -1,4 +1,4 @@
-import { describe, expect, it, vi } from 'vitest';
+import { afterEach, describe, expect, it, vi } from 'vitest';
 import { loadConfig } from '../src/config.js';
 import { metrics } from '../src/metrics.js';
 import { campusDayRange, campusWallTime, currentCampusDate } from '../src/util.js';
@@ -278,6 +278,64 @@ describe('PostgreSQL-first service reads', () => {
     await service.getDining({ date: '2026-09-08', limit: 100 }, true);
 
     expect(store.replaceSourceRecords).toHaveBeenCalledWith('dining', 'Dining Center', [], undefined, undefined);
+  });
+});
+
+describe('get_open_now', () => {
+  afterEach(() => {
+    vi.useRealTimers();
+  });
+
+  it('derives open, closes_at and opens_at per place from today\'s cached hours', async () => {
+    vi.useFakeTimers({ toFake: ['Date'] });
+    const today = currentCampusDate();
+    vi.setSystemTime(campusWallTime(today, 14, 0));
+    const at = (hour: number, minute = 0) => campusWallTime(today, hour, minute).toISOString();
+    const store = {
+      currentRecords: vi.fn().mockResolvedValue([
+        { id: 'mccabe', title: 'McCabe Library', source: 'McCabe Library', start: at(8), end: at(22), details: { campus_category: 'Libraries' } },
+        { id: 'sharples-breakfast', title: 'Breakfast', source: 'Dining Center', start: at(7, 30), end: at(10) },
+        { id: 'sharples-dinner', title: 'Dinner', source: 'Dining Center', start: at(17), end: at(20) },
+        { id: 'matchbox-note', title: 'Matchbox', source: 'Matchbox', details: { hours_announcement: 'Closed for renovation' } },
+        { id: 'kohlberg', title: 'Kohlberg Coffee Bar', source: 'Kohlberg Coffee Bar', start: at(8), end: at(13) },
+      ]),
+      latestRecordObservedAt: vi.fn().mockResolvedValue(new Date().toISOString()),
+    } as unknown as PgStore;
+    const service = new SwatService(config(), {} as DashClient, {} as RegistryDiscovery, store);
+
+    const result = await service.getOpenNow({});
+
+    expect(result.items.map((item) => item.place)).toEqual(['McCabe Library', 'Dining Center', 'Kohlberg Coffee Bar', 'Matchbox']);
+    expect(result.items[0]).toMatchObject({ place: 'McCabe Library', category: 'Libraries', open: true, closes_at: at(22) });
+    expect(result.items[0]!.opens_at).toBeUndefined();
+    expect(result.items[1]).toMatchObject({ place: 'Dining Center', open: false, opens_at: at(17) });
+    expect(result.items[1]!.hours).toHaveLength(2);
+    expect(result.items[2]).toMatchObject({ place: 'Kohlberg Coffee Bar', open: false });
+    expect(result.items[2]!.opens_at).toBeUndefined();
+    expect(result.items[3]).toMatchObject({ place: 'Matchbox', open: null, hours: [] });
+    expect(result.meta).toMatchObject({ freshness: 'cached', resolved_date: today, total: 4, returned: 4, truncated: false });
+  });
+
+  it('filters to one place and honours the limit', async () => {
+    vi.useFakeTimers({ toFake: ['Date'] });
+    const today = currentCampusDate();
+    vi.setSystemTime(campusWallTime(today, 9, 0));
+    const at = (hour: number) => campusWallTime(today, hour, 0).toISOString();
+    const store = {
+      currentRecords: vi.fn().mockResolvedValue([
+        { id: 'a', title: 'A', source: 'Place A', start: at(8), end: at(10) },
+        { id: 'b', title: 'B', source: 'Place B', start: at(8), end: at(10) },
+      ]),
+      latestRecordObservedAt: vi.fn().mockResolvedValue(new Date().toISOString()),
+    } as unknown as PgStore;
+    const service = new SwatService(config(), {} as DashClient, {} as RegistryDiscovery, store);
+
+    const limited = await service.getOpenNow({ limit: 1 });
+    const one = await service.getOpenNow({ place: 'Place B' });
+
+    expect(limited.items.map((item) => item.place)).toEqual(['Place A']);
+    expect(limited.meta).toMatchObject({ total: 2, returned: 1, truncated: true });
+    expect(one.items.map((item) => item.place)).toEqual(['Place B']);
   });
 });
 

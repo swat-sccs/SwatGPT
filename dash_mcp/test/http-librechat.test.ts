@@ -25,11 +25,11 @@ describe('LibreChat streamable-http handshake', () => {
 
     const listed = await client.listTools();
     expect(listed.tools.map((tool) => tool.name)).toEqual(expect.arrayContaining([
-      'get_alerts', 'get_weather', 'get_campus_hours', 'get_dining_menus', 'search_campus_events',
+      'get_alerts', 'get_weather', 'get_campus_hours', 'get_open_now', 'get_dining_menus', 'search_campus_events',
       'search_campus_news', 'get_transit_departures', 'get_sports', 'get_mind_candy',
       'get_campus_resources', 'search_archive', 'get_data_status',
     ]));
-    expect(listed.tools).toHaveLength(12);
+    expect(listed.tools).toHaveLength(13);
 
     const result = await client.callTool({ name: 'get_campus_hours', arguments: { place: 'Sharples' } });
     expect(result.isError).not.toBe(true);
