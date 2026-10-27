@@ -1,6 +1,7 @@
 import { ContentTypes } from 'librechat-data-provider';
 import type {
   TAdminFlag,
+  TAdminFlagListItem,
   TAdminPauseState,
   TAdminUsageUser,
   TAdminUsageModel,
@@ -121,6 +122,12 @@ export const flag: TAdminFlag = {
   createdAt: '2026-09-08T10:06:00.000Z',
   resolvedAt: null,
   resolvedBy: null,
+};
+
+export const flagRow: TAdminFlagListItem = {
+  ...flag,
+  conversationTitle: conversation.title,
+  owner: conversation.user,
 };
 
 export const conversationDetail: TAdminConversationDetail = {

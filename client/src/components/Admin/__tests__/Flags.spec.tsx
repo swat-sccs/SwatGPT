@@ -1,6 +1,6 @@
 import { screen, within, fireEvent, waitFor } from '@testing-library/react';
 import { renderAdmin, mockCapabilities, pending, mocks } from '../testing/utils';
-import { flag } from '../testing/fixtures';
+import { flag, flagRow } from '../testing/fixtures';
 import Flags, { countBySource } from '../Flags';
 
 describe('admin flags', () => {
@@ -13,10 +13,14 @@ describe('admin flags', () => {
 
   it('lists unresolved flags, resolves one and includes resolved ones on toggle', async () => {
     mockCapabilities();
-    mocks.getAdminFlags.mockResolvedValue({ flags: [flag], nextCursor: null });
+    mocks.getAdminFlags.mockResolvedValue({
+      flags: [flagRow],
+      nextCursor: null,
+    });
     mocks.resolveAdminFlag.mockResolvedValue({ ...flag, resolvedAt: '2026-09-09T00:00:00.000Z' });
     renderAdmin(<Flags />);
     expect(await screen.findByText('Contains a phone number')).toBeInTheDocument();
+    expect(screen.getByText('Dining hall hours · Ada Lovelace')).toBeInTheDocument();
     expect(mocks.getAdminFlags).toHaveBeenCalledWith(expect.objectContaining({ resolved: false }));
 
     fireEvent.click(screen.getByRole('button', { name: 'Resolve' }));
@@ -35,7 +39,7 @@ describe('admin flags', () => {
     const showToast = jest.fn();
     mockCapabilities();
     mocks.getAdminFlags.mockResolvedValue({
-      flags: [flag, { ...flag, id: 'flag-2', reason: 'Second flag' }],
+      flags: [flagRow, { ...flagRow, id: 'flag-2', reason: 'Second flag' }],
       nextCursor: null,
     });
     mocks.resolveAdminFlag.mockRejectedValue(new Error('500'));
@@ -69,7 +73,7 @@ describe('admin flags', () => {
   it('filters the loaded queue by source with counted chips', async () => {
     mockCapabilities();
     mocks.getAdminFlags.mockResolvedValue({
-      flags: [flag, { ...flag, id: 'flag-2', source: 'manual', reason: 'Reported by staff' }],
+      flags: [flagRow, { ...flagRow, id: 'flag-2', source: 'manual', reason: 'Reported by staff' }],
       nextCursor: null,
     });
     renderAdmin(<Flags />);
@@ -101,7 +105,7 @@ describe('admin flags', () => {
 
   it('explains an empty source filter without calling the queue empty', async () => {
     mockCapabilities();
-    mocks.getAdminFlags.mockResolvedValue({ flags: [flag], nextCursor: null });
+    mocks.getAdminFlags.mockResolvedValue({ flags: [flagRow], nextCursor: null });
     renderAdmin(<Flags />);
     await screen.findByText('Contains a phone number');
 

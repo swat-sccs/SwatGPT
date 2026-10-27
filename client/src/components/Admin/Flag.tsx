@@ -1,7 +1,7 @@
 import { useState } from 'react';
 import { Link } from 'react-router-dom';
 import { OGDialog, OGDialogTemplate, Label, Button, Textarea } from '@librechat/client';
-import type { TAdminFlag } from 'librechat-data-provider';
+import type { TAdminFlag, TAdminFlagListItem } from 'librechat-data-provider';
 import { useFlagConversation, useResolveFlag } from '~/data-provider';
 import { ActionError, useActionFailedToast } from './States';
 import { conversationPath } from './Rows';
@@ -12,19 +12,31 @@ import Pill from './Pill';
 
 type TResolveFlag = ReturnType<typeof useResolveFlag>;
 
+type TFlagRow = TAdminFlag & Partial<Pick<TAdminFlagListItem, 'conversationTitle' | 'owner'>>;
+
+function flagContext(flag: TFlagRow, untitled: string): string | undefined {
+  if (flag.owner == null) {
+    return undefined;
+  }
+  const title = flag.conversationTitle || untitled;
+  const owner = flag.owner.name || flag.owner.email;
+  return owner ? `${title} · ${owner}` : title;
+}
+
 function FlagItem({
   flag,
   resolve,
   onResolve,
   linkConversation,
 }: {
-  flag: TAdminFlag;
+  flag: TFlagRow;
   resolve: TResolveFlag;
   onResolve: (flagId: string) => void;
   linkConversation: boolean;
 }) {
   const localize = useLocalize();
   const failed = resolve.isError && resolve.variables === flag.id;
+  const context = flagContext(flag, localize('com_admin_untitled'));
   return (
     <li className="flex flex-wrap items-center gap-3 rounded-lg border border-border-light p-3 text-sm">
       <Pill tone={flag.resolvedAt ? 'neutral' : 'warning'}>
@@ -32,6 +44,7 @@ function FlagItem({
       </Pill>
       <div className="min-w-0 flex-1">
         <p className="text-text-primary">{flag.reason}</p>
+        {context && <p className="truncate text-xs text-text-secondary">{context}</p>}
         {linkConversation && (
           <Link
             to={conversationPath(flag.conversationId)}
@@ -65,7 +78,7 @@ export function FlagList({
   flags,
   linkConversation = false,
 }: {
-  flags: TAdminFlag[];
+  flags: TFlagRow[];
   linkConversation?: boolean;
 }) {
   const localize = useLocalize();
