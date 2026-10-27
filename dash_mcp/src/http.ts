@@ -7,6 +7,8 @@ import type { Config } from './config.js';
 import { createMcpServer } from './mcp/tools.js';
 import { metrics } from './metrics.js';
 import type { SwatService } from './service.js';
+import { domains } from './types.js';
+import type { Domain, JsonObject } from './types.js';
 import { log } from './util.js';
 
 interface Session {
@@ -18,6 +20,42 @@ interface Session {
 }
 
 const SESSION_SWEEP_INTERVAL_MS = 60_000;
+
+interface RegistrySummary {
+  loaded_at: string;
+  hashes: number;
+  hours_sources: number;
+  dining_sources: number;
+  news_feeds: number;
+  announcement_calendars: number;
+  resource_sections: number;
+}
+
+interface SnapshotAge {
+  observed_at: string;
+  age_seconds: number;
+}
+
+export interface StatusReport {
+  status: 'ok';
+  time: string;
+  sessions: { active: number; pending: number; max: number; idle_seconds: number };
+  registry: RegistrySummary | null;
+  polling: {
+    enabled: boolean;
+    alert_interval_seconds: number;
+    realtime_interval_seconds: number;
+    content_interval_seconds: number;
+    configuration_interval_seconds: number;
+    tool_timeout_ms: number;
+    upstream_timeout_ms: number;
+    observation_retention_days: number;
+    archive_retention_days: number;
+    sync_run_retention_days: number;
+  };
+  snapshots: Record<Domain, SnapshotAge | null>;
+  sync_runs: JsonObject[];
+}
 
 export class SwatHttpServer {
   private readonly sessions = new Map<string, Session>();
@@ -40,6 +78,15 @@ export class SwatHttpServer {
       let registry = false;
       try { registry = this.service.registry().hashes.length > 0; } catch { registry = false; }
       res.status(database ? 200 : 503).json({ status: database ? 'ready' : 'not-ready', database, registry });
+    });
+
+    app.get('/status', async (_req, res) => {
+      try {
+        res.json(await this.statusReport());
+      } catch (error) {
+        log('error', 'Status report failed', { error: error instanceof Error ? error.message : String(error) });
+        if (!res.headersSent) res.status(500).json({ status: 'error', error: 'status unavailable' });
+      }
     });
 
     app.get('/metrics', async (_req, res) => {
@@ -118,6 +165,63 @@ export class SwatHttpServer {
 
   get sessionCount(): number {
     return this.sessions.size;
+  }
+
+  /** Operator-facing JSON: sessions, registry summary, poll configuration, snapshot ages and last sync runs. Never includes credentials. */
+  async statusReport(now = new Date()): Promise<StatusReport> {
+    const [syncRuns, snapshots] = await Promise.all([this.service.store.status(), this.snapshotAges(now)]);
+    return {
+      status: 'ok',
+      time: now.toISOString(),
+      sessions: {
+        active: this.sessions.size,
+        pending: this.pendingSessions,
+        max: this.config.mcpMaxSessions,
+        idle_seconds: this.config.mcpSessionIdleMs / 1000,
+      },
+      registry: this.registrySummary(),
+      polling: {
+        enabled: this.config.pollingEnabled,
+        alert_interval_seconds: this.config.alertPollMs / 1000,
+        realtime_interval_seconds: this.config.realtimePollMs / 1000,
+        content_interval_seconds: this.config.contentPollMs / 1000,
+        configuration_interval_seconds: this.config.configPollMs / 1000,
+        tool_timeout_ms: this.config.mcpToolTimeoutMs,
+        upstream_timeout_ms: this.config.upstreamTimeoutMs,
+        observation_retention_days: this.config.observationRetentionDays,
+        archive_retention_days: this.config.archiveRetentionDays,
+        sync_run_retention_days: this.config.syncRunRetentionDays,
+      },
+      snapshots,
+      sync_runs: syncRuns,
+    };
+  }
+
+  private registrySummary(): RegistrySummary | null {
+    try {
+      const registry = this.service.registry();
+      return {
+        loaded_at: registry.loadedAt,
+        hashes: registry.hashes.length,
+        hours_sources: registry.hours.length,
+        dining_sources: registry.dining.length,
+        news_feeds: registry.news.length,
+        announcement_calendars: registry.announcementCalendars.length,
+        resource_sections: registry.resources.length,
+      };
+    } catch {
+      return null;
+    }
+  }
+
+  private async snapshotAges(now: Date): Promise<Record<Domain, SnapshotAge | null>> {
+    const entries = await Promise.all(domains.map(async (domain): Promise<[Domain, SnapshotAge | null]> => {
+      const observed = await this.service.snapshotObservedAt(domain).catch(() => undefined);
+      const observedMs = observed ? new Date(observed).getTime() : Number.NaN;
+      if (Number.isNaN(observedMs)) return [domain, null];
+      return [domain, { observed_at: observed!, age_seconds: Math.max(0, Math.round((now.getTime() - observedMs) / 1000)) }];
+    }));
+    return Object.fromEntries(entries) as Record<Domain, SnapshotAge | null>;
   }
 
   /**

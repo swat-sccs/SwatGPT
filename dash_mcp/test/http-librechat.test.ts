@@ -61,6 +61,26 @@ describe('LibreChat streamable-http handshake', () => {
     expect(await health.json()).toEqual({ status: 'ok' });
   });
 
+  it('reports operator status as JSON without leaking the database URL', async () => {
+    const { port } = await listen();
+    await initialize(port);
+
+    const response = await fetch(`http://127.0.0.1:${port}/status`);
+    const body = await response.json() as Record<string, unknown>;
+
+    expect(response.status).toBe(200);
+    expect(body).toMatchObject({
+      status: 'ok',
+      sessions: { active: 1, pending: 0, max: 256 },
+      registry: { hours_sources: 2, dining_sources: 1 },
+      polling: { enabled: false, tool_timeout_ms: 5_000 },
+      snapshots: { hours: { age_seconds: expect.any(Number) }, weather: null },
+      sync_runs: [{ job: 'alerts', status: 'success' }],
+    });
+    expect((body.snapshots as { hours: { age_seconds: number } }).hours.age_seconds).toBeGreaterThanOrEqual(60);
+    expect(JSON.stringify(body)).not.toContain('postgres://');
+  });
+
   it('accepts a 2025-03-26 initialize POST and serves tools/list on the new session immediately', async () => {
     const { port } = await listen();
     const started = performance.now();
@@ -134,8 +154,11 @@ async function listen(
   const port = await freePort();
   const service = {
     config: { mcpToolTimeoutMs: 5_000 },
-    store: { ping: async () => true },
-    registry: () => ({ hashes: ['test'] }),
+    store: { ping: async () => true, status: async () => [{ job: 'alerts', status: 'success' }] },
+    registry: () => ({
+      loadedAt: '2026-10-26T00:00:00.000Z', hashes: ['test'], hours: [{}, {}], dining: [{}], news: [], announcementCalendars: [], resources: [],
+    }),
+    snapshotObservedAt: async (domain: string) => domain === 'hours' ? new Date(Date.now() - 60_000).toISOString() : undefined,
     getHours,
   } as unknown as SwatService;
   const server = new SwatHttpServer(loadConfig({
