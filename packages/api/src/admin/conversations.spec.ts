@@ -108,9 +108,12 @@ function createDeps(overrides: Partial<AdminConversationsDeps> = {}): AdminConve
   return {
     listConversationsAdmin: jest.fn().mockResolvedValue({ items: [], nextCursor: null }),
     getConversationAdmin: jest.fn().mockResolvedValue(detail()),
-    findConversationOwner: jest
-      .fn()
-      .mockResolvedValue({ conversationId: 'c1', title: 'Dining', userId: ownerId }),
+    findConversationOwner: jest.fn().mockResolvedValue({
+      conversationId: 'c1',
+      title: 'Dining',
+      userId: ownerId,
+      expiredAt: null,
+    }),
     searchMessagesAdmin: jest.fn().mockResolvedValue(null),
     searchMessageTextAdmin: jest.fn().mockResolvedValue([]),
     createFlagAdmin: jest.fn().mockImplementation(async (input) => flag(input)),
@@ -600,6 +603,7 @@ describe('createAdminConversationsHandlers', () => {
         source: 'manual',
         createdBy: adminId.toString(),
         tenantId: undefined,
+        expiredAt: null,
       });
       expect(status).toHaveBeenCalledWith(201);
       const body = json.mock.calls[0][0] as TAdminFlag;
@@ -626,6 +630,25 @@ describe('createAdminConversationsHandlers', () => {
       expect(status).toHaveBeenCalledWith(400);
       expect(json.mock.calls[0][0].error).toContain(fragment);
       expect(deps.createFlagAdmin).not.toHaveBeenCalled();
+    });
+
+    it('expires a manual flag together with a temporary conversation', async () => {
+      const expiredAt = new Date('2026-11-01T00:00:00.000Z');
+      const deps = createDeps({
+        findConversationOwner: jest
+          .fn()
+          .mockResolvedValue({ conversationId: 'c1', title: 'Temp', userId: ownerId, expiredAt }),
+      });
+      const handlers = createAdminConversationsHandlers(deps);
+      const { req, res, status } = createReqRes({
+        params: { conversationId: 'c1' },
+        body: { reason: 'threat' },
+      });
+
+      await handlers.flagConversation(req, res);
+
+      expect(status).toHaveBeenCalledWith(201);
+      expect(deps.createFlagAdmin).toHaveBeenCalledWith(expect.objectContaining({ expiredAt }));
     });
 
     it('returns 404 when the conversation does not exist', async () => {

@@ -400,8 +400,14 @@ describe('findConversationOwner', () => {
       conversationId: 'c2',
       title: 'Registrar',
       userId: String(bob._id),
+      expiredAt: null,
     });
     expect(await methods.findConversationOwner('missing')).toBeNull();
+  });
+
+  it('carries a temporary conversation expiry', async () => {
+    const owner = await methods.findConversationOwner('c3');
+    expect(owner?.expiredAt).toEqual(convos[2].expiredAt);
   });
 });
 

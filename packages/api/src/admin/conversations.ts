@@ -327,6 +327,7 @@ export function createAdminConversationsHandlers(deps: AdminConversationsDeps): 
         source: 'manual',
         createdBy: actor.userId,
         tenantId: actor.tenantId,
+        expiredAt: owner.expiredAt,
       });
       try {
         await emitAudit({

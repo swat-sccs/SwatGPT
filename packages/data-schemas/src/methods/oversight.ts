@@ -69,6 +69,8 @@ export interface ConversationOwnerRef {
   conversationId: string;
   title: string;
   userId: string;
+  /** A temporary conversation's expiry, so anything attached to it expires with it. */
+  expiredAt: Date | null;
 }
 
 export interface KeysetCursor {
@@ -505,12 +507,17 @@ export function createOversightMethods(mongoose: typeof import('mongoose')): Ove
     conversationId: string,
   ): Promise<ConversationOwnerRef | null> {
     const convo = await Conversation()
-      .findOne({ conversationId }, 'conversationId title user')
+      .findOne({ conversationId }, 'conversationId title user expiredAt')
       .lean<IConversation | null>();
     if (!convo?.user) {
       return null;
     }
-    return { conversationId: convo.conversationId, title: convo.title ?? '', userId: convo.user };
+    return {
+      conversationId: convo.conversationId,
+      title: convo.title ?? '',
+      userId: convo.user,
+      expiredAt: convo.expiredAt ?? null,
+    };
   }
 
   function meiliIndex() {
