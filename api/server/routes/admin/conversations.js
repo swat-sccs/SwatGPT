@@ -1,5 +1,5 @@
 const express = require('express');
-const { createAdminConversationsHandlers } = require('@librechat/api');
+const { isEnabled, createAdminConversationsHandlers } = require('@librechat/api');
 const { SystemCapabilities } = require('@librechat/data-schemas');
 const { requireCapability } = require('~/server/middleware/roles/capabilities');
 const { requireJwtAuth } = require('~/server/middleware');
@@ -21,7 +21,7 @@ const handlers = createAdminConversationsHandlers({
   deleteFlag: db.deleteFlag,
   recordAuditEntry: db.recordAuditEntry,
   /** Opt-in: refuse to disclose a conversation if its audit entry can't be persisted. */
-  auditFailClosed: process.env.AUDIT_LOG_FAIL_CLOSED === 'true',
+  auditFailClosed: isEnabled(process.env.AUDIT_LOG_FAIL_CLOSED),
 });
 
 router.use(requireJwtAuth, requireAdminAccess, requireReadConversations);

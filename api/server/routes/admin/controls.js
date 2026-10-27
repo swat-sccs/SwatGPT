@@ -40,7 +40,7 @@ const handlers = createAdminControlsHandlers({
   deleteUserSessions: (userId) => db.deleteAllUserSessions({ userId }),
   recordAuditEntry: db.recordAuditEntry,
   /** Opt-in: fail the control request if its audit entry can't be persisted. */
-  auditFailClosed: process.env.AUDIT_LOG_FAIL_CLOSED === 'true',
+  auditFailClosed: isEnabled(process.env.AUDIT_LOG_FAIL_CLOSED),
   banEnforced,
   isBalanceEnabled: async (user) => {
     const appConfig = await getAppConfig({
