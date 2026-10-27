@@ -33,6 +33,7 @@ export interface FlagPage {
   nextCursor: string | null;
 }
 
+/** Half-open `[from, to)` window on `createdAt`. */
 export interface UnresolvedFlagRange {
   from?: Date;
   to?: Date;

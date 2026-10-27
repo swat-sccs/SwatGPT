@@ -48,7 +48,7 @@ export interface ListConversationsAdminOptions {
   limit?: number;
   userId?: string;
   model?: string;
-  /** Applied to the sort field: `updatedAt` (default) or `createdAt`. */
+  /** Half-open `[from, to)` window on the sort field: `updatedAt` (default) or `createdAt`. */
   from?: Date;
   to?: Date;
   /** `true` → only conversations with an open flag, `false` → only without one. */
@@ -395,7 +395,7 @@ export function createOversightMethods(mongoose: typeof import('mongoose')): Ove
       conditions.push({ [sortField]: { $gte: options.from } });
     }
     if (options.to) {
-      conditions.push({ [sortField]: { $lte: options.to } });
+      conditions.push({ [sortField]: { $lt: options.to } });
     }
     if (options.conversationIds) {
       conditions.push({ conversationId: { $in: options.conversationIds } });

@@ -232,6 +232,11 @@ describe('conversation lookups', () => {
     const bounded = await methods.countUnresolvedFlagsByUser({ from: t(2), to: t(4) });
     expect(bounded.get(String(alice))).toBe(1);
     expect(bounded.has(String(bob))).toBe(false);
+
+    const exclusiveEnd = await methods.countUnresolvedFlagsByUser({ from: t(1), to: t(2) });
+    expect(exclusiveEnd.get(String(alice))).toBe(1);
+    const inclusiveStart = await methods.countUnresolvedFlagsByUser({ from: t(5), to: t(6) });
+    expect(inclusiveStart.get(String(bob))).toBe(1);
   });
 
   it('closes every open flag of deleted conversations with a reason suffix', async () => {

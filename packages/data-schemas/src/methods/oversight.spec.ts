@@ -336,16 +336,23 @@ describe('listConversationsAdmin', () => {
     expect(await ids(false)).toContain('c2');
   });
 
-  it('applies from/to to the sort field and supports createdAt sort', async () => {
+  it('applies a half-open [from, to) window to the sort field and supports createdAt sort', async () => {
     const byUpdated = await methods.listConversationsAdmin({ from: t(15), to: t(25) });
     expect(byUpdated.items.map((i) => i.conversationId)).toEqual(['c2']);
 
     const byCreated = await methods.listConversationsAdmin({
       sort: 'createdAt',
       from: t(5),
-      to: t(15),
+      to: t(16),
     });
     expect(byCreated.items.map((i) => i.conversationId)).toEqual(['c4', 'c3', 'c2']);
+
+    const exclusiveEnd = await methods.listConversationsAdmin({
+      sort: 'createdAt',
+      from: t(5),
+      to: t(15),
+    });
+    expect(exclusiveEnd.items.map((i) => i.conversationId)).toEqual(['c3', 'c2']);
   });
 });
 

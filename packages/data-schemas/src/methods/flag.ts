@@ -93,7 +93,7 @@ function rangeFilter(range: UnresolvedFlagRange): FilterQuery<IFlag> {
   return {
     createdAt: {
       ...(range.from ? { $gte: range.from } : {}),
-      ...(range.to ? { $lte: range.to } : {}),
+      ...(range.to ? { $lt: range.to } : {}),
     },
   };
 }
