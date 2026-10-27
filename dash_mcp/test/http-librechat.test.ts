@@ -1,6 +1,7 @@
 import { createServer } from 'node:net';
 import { Client } from '@modelcontextprotocol/sdk/client/index.js';
 import { StreamableHTTPClientTransport } from '@modelcontextprotocol/sdk/client/streamableHttp.js';
+import { McpServer } from '@modelcontextprotocol/server';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import { loadConfig } from '../src/config.js';
 import { SwatHttpServer } from '../src/http.js';
@@ -187,6 +188,28 @@ describe('MCP session lifecycle', () => {
     expect(rejected.status).toBeGreaterThanOrEqual(400);
     expect(rejected.status).toBeLessThan(500);
     expect(server.sessionCount).toBe(0);
+  });
+
+  it('honours the cap when initializes arrive concurrently', async () => {
+    const { port, server } = await listen(undefined, undefined, { MCP_MAX_SESSIONS: '1' });
+    const connect = McpServer.prototype.connect;
+    const slowConnect = vi.spyOn(McpServer.prototype, 'connect').mockImplementation(async function (this: McpServer, transport) {
+      await new Promise((resolve) => setTimeout(resolve, 200));
+      return connect.call(this, transport);
+    });
+
+    try {
+      const responses = await Promise.all([mcpRequest(port, initializeBody()), mcpRequest(port, initializeBody())]);
+      const statuses = responses.map((response) => response.status);
+      expect(statuses).toContain(200);
+      for (const status of statuses) expect([200, 503]).toContain(status);
+      expect(server.sessionCount).toBe(1);
+    } finally {
+      slowConnect.mockRestore();
+    }
+
+    expect((await initialize(port)).headers.get('mcp-session-id')).toBeTruthy();
+    expect(server.sessionCount).toBe(1);
   });
 
   it('evicts the least recently used idle session at the cap', async () => {

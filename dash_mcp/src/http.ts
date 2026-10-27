@@ -21,6 +21,7 @@ const SESSION_SWEEP_INTERVAL_MS = 60_000;
 
 export class SwatHttpServer {
   private readonly sessions = new Map<string, Session>();
+  private pendingSessions = 0;
   private httpServer?: HttpServer;
   private sweeper?: NodeJS.Timeout;
 
@@ -67,7 +68,8 @@ export class SwatHttpServer {
           res.status(400).json({ jsonrpc: '2.0', error: { code: -32000, message: 'MCP initialization required' }, id: null });
           return;
         }
-        if (!this.makeRoomForSession()) {
+        const releaseReservation = this.reserveSession();
+        if (!releaseReservation) {
           res.status(503).json({ jsonrpc: '2.0', error: { code: -32000, message: 'Too many active MCP sessions' }, id: null });
           return;
         }
@@ -79,6 +81,7 @@ export class SwatHttpServer {
           onsessioninitialized: (id) => {
             const session: Session = { transport, server: mcpServer, lastSeen: Date.now(), openRequests: 0 };
             this.sessions.set(id, session);
+            releaseReservation();
             this.track(session, res);
             log('info', 'MCP session initialized', { sessionId: id });
           },
@@ -94,6 +97,8 @@ export class SwatHttpServer {
           this.sessions.delete(nextSessionId);
           await closeQuietly(transport, mcpServer);
           throw error;
+        } finally {
+          releaseReservation();
         }
         if (!this.sessions.has(nextSessionId)) await closeQuietly(transport, mcpServer);
       } catch (error) {
@@ -138,16 +143,27 @@ export class SwatHttpServer {
     });
   }
 
-  /** Keeps the map under the cap by evicting the least recently seen idle session. */
-  private makeRoomForSession(): boolean {
-    if (this.sessions.size < this.config.mcpMaxSessions) return true;
-    const oldest = [...this.sessions.entries()]
-      .filter(([, session]) => session.openRequests === 0)
-      .reduce<[string, Session] | undefined>((best, entry) => !best || entry[1].lastSeen < best[1].lastSeen ? entry : best, undefined);
-    if (!oldest) return false;
-    void this.closeSession(oldest[0]);
-    log('warn', 'Evicted the least recently used MCP session to stay under the session cap', { sessionId: oldest[0] });
-    return true;
+  /**
+   * Claims a slot under the cap before the asynchronous initialize runs, counting slots that
+   * concurrent initializes have claimed but not yet filled, and evicts the least recently seen
+   * idle session when none is free. Returns the idempotent release for the claimed slot.
+   */
+  private reserveSession(): (() => void) | undefined {
+    if (this.sessions.size + this.pendingSessions >= this.config.mcpMaxSessions) {
+      const oldest = [...this.sessions.entries()]
+        .filter(([, session]) => session.openRequests === 0)
+        .reduce<[string, Session] | undefined>((best, entry) => !best || entry[1].lastSeen < best[1].lastSeen ? entry : best, undefined);
+      if (!oldest) return undefined;
+      void this.closeSession(oldest[0]);
+      log('warn', 'Evicted the least recently used MCP session to stay under the session cap', { sessionId: oldest[0] });
+    }
+    this.pendingSessions += 1;
+    let released = false;
+    return () => {
+      if (released) return;
+      released = true;
+      this.pendingSessions -= 1;
+    };
   }
 
   private async closeSession(id: string): Promise<void> {
