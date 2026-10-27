@@ -1,4 +1,5 @@
 import type { TMessageContentParts } from './assistants';
+import type { RefillIntervalUnit } from '../balance';
 import type { TFeedback } from '../feedback';
 
 /* ── Shared ─────────────────────────────────────────────────────────── */
@@ -232,7 +233,18 @@ export type TAdminUserControls = {
 
 export type TAdminBanRequest = { durationMs?: number; reason?: string };
 
-export type TAdminBalanceRequest = { tokenCredits: number };
+export type TAdminBalanceRequest = {
+  tokenCredits: number;
+  /**
+   * Quota: top the balance up to `refillAmount` every `refillIntervalValue`
+   * `refillIntervalUnit`. All three are required when enabling; omit all to leave
+   * the refill settings untouched.
+   */
+  autoRefillEnabled?: boolean;
+  refillAmount?: number;
+  refillIntervalValue?: number;
+  refillIntervalUnit?: RefillIntervalUnit;
+};
 
 export type TAdminPauseState = {
   paused: boolean;

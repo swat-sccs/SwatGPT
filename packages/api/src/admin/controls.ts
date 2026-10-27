@@ -1,3 +1,4 @@
+import { REFILL_INTERVAL_UNITS } from 'librechat-data-provider';
 import { logger, isValidObjectIdString } from '@librechat/data-schemas';
 import type {
   IUser,
@@ -13,6 +14,7 @@ import type {
 import type {
   TAdminBalance,
   TAdminBanRequest,
+  RefillIntervalUnit,
   TAdminPauseState,
   TAdminUserControls,
   TAdminPauseRequest,
@@ -135,6 +137,88 @@ function isNonNegativeNumber(value: unknown): value is number {
 
 function isTokenCredits(value: unknown): value is number {
   return typeof value === 'number' && Number.isSafeInteger(value) && value >= 0;
+}
+
+function isPositiveInteger(value: unknown): value is number {
+  return typeof value === 'number' && Number.isSafeInteger(value) && value > 0;
+}
+
+function isRefillUnit(value: unknown): value is RefillIntervalUnit {
+  return typeof value === 'string' && (REFILL_INTERVAL_UNITS as readonly string[]).includes(value);
+}
+
+type BalanceBody = { fields: IBalanceUpdate; error?: undefined } | { error: string };
+
+const REFILL_FIELDS = ['refillAmount', 'refillIntervalValue', 'refillIntervalUnit'] as const;
+
+/** Validates the credits and, when any refill setting is sent, the whole refill schedule. */
+function parseBalanceBody(body: Partial<TAdminBalanceRequest> | undefined): BalanceBody {
+  const { tokenCredits, autoRefillEnabled, refillAmount, refillIntervalValue, refillIntervalUnit } =
+    body ?? {};
+  if (!isTokenCredits(tokenCredits)) {
+    return { error: 'tokenCredits must be a non-negative safe integer' };
+  }
+  const touchesRefill = REFILL_FIELDS.some((field) => body?.[field] !== undefined);
+  if (autoRefillEnabled === undefined && !touchesRefill) {
+    return { fields: { tokenCredits } };
+  }
+  if (typeof autoRefillEnabled !== 'boolean') {
+    return { error: 'autoRefillEnabled must be a boolean when refill settings are sent' };
+  }
+  if (!autoRefillEnabled) {
+    return { fields: { tokenCredits, autoRefillEnabled: false } };
+  }
+  if (!isPositiveInteger(refillAmount)) {
+    return { error: 'refillAmount must be a positive safe integer' };
+  }
+  if (!isPositiveInteger(refillIntervalValue)) {
+    return { error: 'refillIntervalValue must be a positive safe integer' };
+  }
+  if (!isRefillUnit(refillIntervalUnit)) {
+    return { error: `refillIntervalUnit must be one of: ${REFILL_INTERVAL_UNITS.join(', ')}` };
+  }
+  return {
+    fields: {
+      tokenCredits,
+      autoRefillEnabled: true,
+      refillAmount,
+      refillIntervalValue,
+      refillIntervalUnit,
+    },
+  };
+}
+
+/** The same keys the request wrote, taken from the earlier record, so a rollback is exact. */
+function previousBalanceFields(previous: IBalance, written: IBalanceUpdate): IBalanceUpdate {
+  const restored: IBalanceUpdate = { tokenCredits: previous.tokenCredits ?? 0 };
+  if (written.autoRefillEnabled === undefined) {
+    return restored;
+  }
+  restored.autoRefillEnabled = previous.autoRefillEnabled ?? false;
+  for (const field of REFILL_FIELDS) {
+    if (written[field] !== undefined && previous[field] != null) {
+      Object.assign(restored, { [field]: previous[field] });
+    }
+  }
+  return restored;
+}
+
+function balanceAuditMetadata(previous: IBalance | null, written: IBalanceUpdate): AuditMetadata {
+  const metadata: AuditMetadata = {
+    previousTokenCredits: previous?.tokenCredits ?? null,
+    tokenCredits: written.tokenCredits ?? null,
+  };
+  if (written.autoRefillEnabled === undefined) {
+    return metadata;
+  }
+  metadata.previousAutoRefillEnabled = previous?.autoRefillEnabled ?? null;
+  metadata.autoRefillEnabled = written.autoRefillEnabled;
+  for (const field of REFILL_FIELDS) {
+    const previousKey = `previous${field[0].toUpperCase()}${field.slice(1)}`;
+    metadata[previousKey] = previous?.[field] ?? null;
+    metadata[field] = written[field] ?? null;
+  }
+  return metadata;
 }
 
 function validateBanBody(body: TAdminBanRequest | undefined): string | null {
@@ -474,10 +558,11 @@ export function createAdminControlsHandlers(deps: AdminControlsDeps): AdminContr
 
   async function setUserBalance(req: ServerRequest, res: Response): Promise<Response> {
     try {
-      const { tokenCredits } = (req.body ?? {}) as Partial<TAdminBalanceRequest>;
-      if (!isTokenCredits(tokenCredits)) {
-        return res.status(400).json({ error: 'tokenCredits must be a non-negative safe integer' });
+      const parsed = parseBalanceBody(req.body as Partial<TAdminBalanceRequest> | undefined);
+      if (parsed.error !== undefined) {
+        return res.status(400).json({ error: parsed.error });
       }
+      const { fields } = parsed;
       const resolved = await resolveTargetUser(req, res);
       if (!resolved) {
         return res;
@@ -487,7 +572,7 @@ export function createAdminControlsHandlers(deps: AdminControlsDeps): AdminContr
         return res.status(409).json({ error: BALANCE_DISABLED_ERROR });
       }
       const previous = await findBalanceByUser(userId);
-      await upsertBalanceFields(userId, { tokenCredits });
+      await upsertBalanceFields(userId, fields);
       await completeOrUndo(
         'setUserBalance audit',
         () =>
@@ -495,12 +580,12 @@ export function createAdminControlsHandlers(deps: AdminControlsDeps): AdminContr
             action: 'user.balance_set',
             caller,
             target: userTarget(user),
-            metadata: { previousTokenCredits: previous?.tokenCredits ?? null, tokenCredits },
+            metadata: balanceAuditMetadata(previous, fields),
             context: buildAuditContext(req),
           }),
         () =>
           previous
-            ? upsertBalanceFields(userId, { tokenCredits: previous.tokenCredits ?? 0 })
+            ? upsertBalanceFields(userId, previousBalanceFields(previous, fields))
             : Promise.reject(new Error('no earlier balance record to restore')),
       );
       return res.status(200).json(await loadUserControls(user, userId));

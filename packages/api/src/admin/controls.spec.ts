@@ -715,6 +715,136 @@ describe('createAdminControlsHandlers', () => {
       });
     });
 
+    it('enables a daily auto-refill and audits the previous schedule', async () => {
+      const findBalanceByUser = jest
+        .fn()
+        .mockResolvedValueOnce(mockBalance({ tokenCredits: 200, autoRefillEnabled: false }))
+        .mockResolvedValueOnce(mockBalance({ tokenCredits: 5000 }));
+      const deps = createDeps({ findBalanceByUser });
+      const handlers = createAdminControlsHandlers(deps);
+      const { req, res, status } = createReqRes({
+        params: { id: targetId.toString() },
+        body: {
+          tokenCredits: 5000,
+          autoRefillEnabled: true,
+          refillAmount: 5000,
+          refillIntervalValue: 1,
+          refillIntervalUnit: 'days',
+        },
+      });
+
+      await handlers.setUserBalance(req, res);
+
+      expect(status).toHaveBeenCalledWith(200);
+      expect(deps.upsertBalanceFields).toHaveBeenCalledWith(targetId.toString(), {
+        tokenCredits: 5000,
+        autoRefillEnabled: true,
+        refillAmount: 5000,
+        refillIntervalValue: 1,
+        refillIntervalUnit: 'days',
+      });
+      expect(deps.recordAuditEntry).toHaveBeenCalledWith(
+        expect.objectContaining({
+          metadata: {
+            previousTokenCredits: 200,
+            tokenCredits: 5000,
+            previousAutoRefillEnabled: false,
+            autoRefillEnabled: true,
+            previousRefillAmount: 500,
+            refillAmount: 5000,
+            previousRefillIntervalValue: 1,
+            refillIntervalValue: 1,
+            previousRefillIntervalUnit: 'days',
+            refillIntervalUnit: 'days',
+          },
+        }),
+      );
+    });
+
+    it('disables auto-refill without touching the schedule fields', async () => {
+      const deps = createDeps();
+      const handlers = createAdminControlsHandlers(deps);
+      const { req, res, status } = createReqRes({
+        params: { id: targetId.toString() },
+        body: { tokenCredits: 10, autoRefillEnabled: false, refillAmount: 1 },
+      });
+
+      await handlers.setUserBalance(req, res);
+
+      expect(status).toHaveBeenCalledWith(200);
+      expect(deps.upsertBalanceFields).toHaveBeenCalledWith(targetId.toString(), {
+        tokenCredits: 10,
+        autoRefillEnabled: false,
+      });
+    });
+
+    it.each([
+      [{ tokenCredits: 10, refillAmount: 5 }, 'autoRefillEnabled'],
+      [{ tokenCredits: 10, autoRefillEnabled: 'yes' }, 'autoRefillEnabled'],
+      [{ tokenCredits: 10, autoRefillEnabled: true }, 'refillAmount'],
+      [{ tokenCredits: 10, autoRefillEnabled: true, refillAmount: 0 }, 'refillAmount'],
+      [{ tokenCredits: 10, autoRefillEnabled: true, refillAmount: 5 }, 'refillIntervalValue'],
+      [
+        { tokenCredits: 10, autoRefillEnabled: true, refillAmount: 5, refillIntervalValue: 1.5 },
+        'refillIntervalValue',
+      ],
+      [
+        {
+          tokenCredits: 10,
+          autoRefillEnabled: true,
+          refillAmount: 5,
+          refillIntervalValue: 1,
+          refillIntervalUnit: 'years',
+        },
+        'refillIntervalUnit',
+      ],
+    ])('rejects refill settings %p before writing', async (body, fragment) => {
+      const deps = createDeps();
+      const handlers = createAdminControlsHandlers(deps);
+      const { req, res, status, json } = createReqRes({
+        params: { id: targetId.toString() },
+        body,
+      });
+
+      await handlers.setUserBalance(req, res);
+
+      expect(status).toHaveBeenCalledWith(400);
+      expect(json.mock.calls[0][0].error).toContain(fragment);
+      expect(deps.upsertBalanceFields).not.toHaveBeenCalled();
+    });
+
+    it('restores the previous schedule when the fail-closed audit write fails', async () => {
+      const deps = createDeps({
+        findBalanceByUser: jest
+          .fn()
+          .mockResolvedValue(mockBalance({ tokenCredits: 200, autoRefillEnabled: false })),
+        recordAuditEntry: auditDown(),
+        auditFailClosed: true,
+      });
+      const handlers = createAdminControlsHandlers(deps);
+      const { req, res, status } = createReqRes({
+        params: { id: targetId.toString() },
+        body: {
+          tokenCredits: 5000,
+          autoRefillEnabled: true,
+          refillAmount: 5000,
+          refillIntervalValue: 1,
+          refillIntervalUnit: 'days',
+        },
+      });
+
+      await handlers.setUserBalance(req, res);
+
+      expect(status).toHaveBeenCalledWith(500);
+      expect(deps.upsertBalanceFields).toHaveBeenLastCalledWith(targetId.toString(), {
+        tokenCredits: 200,
+        autoRefillEnabled: false,
+        refillAmount: 500,
+        refillIntervalValue: 1,
+        refillIntervalUnit: 'days',
+      });
+    });
+
     it('creates a balance record when none exists yet', async () => {
       const deps = createDeps();
       const handlers = createAdminControlsHandlers(deps);
