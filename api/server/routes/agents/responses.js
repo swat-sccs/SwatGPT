@@ -25,7 +25,7 @@ const {
   getResponse,
   listModels,
 } = require('~/server/controllers/agents/responses');
-const { configMiddleware } = require('~/server/middleware');
+const { checkPaused, configMiddleware } = require('~/server/middleware');
 const {
   checkAgentPermission,
   preAuthTenantMiddleware,
@@ -81,7 +81,7 @@ router.use(checkRemoteAgentsFeature);
  *   "usage": { ... }
  * }
  */
-router.post('/', checkAgentPermission, createResponse);
+router.post('/', checkPaused, checkAgentPermission, createResponse);
 
 /**
  * @route GET /v1/responses/models

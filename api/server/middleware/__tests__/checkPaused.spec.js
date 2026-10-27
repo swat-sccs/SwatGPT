@@ -3,7 +3,11 @@ const { MongoMemoryServer } = require('mongodb-memory-server');
 const { logger } = require('@librechat/data-schemas');
 const { ErrorTypes } = require('librechat-data-provider');
 const { getPauseService } = require('@librechat/api');
+const { PrincipalType } = require('librechat-data-provider');
+const { SystemCapabilities } = require('@librechat/data-schemas');
 const checkPaused = require('../checkPaused');
+const db = require('~/models');
+require('~/db/models');
 
 let mongoServer;
 
@@ -12,10 +16,10 @@ const createRes = () => ({
   json: jest.fn().mockReturnThis(),
 });
 
-async function run() {
+async function run(req = {}) {
   const res = createRes();
   const next = jest.fn();
-  await checkPaused({}, res, next);
+  await checkPaused(req, res, next);
   return { res, next };
 }
 
@@ -59,6 +63,26 @@ describe('checkPaused', () => {
       error: 'paused',
       message: 'Back at 5pm.',
     });
+  });
+
+  it('lets a manage:controls holder through so a pause can be verified', async () => {
+    const adminId = new mongoose.Types.ObjectId();
+    await db.grantCapability({
+      principalType: PrincipalType.USER,
+      principalId: adminId,
+      capability: SystemCapabilities.MANAGE_CONTROLS,
+    });
+    await getPauseService().setState({ paused: true, updatedBy: 'admin-1' });
+
+    const admin = await run({ user: { id: adminId.toString(), role: 'USER' } });
+    expect(admin.next).toHaveBeenCalledWith();
+    expect(admin.res.status).not.toHaveBeenCalled();
+
+    const student = await run({
+      user: { id: new mongoose.Types.ObjectId().toString(), role: 'USER' },
+    });
+    expect(student.next).not.toHaveBeenCalled();
+    expect(student.res.status).toHaveBeenCalledWith(423);
   });
 
   it('lets requests through again right after a resume', async () => {
