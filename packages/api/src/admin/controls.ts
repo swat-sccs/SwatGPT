@@ -76,6 +76,7 @@ interface Caller {
 const PAUSE_TARGET: AuditTarget = { type: 'system', id: 'controls.pause', name: 'Pause switch' };
 const MAX_REASON_LENGTH = 500;
 const MAX_PAUSE_MESSAGE_LENGTH = 500;
+export const MAX_PAUSE_RESUME_MS = 7 * 24 * 60 * 60 * 1000;
 const TARGET_USER_FIELDS = '_id name username email role tenantId';
 export const BALANCE_DISABLED_ERROR =
   'Balance is not enabled on this server, so token credits are not enforced';
@@ -153,8 +154,29 @@ function validateBanBody(body: TAdminBanRequest | undefined): string | null {
   return null;
 }
 
+function validateResumeAt(paused: boolean, resumeAt: unknown): string | null {
+  if (resumeAt === undefined) {
+    return null;
+  }
+  if (!paused) {
+    return 'resumeAt can only be set when pausing';
+  }
+  const at = typeof resumeAt === 'string' ? Date.parse(resumeAt) : Number.NaN;
+  if (Number.isNaN(at)) {
+    return 'resumeAt must be an ISO-8601 date';
+  }
+  const now = Date.now();
+  if (at <= now) {
+    return 'resumeAt must be in the future';
+  }
+  if (at - now > MAX_PAUSE_RESUME_MS) {
+    return 'resumeAt must be at most 7 days from now';
+  }
+  return null;
+}
+
 function validatePauseBody(body: TAdminPauseRequest | undefined): string | null {
-  const { paused, message } = body ?? {};
+  const { paused, message, resumeAt } = body ?? {};
   if (typeof paused !== 'boolean') {
     return 'paused must be a boolean';
   }
@@ -164,7 +186,18 @@ function validatePauseBody(body: TAdminPauseRequest | undefined): string | null 
   if (message !== undefined && message.length > MAX_PAUSE_MESSAGE_LENGTH) {
     return `message must be at most ${MAX_PAUSE_MESSAGE_LENGTH} characters`;
   }
-  return null;
+  return validateResumeAt(paused, resumeAt);
+}
+
+/** A pause changes when it starts, stops, or its message or scheduled resume moves. */
+function pauseChanged(previous: TAdminPauseState, next: TAdminPauseState): boolean {
+  if (previous.paused !== next.paused) {
+    return true;
+  }
+  return (
+    next.paused &&
+    (previous.message !== next.message || (previous.resumeAt ?? null) !== (next.resumeAt ?? null))
+  );
 }
 
 /** Creates the handlers behind `/api/admin/controls` (bans, balances, global pause). */
@@ -311,16 +344,15 @@ export function createAdminControlsHandlers(deps: AdminControlsDeps): AdminContr
       if (bodyError) {
         return res.status(400).json({ error: bodyError });
       }
-      const { paused, message } = req.body as TAdminPauseRequest;
+      const { paused, message, resumeAt } = req.body as TAdminPauseRequest;
       const previous = await pauseService.getState();
       const state: TAdminPauseState = await pauseService.setState({
         paused,
         message,
         updatedBy: caller.userId,
+        resumeAt: resumeAt ? new Date(resumeAt).toISOString() : null,
       });
-      const changed =
-        previous.paused !== state.paused || (state.paused && previous.message !== state.message);
-      if (changed) {
+      if (pauseChanged(previous, state)) {
         await completeOrUndo(
           'setPause audit',
           () =>
@@ -328,7 +360,7 @@ export function createAdminControlsHandlers(deps: AdminControlsDeps): AdminContr
               action: state.paused ? 'system.paused' : 'system.resumed',
               caller,
               target: PAUSE_TARGET,
-              metadata: { message: state.message },
+              metadata: { message: state.message, resumeAt: state.resumeAt ?? null },
               context: buildAuditContext(req),
             }),
           () => pauseService.restoreState(previous),

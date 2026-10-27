@@ -37,6 +37,8 @@ export interface PauseUpdate {
   paused: boolean;
   message?: string;
   updatedBy: string | null;
+  /** ISO time after which {@link PauseService.getState} reports the system as running again. */
+  resumeAt?: string | null;
 }
 
 export interface PauseService {
@@ -56,6 +58,7 @@ const RESUMED_STATE: TAdminPauseState = {
   message: DEFAULT_PAUSE_MESSAGE,
   updatedAt: null,
   updatedBy: null,
+  resumeAt: null,
 };
 
 function isPauseState(value: unknown): value is TAdminPauseState {
@@ -80,12 +83,22 @@ function toState(value: unknown): TAdminPauseState {
     message: normalizeMessage(value.message),
     updatedAt: value.updatedAt ?? null,
     updatedBy: value.updatedBy ?? null,
+    resumeAt: typeof value.resumeAt === 'string' ? value.resumeAt : null,
   };
+}
+
+/** A pause whose scheduled resume time has passed reads as running; no timer is needed. */
+function applyScheduledResume(state: TAdminPauseState): TAdminPauseState {
+  if (!state.paused || !state.resumeAt || Date.parse(state.resumeAt) > Date.now()) {
+    return state;
+  }
+  return { ...state, paused: false };
 }
 
 /**
  * Global kill switch. A missing entry means "running". With a persistent store
- * (see {@link getPauseService}) a pause survives restarts and deploys.
+ * (see {@link getPauseService}) a pause survives restarts and deploys. A pause may
+ * carry a `resumeAt`; once that time passes, reads report "running" without any write.
  */
 export function createPauseService(
   store: PauseStore,
@@ -100,9 +113,9 @@ export function createPauseService(
 
   async function getState(): Promise<TAdminPauseState> {
     if (cached && Date.now() < cached.until) {
-      return cached.state;
+      return applyScheduledResume(cached.state);
     }
-    return remember(toState(await store.get(PAUSE_STATE_KEY)));
+    return applyScheduledResume(remember(toState(await store.get(PAUSE_STATE_KEY))));
   }
 
   async function restoreState(state: TAdminPauseState): Promise<TAdminPauseState> {
@@ -113,12 +126,18 @@ export function createPauseService(
     return remember(state);
   }
 
-  function setState({ paused, message, updatedBy }: PauseUpdate): Promise<TAdminPauseState> {
+  function setState({
+    paused,
+    message,
+    updatedBy,
+    resumeAt,
+  }: PauseUpdate): Promise<TAdminPauseState> {
     return restoreState({
       paused,
       message: normalizeMessage(message),
       updatedAt: new Date().toISOString(),
       updatedBy,
+      resumeAt: paused ? (resumeAt ?? null) : null,
     });
   }
 

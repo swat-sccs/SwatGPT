@@ -239,6 +239,13 @@ export type TAdminPauseState = {
   message: string;
   updatedAt: string | null;
   updatedBy: string | null;
+  /** ISO time at which a pause lifts itself; `null` when it must be resumed by hand. */
+  resumeAt?: string | null;
 };
 
-export type TAdminPauseRequest = { paused: boolean; message?: string };
+export type TAdminPauseRequest = {
+  paused: boolean;
+  message?: string;
+  /** Optional scheduled resume (ISO-8601, in the future, at most 7 days out). */
+  resumeAt?: string;
+};

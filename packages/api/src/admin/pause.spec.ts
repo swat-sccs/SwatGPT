@@ -30,6 +30,7 @@ describe('createPauseService', () => {
       message: DEFAULT_PAUSE_MESSAGE,
       updatedAt: null,
       updatedBy: null,
+      resumeAt: null,
     });
   });
 
@@ -47,6 +48,7 @@ describe('createPauseService', () => {
       message: 'Back at 3pm.',
       updatedAt: NOW.toISOString(),
       updatedBy: 'admin-1',
+      resumeAt: null,
     };
     expect(state).toEqual(expected);
     await expect(store.get(PAUSE_STATE_KEY)).resolves.toEqual(expected);
@@ -75,7 +77,38 @@ describe('createPauseService', () => {
       message: DEFAULT_PAUSE_MESSAGE,
       updatedAt: '2026-09-09T13:00:00.000Z',
       updatedBy: 'admin-2',
+      resumeAt: null,
     });
+  });
+
+  it('reads as running once a scheduled resume time has passed, without a write', async () => {
+    const service = createPauseService(store, { readCacheMs: 60_000 });
+    const resumeAt = '2026-09-09T12:30:00.000Z';
+    await service.setState({ paused: true, message: 'Lunch', updatedBy: 'admin-1', resumeAt });
+
+    await expect(service.getState()).resolves.toMatchObject({ paused: true, resumeAt });
+
+    jest.setSystemTime(new Date('2026-09-09T12:30:00.000Z'));
+    await expect(service.getState()).resolves.toMatchObject({
+      paused: false,
+      message: 'Lunch',
+      resumeAt,
+      updatedBy: 'admin-1',
+    });
+    await expect(store.get(PAUSE_STATE_KEY)).resolves.toMatchObject({ paused: true });
+  });
+
+  it('drops a scheduled resume when the system is resumed by hand', async () => {
+    const service = createPauseService(store);
+    await service.setState({
+      paused: true,
+      updatedBy: 'admin-1',
+      resumeAt: '2026-09-10T12:00:00.000Z',
+    });
+
+    await service.setState({ paused: false, updatedBy: 'admin-2', resumeAt: 'ignored' });
+
+    await expect(service.getState()).resolves.toMatchObject({ paused: false, resumeAt: null });
   });
 
   it('ignores a corrupted stored value', async () => {

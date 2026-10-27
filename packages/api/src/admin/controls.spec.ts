@@ -92,6 +92,7 @@ describe('createAdminControlsHandlers', () => {
         message: DEFAULT_PAUSE_MESSAGE,
         updatedAt: null,
         updatedBy: null,
+        resumeAt: null,
       });
     });
 
@@ -139,10 +140,57 @@ describe('createAdminControlsHandlers', () => {
           severity: 'warning',
           actor: { type: 'user', id: adminId.toString(), name: 'Someone' },
           target: expect.objectContaining({ type: 'system' }),
-          metadata: { message: 'Maintenance until 5pm' },
+          metadata: { message: 'Maintenance until 5pm', resumeAt: null },
           context: { ip: '10.0.0.1', userAgent: 'jest', requestId: 'req-1' },
         }),
       );
+    });
+
+    it('schedules an auto-resume and audits it', async () => {
+      const deps = createDeps();
+      const handlers = createAdminControlsHandlers(deps);
+      const resumeAt = new Date(Date.now() + HOUR).toISOString();
+      const { req, res, status, json } = createReqRes({
+        body: { paused: true, message: 'Lunch', resumeAt },
+      });
+
+      await handlers.setPause(req, res);
+
+      expect(status).toHaveBeenCalledWith(200);
+      expect(json).toHaveBeenCalledWith(expect.objectContaining({ paused: true, resumeAt }));
+      expect(deps.recordAuditEntry).toHaveBeenCalledWith(
+        expect.objectContaining({
+          action: 'system.paused',
+          metadata: { message: 'Lunch', resumeAt },
+        }),
+      );
+
+      const moved = createReqRes({
+        body: {
+          paused: true,
+          message: 'Lunch',
+          resumeAt: new Date(Date.now() + 2 * HOUR).toISOString(),
+        },
+      });
+      await handlers.setPause(moved.req, moved.res);
+      expect(deps.recordAuditEntry).toHaveBeenCalledTimes(2);
+    });
+
+    it.each([
+      [{ paused: true, resumeAt: 'soon' }, 'ISO-8601'],
+      [{ paused: true, resumeAt: new Date(Date.now() - 1000).toISOString() }, 'future'],
+      [{ paused: true, resumeAt: new Date(Date.now() + 8 * 24 * HOUR).toISOString() }, '7 days'],
+      [{ paused: false, resumeAt: new Date(Date.now() + HOUR).toISOString() }, 'pausing'],
+    ])('rejects resumeAt in %p', async (body, fragment) => {
+      const deps = createDeps();
+      const handlers = createAdminControlsHandlers(deps);
+      const { req, res, status, json } = createReqRes({ body });
+
+      await handlers.setPause(req, res);
+
+      expect(status).toHaveBeenCalledWith(400);
+      expect(json.mock.calls[0][0].error).toContain(fragment);
+      await expect(deps.pauseService.getState()).resolves.toMatchObject({ paused: false });
     });
 
     it('audits system.resumed and skips no-op updates', async () => {
