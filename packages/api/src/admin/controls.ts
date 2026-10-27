@@ -78,7 +78,7 @@ interface Caller {
 const PAUSE_TARGET: AuditTarget = { type: 'system', id: 'controls.pause', name: 'Pause switch' };
 const MAX_REASON_LENGTH = 500;
 const MAX_PAUSE_MESSAGE_LENGTH = 500;
-export const MAX_PAUSE_RESUME_MS = 7 * 24 * 60 * 60 * 1000;
+export const MAX_PAUSE_RESUME_MS: number = 7 * 24 * 60 * 60 * 1000;
 const TARGET_USER_FIELDS = '_id name username email role tenantId';
 export const BALANCE_DISABLED_ERROR =
   'Balance is not enabled on this server, so token credits are not enforced';
