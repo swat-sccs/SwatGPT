@@ -114,6 +114,58 @@ describe('createFlag / createFlagAdmin', () => {
   });
 });
 
+describe('createKeywordFlag', () => {
+  it('keeps one open flag per conversation and reason across repeated matches', async () => {
+    const expiredAt = new Date(Date.now() + 86_400_000);
+    for (let turn = 0; turn < 10; turn++) {
+      await methods.createFlag({
+        conversationId: 'c9',
+        messageId: `m${turn}`,
+        user: alice,
+        reason: 'self-harm',
+        source: 'keyword',
+        expiredAt: turn === 0 ? expiredAt : undefined,
+      });
+    }
+    await methods.createFlag({
+      conversationId: 'c9',
+      user: alice,
+      reason: 'violence',
+      source: 'keyword',
+    });
+
+    const flags = await methods.getFlagsForConversation('c9');
+    expect(flags.map((flag) => [flag.reason, flag.messageId])).toEqual([
+      ['self-harm', 'm0'],
+      ['violence', null],
+    ]);
+    const stored = await models.Flag.findOne({ conversationId: 'c9', reason: 'self-harm' }).lean();
+    expect(stored?.expiredAt).toEqual(expiredAt);
+    expect(stored?.createdAt).toBeInstanceOf(Date);
+  });
+
+  it('opens a new flag once the earlier one is resolved, and never folds manual flags', async () => {
+    const first = await methods.createKeywordFlag({
+      conversationId: 'c9',
+      user: alice,
+      reason: 'self-harm',
+      source: 'keyword',
+    });
+    await methods.resolveFlag(String(first._id), admin);
+    const second = await methods.createKeywordFlag({
+      conversationId: 'c9',
+      user: alice,
+      reason: 'self-harm',
+      source: 'keyword',
+    });
+    expect(String(second._id)).not.toBe(String(first._id));
+
+    await methods.createFlag({ conversationId: 'c9', user: alice, reason: 'x', source: 'manual' });
+    await methods.createFlag({ conversationId: 'c9', user: alice, reason: 'x', source: 'manual' });
+    expect(await models.Flag.countDocuments({ conversationId: 'c9', source: 'manual' })).toBe(2);
+  });
+});
+
 describe('listFlags', () => {
   it('lists newest first and filters by resolution state', async () => {
     const all = await methods.listFlags();

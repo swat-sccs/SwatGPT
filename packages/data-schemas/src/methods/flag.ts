@@ -28,10 +28,16 @@ export interface CreateFlagInput {
 
 /**
  * `createFlag` is also called from the generation write path (Layer B) when
- * keyword screening matches, so its signature stays stable.
+ * keyword screening matches, so its signature stays stable; keyword flags are
+ * routed through `createKeywordFlag`.
  */
 export interface FlagMethods {
   createFlag: (input: CreateFlagInput) => Promise<IFlag>;
+  /**
+   * One open flag per (conversation, reason) for keyword screening: a later matching
+   * turn returns the existing open flag instead of adding to the queue.
+   */
+  createKeywordFlag: (input: CreateFlagInput) => Promise<IFlag>;
   createFlagAdmin: (input: CreateFlagInput) => Promise<TAdminFlag>;
   listFlags: (options?: ListFlagsOptions) => Promise<FlagPage>;
   /** Marks the flag resolved; a second call is a no-op that returns the current record. `null` when missing. */
@@ -98,7 +104,28 @@ export function createFlagMethods(mongoose: typeof import('mongoose')): FlagMeth
   }
 
   async function createFlag(input: CreateFlagInput): Promise<IFlag> {
+    if (input.source === 'keyword') {
+      return createKeywordFlag(input);
+    }
     return model().create(input);
+  }
+
+  async function createKeywordFlag(input: CreateFlagInput): Promise<IFlag> {
+    const { conversationId, reason, messageId, user, createdBy, tenantId, expiredAt } = input;
+    const insert = Object.fromEntries(
+      Object.entries({ messageId, user, createdBy, tenantId, expiredAt }).filter(
+        ([, value]) => value !== undefined,
+      ),
+    );
+    const doc = await model().findOneAndUpdate(
+      { conversationId, reason, source: 'keyword', resolvedAt: null },
+      { $setOnInsert: insert },
+      { upsert: true, new: true, setDefaultsOnInsert: true },
+    );
+    if (!doc) {
+      throw new Error('Failed to upsert keyword flag');
+    }
+    return doc;
   }
 
   async function createFlagAdmin(input: CreateFlagInput): Promise<TAdminFlag> {
@@ -181,6 +208,7 @@ export function createFlagMethods(mongoose: typeof import('mongoose')): FlagMeth
 
   return {
     createFlag,
+    createKeywordFlag,
     createFlagAdmin,
     listFlags,
     resolveFlag,
