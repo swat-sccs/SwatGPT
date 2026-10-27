@@ -11,6 +11,8 @@ import {
 
 export const DEFAULT_FLAG_PAGE = 25;
 export const MAX_FLAG_PAGE = 100;
+/** Appended to the reason of flags closed because their conversation was deleted. */
+export const DELETED_CONVERSATION_SUFFIX = 'conversation deleted';
 
 export interface CreateFlagInput {
   conversationId: string;
@@ -40,6 +42,35 @@ export interface FlagMethods {
   getFlaggedConversationIds: (conversationIds: string[]) => Promise<Set<string>>;
   /** Open flags per owner (`userId` → count), optionally bounded by `createdAt`. */
   countUnresolvedFlagsByUser: (range?: UnresolvedFlagRange) => Promise<Map<string, number>>;
+  /** Closes every open flag on the given conversations; returns how many were closed. */
+  resolveFlagsForConversations: (conversationIds: string[]) => Promise<number>;
+}
+
+/**
+ * Closes the open flags of deleted conversations so the review queue never points at
+ * content that no longer exists. Shared with the conversation delete path, which only
+ * has the mongoose instance.
+ */
+export async function resolveFlagsForConversations(
+  mongoose: typeof import('mongoose'),
+  conversationIds: string[],
+): Promise<number> {
+  const Flag = mongoose.models.Flag as Model<IFlag> | undefined;
+  if (!Flag || conversationIds.length === 0) {
+    return 0;
+  }
+  const result = await Flag.updateMany(
+    { conversationId: { $in: conversationIds }, resolvedAt: null },
+    [
+      {
+        $set: {
+          resolvedAt: '$$NOW',
+          reason: { $concat: ['$reason', ` (${DELETED_CONVERSATION_SUFFIX})`] },
+        },
+      },
+    ],
+  );
+  return result.modifiedCount;
 }
 
 function resolvedFilter(resolved: boolean | undefined): FilterQuery<IFlag> {
@@ -157,5 +188,7 @@ export function createFlagMethods(mongoose: typeof import('mongoose')): FlagMeth
     getFlagsForConversation,
     getFlaggedConversationIds,
     countUnresolvedFlagsByUser,
+    resolveFlagsForConversations: (conversationIds) =>
+      resolveFlagsForConversations(mongoose, conversationIds),
   };
 }

@@ -15,6 +15,7 @@ import {
 import { createTempChatExpirationDate } from '~/utils/tempChatRetention';
 import { tenantSafeBulkWrite } from '~/utils/tenantBulkWrite';
 import { isValidObjectIdString } from '~/utils/objectId';
+import { resolveFlagsForConversations } from './flag';
 import { decrementTagCounts } from './conversationTag';
 import logger from '~/config/winston';
 
@@ -876,6 +877,11 @@ export function createConversationMethods(
        */
       if (deleted) {
         await decrementTagCounts(mongoose, user, tagDecrements);
+        try {
+          await resolveFlagsForConversations(mongoose, conversationIds);
+        } catch (error) {
+          logger.error('[deleteConvos] Conversations deleted but flag cleanup failed', error);
+        }
       }
 
       /**

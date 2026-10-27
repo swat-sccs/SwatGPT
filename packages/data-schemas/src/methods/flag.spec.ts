@@ -1,7 +1,7 @@
 import mongoose, { Types } from 'mongoose';
 import { MongoMemoryServer } from 'mongodb-memory-server';
 import type { FlagMethods } from './flag';
-import { createFlagMethods } from './flag';
+import { createFlagMethods, DELETED_CONVERSATION_SUFFIX } from './flag';
 import { createModels } from '../models';
 
 jest.mock('~/config/winston', () => ({
@@ -180,6 +180,22 @@ describe('conversation lookups', () => {
     const bounded = await methods.countUnresolvedFlagsByUser({ from: t(2), to: t(4) });
     expect(bounded.get(String(alice))).toBe(1);
     expect(bounded.has(String(bob))).toBe(false);
+  });
+
+  it('closes every open flag of deleted conversations with a reason suffix', async () => {
+    await expect(methods.resolveFlagsForConversations(['c1', 'c2', 'missing'])).resolves.toBe(2);
+
+    const c1 = await methods.getFlagsForConversation('c1');
+    expect(c1.map((flag) => flag.reason)).toEqual([
+      `r1 (${DELETED_CONVERSATION_SUFFIX})`,
+      `r2 (${DELETED_CONVERSATION_SUFFIX})`,
+    ]);
+    expect(c1.every((flag) => flag.resolvedAt != null && flag.resolvedBy == null)).toBe(true);
+    const [c2] = await methods.getFlagsForConversation('c2');
+    expect(c2.reason).toBe('r3');
+    expect(c2.resolvedAt).toBe(t(4).toISOString());
+    expect(await methods.getFlaggedConversationIds(['c1', 'c3'])).toEqual(new Set(['c3']));
+    await expect(methods.resolveFlagsForConversations([])).resolves.toBe(0);
   });
 
   it('deletes a flag by id', async () => {

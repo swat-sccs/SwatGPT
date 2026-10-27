@@ -2,7 +2,7 @@ import mongoose from 'mongoose';
 import { v4 as uuidv4 } from 'uuid';
 import { MongoMemoryServer } from 'mongodb-memory-server';
 import { EModelEndpoint, RetentionMode } from 'librechat-data-provider';
-import type { IChatProject, IConversation } from '../types';
+import type { IChatProject, IConversation, IFlag } from '../types';
 import { ConversationMethods, createConversationMethods } from './conversation';
 import { tenantStorage, runAsSystem } from '~/config/tenantContext';
 import { createModels } from '../models';
@@ -977,6 +977,29 @@ describe('Conversation Operations', () => {
         conversationId: mockConversationData.conversationId,
       });
       expect(deletedConvo).toBeNull();
+    });
+
+    it('resolves the open flags of a deleted conversation', async () => {
+      const Flag = mongoose.models.Flag as mongoose.Model<IFlag>;
+      const convoId = uuidv4();
+      const owner = new mongoose.Types.ObjectId();
+      await Conversation.create({
+        conversationId: convoId,
+        user: 'user123',
+        endpoint: EModelEndpoint.openAI,
+      });
+      await Flag.collection.insertMany([
+        { conversationId: convoId, user: owner, reason: 'self-harm', source: 'keyword' },
+        { conversationId: 'other', user: owner, reason: 'other', source: 'keyword' },
+      ]);
+
+      await deleteConvos('user123', { conversationId: convoId });
+
+      const closed = await Flag.findOne({ conversationId: convoId }).lean();
+      expect(closed).toMatchObject({ reason: 'self-harm (conversation deleted)' });
+      expect(closed?.resolvedAt).toBeInstanceOf(Date);
+      const untouched = await Flag.findOne({ conversationId: 'other' }).lean();
+      expect(untouched?.resolvedAt).toBeUndefined();
     });
 
     it('should throw error if no conversations found', async () => {
