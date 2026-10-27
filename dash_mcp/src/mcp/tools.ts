@@ -123,18 +123,20 @@ function register<Schema extends z.ZodType>(
   // validates explicitly before dispatching so all tools get identical errors.
   const registerTool = server.registerTool.bind(server) as (...args: unknown[]) => unknown;
   registerTool(name, { title: humanize(name), description, inputSchema, annotations }, async (input: unknown) => {
+    const started = performance.now();
+    const elapsedSeconds = () => (performance.now() - started) / 1000;
     try {
       const result = await withTimeout(
         handler(inputSchema.parse(input) as z.infer<Schema>),
         timeoutMs,
       );
-      metrics.recordToolCall(name, 'success');
+      metrics.recordToolCall(name, 'success', elapsedSeconds());
       return {
         content: [{ type: 'text' as const, text: wrapUntrusted(name, result) }],
         structuredContent: result as Record<string, unknown>,
       };
     } catch (error) {
-      metrics.recordToolCall(name, error instanceof ToolTimeoutError ? 'timeout' : 'error');
+      metrics.recordToolCall(name, error instanceof ToolTimeoutError ? 'timeout' : 'error', elapsedSeconds());
       const message = error instanceof Error ? error.message : String(error);
       return { isError: true, content: [{ type: 'text' as const, text: message }] };
     }

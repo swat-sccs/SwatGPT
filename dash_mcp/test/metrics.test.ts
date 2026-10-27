@@ -64,6 +64,24 @@ describe('SwatMetrics', () => {
     expect(rendered).not.toMatch(/swatgpt_mcp_snapshot_age_seconds\{domain="events"\}/);
   });
 
+  it('observes tool and poll latency histograms by label', async () => {
+    const metrics = new SwatMetrics();
+    metrics.recordToolCall('get_campus_hours', 'success', 0.03);
+    metrics.recordToolCall('get_campus_hours', 'timeout', 5.2);
+    metrics.recordPoll('content', 'success', 12);
+    metrics.recordPoll('content:news', 'error');
+
+    const rendered = await metrics.render();
+    expect(rendered).toMatch(/# TYPE swatgpt_mcp_tool_duration_seconds histogram/);
+    expect(rendered).toMatch(/swatgpt_mcp_tool_duration_seconds_bucket\{le="0.05",tool="get_campus_hours"\} 1/);
+    expect(rendered).toMatch(/swatgpt_mcp_tool_duration_seconds_bucket\{le="10",tool="get_campus_hours"\} 2/);
+    expect(rendered).toMatch(/swatgpt_mcp_tool_duration_seconds_count\{tool="get_campus_hours"\} 2/);
+    expect(rendered).toMatch(/swatgpt_mcp_poll_duration_seconds_bucket\{le="10",kind="content"\} 0/);
+    expect(rendered).toMatch(/swatgpt_mcp_poll_duration_seconds_bucket\{le="30",kind="content"\} 1/);
+    expect(rendered).toMatch(/swatgpt_mcp_poll_duration_seconds_count\{kind="content"\} 1/);
+    expect(rendered).not.toMatch(/swatgpt_mcp_poll_duration_seconds_count\{kind="content:news"\}/);
+  });
+
   it('renders no snapshot ages before a lookup is registered', async () => {
     const rendered = await new SwatMetrics().render();
     expect(rendered).toMatch(/# TYPE swatgpt_mcp_snapshot_age_seconds gauge/);

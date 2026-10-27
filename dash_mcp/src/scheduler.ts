@@ -59,12 +59,14 @@ export class PollScheduler {
   }
 
   private async execute(name: string, task: () => Promise<void>): Promise<void> {
+    const started = performance.now();
+    const elapsedSeconds = () => (performance.now() - started) / 1000;
     try {
       const acquired = await this.service.store.withJobLock(name, async () => task());
-      metrics.recordPoll(name, acquired ? 'success' : 'skipped');
+      metrics.recordPoll(name, acquired ? 'success' : 'skipped', elapsedSeconds());
       if (!acquired) log('debug', 'Skipped poll because another instance owns the lock', { job: name });
     } catch (error) {
-      metrics.recordPoll(name, 'error');
+      metrics.recordPoll(name, 'error', elapsedSeconds());
       log('error', 'Polling job failed', { job: name, error: error instanceof Error ? error.message : String(error) });
     }
   }

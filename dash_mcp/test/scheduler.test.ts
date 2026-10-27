@@ -1,5 +1,6 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { loadConfig } from '../src/config.js';
+import { metrics } from '../src/metrics.js';
 import { PollScheduler } from '../src/scheduler.js';
 import type { SwatService } from '../src/service.js';
 
@@ -27,6 +28,15 @@ describe('PollScheduler', () => {
     expect(service.getAlerts).toHaveBeenCalledTimes(2);
 
     await scheduler.stop();
+  });
+
+  it('observes each run in the poll latency histogram', async () => {
+    const { scheduler } = build(vi.fn().mockResolvedValue(undefined));
+    scheduler.start();
+    await vi.advanceTimersByTimeAsync(250);
+    await scheduler.stop();
+
+    expect(await metrics.render()).toMatch(/swatgpt_mcp_poll_duration_seconds_count\{kind="alerts"\} [1-9]/);
   });
 
   it('stop() waits for the job that is executing', async () => {
