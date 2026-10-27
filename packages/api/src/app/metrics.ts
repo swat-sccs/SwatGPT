@@ -153,6 +153,7 @@ export type RumProxyResult =
 export type RedisClient = 'ioredis' | 'keyv';
 export type RedisOperationStatus = 'success' | 'error';
 export type KbRetrievalResult = 'hit' | 'empty' | 'timeout' | 'error' | 'disabled';
+export type OversightCollection = 'generations' | 'flags';
 export type MCPToolCallResult = 'success' | 'tool_error' | 'error';
 
 type OpenIDUserLookupMetrics = {
@@ -459,6 +460,29 @@ const isUploadRequest = (req: Request, normalizedPath: string): boolean => {
   return UPLOAD_PATHS.has(normalizedPath);
 };
 
+const OVERSIGHT_MODELS: Record<OversightCollection, string> = {
+  generations: 'Generation',
+  flags: 'Flag',
+};
+
+let metricsMongoose: Mongoose | undefined;
+
+/** Rows per oversight collection that carry an `expiredAt` and will fall off the TTL index. */
+async function countExpiringOversightRows(): Promise<Record<OversightCollection, number> | null> {
+  const models = metricsMongoose?.models;
+  if (!models) {
+    return null;
+  }
+  const entries = await Promise.all(
+    (Object.keys(OVERSIGHT_MODELS) as OversightCollection[]).map(async (collection) => {
+      const model = models[OVERSIGHT_MODELS[collection]];
+      const count = model ? await model.countDocuments({ expiredAt: { $ne: null } }) : 0;
+      return [collection, count] as const;
+    }),
+  );
+  return Object.fromEntries(entries) as Record<OversightCollection, number>;
+}
+
 export function recordMongooseQuery(
   model: string,
   operation: string,
@@ -473,7 +497,12 @@ export function recordMongooseQuery(
   );
 }
 
+/**
+ * Wraps `Query.exec` with latency metrics. The mongoose instance is also kept for the
+ * oversight row gauge, which counts documents at scrape time.
+ */
 export function instrumentMongooseQueryMetrics(mongoose: Mongoose): void {
+  metricsMongoose = mongoose;
   if (!isMetricsConfigured()) return;
 
   const instrumented = Symbol.for('librechat.mongooseQueryMetrics.instrumented');
@@ -667,6 +696,24 @@ export function createMetrics(): PrometheusMetrics {
     help: 'Generation jobs currently running in this process',
     labelNames: ['store'] as const,
     registers: [registry],
+  });
+
+  new Gauge({
+    name: 'oversight_rows_expiring_total',
+    help: 'Oversight rows (generations, flags) stamped with an expiry the TTL index will enforce',
+    labelNames: ['collection'] as const,
+    registers: [registry],
+    async collect() {
+      try {
+        const counts = await countExpiringOversightRows();
+        if (!counts) return;
+        for (const [collection, count] of Object.entries(counts)) {
+          this.set({ collection }, count);
+        }
+      } catch (error) {
+        logger.error('[metrics] Failed to count expiring oversight rows:', error);
+      }
+    },
   });
 
   const generationStreamSubscriptions = new Counter({

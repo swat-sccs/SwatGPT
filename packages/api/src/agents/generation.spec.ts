@@ -78,7 +78,12 @@ describe('createFirstTokenTimingHandlers', () => {
 
 describe('countKbChunks', () => {
   it('counts the entries of a formatted KB context', () => {
-    const chunk = { title: 'Dining', section: 'Sharples', source: 'https://a', text: '## not\nan entry' };
+    const chunk = {
+      title: 'Dining',
+      section: 'Sharples',
+      source: 'https://a',
+      text: '## not\nan entry',
+    };
     const context = formatContext([chunk, { ...chunk, source: 'https://b' }, chunk]);
     expect(countKbChunks(context)).toBe(3);
     expect(countKbChunks(undefined)).toBe(0);
@@ -132,7 +137,13 @@ describe('recordGeneration', () => {
 
   it('prefers the retrieval chunk count over the context fallback', async () => {
     const deps = createDeps();
-    await recordGeneration(deps, createInput({ ragChunks: 5, kbContext: formatContext([{ title: 'A', source: 'https://a', text: 'x' }]) }));
+    await recordGeneration(
+      deps,
+      createInput({
+        ragChunks: 5,
+        kbContext: formatContext([{ title: 'A', source: 'https://a', text: 'x' }]),
+      }),
+    );
     expect(deps.createGeneration).toHaveBeenCalledWith(
       expect.objectContaining({ ragChunks: 5, ragMs: undefined }),
     );
@@ -302,6 +313,28 @@ describe('recordGeneration', () => {
     const [flag] = (deps.createFlag as jest.Mock).mock.calls[0];
     expect(ledgerRow.expiredAt).toBeUndefined();
     expect(flag.expiredAt).toBeUndefined();
+  });
+
+  it('applies the retention window to permanent conversations when configured', async () => {
+    process.env.OVERSIGHT_RETENTION_DAYS = '30';
+    const now = jest.spyOn(Date, 'now').mockReturnValue(Date.parse('2026-10-01T00:00:00.000Z'));
+    try {
+      const deps = createDeps({ findKeywordFlags: jest.fn().mockReturnValue(['self-harm']) });
+      await recordGeneration(deps, createInput({ expiredAt: null }));
+      const expiredAt = new Date('2026-10-31T00:00:00.000Z');
+      expect(deps.createGeneration).toHaveBeenCalledWith(expect.objectContaining({ expiredAt }));
+      expect(deps.createFlag).toHaveBeenCalledWith(expect.objectContaining({ expiredAt }));
+
+      const temporary = new Date('2026-10-02T00:00:00.000Z');
+      const temp = createDeps();
+      await recordGeneration(temp, createInput({ expiredAt: temporary }));
+      expect(temp.createGeneration).toHaveBeenCalledWith(
+        expect.objectContaining({ expiredAt: temporary }),
+      );
+    } finally {
+      delete process.env.OVERSIGHT_RETENTION_DAYS;
+      now.mockRestore();
+    }
   });
 
   it('skips when identifiers are missing and never throws on failures', async () => {

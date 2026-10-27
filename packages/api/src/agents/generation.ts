@@ -4,6 +4,7 @@ import { ContentTypes, inputTokensIncludesCache } from 'librechat-data-provider'
 import type { EventHandler, MessageContentComplex } from '@librechat/agents';
 import type { GenerationMethods, FlagMethods, GenerationStatus } from '@librechat/data-schemas';
 import type { UsageMetadata } from '~/stream/interfaces/IJobStore';
+import { retentionExpiry } from '~/oversight/retention';
 import { contextEntrySources } from '~/rag/format';
 import { countTokens } from '~/utils/tokenizer';
 
@@ -90,7 +91,10 @@ export interface RecordGenerationInput {
   aborted: boolean;
   error?: unknown;
   tenantId?: string;
-  /** A temporary conversation's `expiredAt`; the ledger row and any flags expire with it. */
+  /**
+   * A temporary conversation's `expiredAt`; the ledger row and any flags expire with it.
+   * Otherwise the `OVERSIGHT_RETENTION_DAYS` window applies, when one is configured.
+   */
   expiredAt?: Date | null;
 }
 
@@ -295,9 +299,17 @@ function elapsed(from: number | null, to: number | null | undefined): number | u
   return to - from;
 }
 
+interface ScreenedInput {
+  user: string;
+  conversationId: string;
+  messageId: string;
+  tenantId?: string;
+  expiredAt?: Date;
+}
+
 async function screenForFlags(
   deps: RecordGenerationDeps,
-  input: RecordGenerationInput & { user: string; conversationId: string; messageId: string },
+  input: ScreenedInput,
   prompt: string,
   reply: string,
 ): Promise<void> {
@@ -314,7 +326,7 @@ async function screenForFlags(
         reason,
         source: 'keyword',
         tenantId: input.tenantId,
-        expiredAt: input.expiredAt ?? undefined,
+        expiredAt: input.expiredAt,
       }),
     ),
   );
@@ -357,6 +369,7 @@ export async function recordGeneration(
     logger.debug('[recordGeneration] Skipping: missing user, conversation, or message id');
     return;
   }
+  const expiredAt = input.expiredAt ?? retentionExpiry();
   let responseText = '';
   let continued: boolean | undefined;
   try {
@@ -382,14 +395,19 @@ export async function recordGeneration(
       status: resolveStatus(input.aborted, errorType != null),
       errorType,
       tenantId: input.tenantId,
-      expiredAt: input.expiredAt ?? undefined,
+      expiredAt,
     });
   } catch (error) {
     logger.error('[recordGeneration] Failed to build generation record', error);
   }
   try {
     const prompt = continued ? '' : input.userText;
-    await screenForFlags(deps, { ...input, user, conversationId, messageId }, prompt, responseText);
+    await screenForFlags(
+      deps,
+      { user, conversationId, messageId, tenantId: input.tenantId, expiredAt },
+      prompt,
+      responseText,
+    );
   } catch (error) {
     logger.error('[recordGeneration] Failed to screen generation', error);
   }
