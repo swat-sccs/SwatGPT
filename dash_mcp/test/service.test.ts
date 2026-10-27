@@ -281,6 +281,83 @@ describe('PostgreSQL-first service reads', () => {
   });
 });
 
+describe('freshness metadata', () => {
+  const cachedItem = { title: 'Cached feature', source: 'The Dash' };
+
+  it('labels a live read-through as live with zero age', async () => {
+    const client = { query: vi.fn().mockResolvedValue({ data: [{ id: 'f', title: 'Fresh' }] }) } as unknown as DashClient;
+    const store = {
+      replaceSourceRecords: vi.fn().mockResolvedValue(undefined),
+      markDomainSynced: vi.fn().mockResolvedValue(undefined),
+      deactivateMissingSources: vi.fn().mockResolvedValue(0),
+    } as unknown as PgStore;
+    const service = new SwatService(config(), client, {} as RegistryDiscovery, store);
+
+    const result = await service.getMindCandy(true);
+
+    expect(result.meta).toMatchObject({ freshness: 'live', stale: false, data_age_seconds: 0 });
+  });
+
+  it('labels a recent snapshot as cached and reports its age', async () => {
+    const store = {
+      currentRecords: vi.fn().mockResolvedValue([cachedItem]),
+      latestRecordObservedAt: vi.fn().mockResolvedValue(new Date(Date.now() - 120_000).toISOString()),
+    } as unknown as PgStore;
+    const service = new SwatService(config(), {} as DashClient, {} as RegistryDiscovery, store);
+
+    const result = await service.getMindCandy();
+
+    expect(result.meta.freshness).toBe('cached');
+    expect(result.meta.stale).toBe(false);
+    expect(result.meta.data_age_seconds).toBeGreaterThanOrEqual(120);
+    expect(result.meta.data_age_seconds).toBeLessThan(130);
+  });
+
+  it('labels a snapshot older than two poll intervals as stale', async () => {
+    const store = {
+      currentRecords: vi.fn().mockResolvedValue([cachedItem]),
+      latestRecordObservedAt: vi.fn().mockResolvedValue(new Date(Date.now() - 3 * 900_000).toISOString()),
+    } as unknown as PgStore;
+    const service = new SwatService(config(), {} as DashClient, {} as RegistryDiscovery, store);
+
+    const result = await service.getMindCandy();
+
+    expect(result.meta).toMatchObject({ freshness: 'stale', stale: true });
+    expect(result.meta.data_age_seconds).toBeGreaterThanOrEqual(2_700);
+  });
+
+  it('labels an empty cache as unavailable with no age', async () => {
+    const store = {
+      currentRecords: vi.fn().mockResolvedValue([]),
+      latestRecordObservedAt: vi.fn().mockResolvedValue(undefined),
+    } as unknown as PgStore;
+    const service = new SwatService(config(), {} as DashClient, {} as RegistryDiscovery, store);
+
+    const result = await service.getMindCandy();
+
+    expect(result.meta).toMatchObject({ freshness: 'unavailable', stale: true, data_age_seconds: null });
+  });
+
+  it('labels cached data returned after a failed live read as stale', async () => {
+    const client = { query: vi.fn().mockRejectedValue(new Error('Dash offline')) } as unknown as DashClient;
+    const store = {
+      currentRecords: vi.fn().mockResolvedValue([{
+        id: 'lunch-1', title: 'Lunch', source: 'Dining Center',
+        start: '2026-09-08T11:00:00-04:00', end: '2026-09-08T14:00:00-04:00',
+      }]),
+      latestRecordObservedAt: vi.fn().mockResolvedValue(new Date(Date.now() - 3 * 900_000).toISOString()),
+    } as unknown as PgStore;
+    const service = new SwatService(config(), client, diningDiscovery(), store);
+
+    const result = await service.getDining({ location: 'Sharples', date: '2026-09-08' });
+
+    expect(result.items).toHaveLength(1);
+    expect(result.meta).toMatchObject({ freshness: 'stale', stale: true });
+    expect(result.meta.data_age_seconds).toBeGreaterThanOrEqual(2_700);
+    expect(result.meta.warning).toContain('Dash offline');
+  });
+});
+
 describe('persist fan-out', () => {
   it('holds at most PERSIST_CONCURRENCY write transactions open during a poll', async () => {
     const places = Array.from({ length: 12 }, (_, index) => `Place ${index}`);

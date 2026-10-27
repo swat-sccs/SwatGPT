@@ -39,6 +39,13 @@ export interface NormalizedRecord {
   payload: JsonObject;
 }
 
+/**
+ * How the items were obtained: `live` from The Dash during this call, `cached` from a fresh
+ * snapshot, `stale` from a snapshot older than the refresh guarantee or after a failed live
+ * read, `unavailable` when nothing could be returned.
+ */
+export type Freshness = 'live' | 'cached' | 'stale' | 'unavailable';
+
 export interface FeedResult<T = unknown> {
   items: T[];
   meta: {
@@ -46,6 +53,9 @@ export interface FeedResult<T = unknown> {
     fetched_at: string;
     data_as_of: string;
     stale: boolean;
+    freshness: Freshness;
+    /** Seconds between data_as_of and fetched_at; null when no data was available. */
+    data_age_seconds: number | null;
     total: number;
     returned: number;
     truncated: boolean;

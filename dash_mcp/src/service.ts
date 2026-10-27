@@ -316,7 +316,7 @@ export class SwatService {
     this.config.contentPollMs);
     const coverage = eventsCoverage(input, start, end, fetchedAt, cached.meta.data_as_of);
     if (coverage.kind === 'covered') return withWarning(cached, coverage.warning);
-    if (coverage.kind === 'past') return { ...cached, meta: { ...cached.meta, stale: true, warning: coverage.warning } };
+    if (coverage.kind === 'past') return markStale(cached, coverage.warning);
 
     try {
       const records = await this.withinToolBudget(fetchedAt, 'events', this.fetchEvents(coverage.days));
@@ -703,7 +703,8 @@ function makeResult<T>(items: T[], fetchedAt: Date, sources: string[], limit: nu
   const bounded = items.slice(0, limit);
   return { items: bounded, meta: {
     source: [...new Set(sources)], fetched_at: fetchedAt.toISOString(), data_as_of: dataAsOf,
-    stale: false, total: items.length, returned: bounded.length, truncated: items.length > bounded.length,
+    stale: false, freshness: 'live', data_age_seconds: dataAgeSeconds(fetchedAt, dataAsOf),
+    total: items.length, returned: bounded.length, truncated: items.length > bounded.length,
   } };
 }
 
@@ -716,11 +717,12 @@ function makeCachedResult<T>(
   limit = items.length,
 ): FeedResult<T> {
   const bounded = items.slice(0, limit);
-  const cacheAgeMs = fetchedAt.getTime() - new Date(dataAsOf).getTime();
-  const stale = !Number.isFinite(cacheAgeMs) || cacheAgeMs > pollIntervalMs * 2;
+  const age = dataAgeSeconds(fetchedAt, dataAsOf);
+  const stale = age === null || age * 1000 > pollIntervalMs * 2;
   return { items: bounded, meta: {
     source: [...new Set(sources.length ? sources : ['SwatGPT PostgreSQL cache'])],
     fetched_at: fetchedAt.toISOString(), data_as_of: dataAsOf, stale,
+    freshness: stale ? 'stale' : 'cached', data_age_seconds: age,
     total: items.length, returned: bounded.length, truncated: items.length > bounded.length,
     ...(stale ? { warning: `PostgreSQL cache is older than ${Math.round(pollIntervalMs * 2 / 1000)} seconds; the background Dash refresh may be failing.` } : {}),
   } };
@@ -729,7 +731,8 @@ function makeCachedResult<T>(
 function makeUnavailableResult(fetchedAt: Date, domain: Domain, warning?: string): FeedResult<JsonObject> {
   return { items: [], meta: {
     source: ['SwatGPT PostgreSQL cache'], fetched_at: fetchedAt.toISOString(),
-    data_as_of: fetchedAt.toISOString(), stale: true, total: 0, returned: 0, truncated: false,
+    data_as_of: fetchedAt.toISOString(), stale: true, freshness: 'unavailable', data_age_seconds: null,
+    total: 0, returned: 0, truncated: false,
     warning: warning ?? `No cached ${domain} data is available yet; background synchronization will retry without blocking this chat.`,
   } };
 }
@@ -744,9 +747,20 @@ function makeStaleResult<T>(
 ): FeedResult<T> {
   return { items, meta: {
     source: sources, fetched_at: fetchedAt.toISOString(), data_as_of: dataAsOf, stale: true,
+    freshness: 'stale', data_age_seconds: dataAgeSeconds(fetchedAt, dataAsOf),
     total: items.length, returned: items.length, truncated: false,
     warning: [context, `Live Dash request failed; returning archived data: ${errorMessage(error)}`].filter(Boolean).join(' '),
   } };
+}
+
+/** Marks a result stale without changing its items, e.g. when the window is outside the snapshot. */
+function markStale<T>(result: FeedResult<T>, warning: string): FeedResult<T> {
+  return { ...result, meta: { ...result.meta, stale: true, freshness: 'stale', warning } };
+}
+
+function dataAgeSeconds(fetchedAt: Date, dataAsOf: string): number | null {
+  const ageMs = fetchedAt.getTime() - new Date(dataAsOf).getTime();
+  return Number.isFinite(ageMs) ? Math.max(0, Math.round(ageMs / 1000)) : null;
 }
 
 function withWarning<T>(result: FeedResult<T>, warning?: string): FeedResult<T> {
