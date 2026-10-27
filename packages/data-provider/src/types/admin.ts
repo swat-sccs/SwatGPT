@@ -221,7 +221,14 @@ export type TAdminFlagsQuery = {
 
 export type TAdminFlagResolveRequest = { note?: string };
 
-export type TAdminFlagsResponse = { flags: TAdminFlag[]; nextCursor: string | null };
+/** Queue row: the flag plus what a reviewer needs without opening the conversation. */
+export type TAdminFlagListItem = TAdminFlag & {
+  /** Empty when the conversation has since been deleted. */
+  conversationTitle: string;
+  owner: TAdminConversationOwner;
+};
+
+export type TAdminFlagsResponse = { flags: TAdminFlagListItem[]; nextCursor: string | null };
 
 /* ── Controls ───────────────────────────────────────────────────────── */
 

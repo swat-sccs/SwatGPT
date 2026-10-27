@@ -1,13 +1,23 @@
 import { Types } from 'mongoose';
-import type { TAdminFlag } from 'librechat-data-provider';
+import type { TAdminFlag, TAdminFlagListItem } from 'librechat-data-provider';
 import type { FilterQuery, Model } from 'mongoose';
-import type { IFlag, FlagSource, FlagPage, ListFlagsOptions, UnresolvedFlagRange } from '~/types';
+import type {
+  IFlag,
+  IUser,
+  FlagPage,
+  FlagSource,
+  IConversation,
+  ListFlagsOptions,
+  UnresolvedFlagRange,
+} from '~/types';
 import {
   decodeKeysetCursor,
   encodeKeysetCursor,
   keysetFilter,
   clampLimit,
   toAdminFlag,
+  loadUsers,
+  toOwner,
 } from './oversight';
 
 export const DEFAULT_FLAG_PAGE = 25;
@@ -125,6 +135,36 @@ export function createFlagMethods(mongoose: typeof import('mongoose')): FlagMeth
     return mongoose.models.Flag as Model<IFlag>;
   }
 
+  /**
+   * Titles and owners for a page of flags in two batched reads, so the queue can be
+   * reviewed without opening (and auditing a view of) every conversation.
+   */
+  async function enrich(flags: IFlag[]): Promise<TAdminFlagListItem[]> {
+    if (!flags.length) {
+      return [];
+    }
+    const Conversation = mongoose.models.Conversation as Model<IConversation>;
+    const [convos, users] = await Promise.all([
+      Conversation.find(
+        { conversationId: { $in: flags.map((flag) => flag.conversationId) } },
+        'conversationId title',
+      ).lean<Pick<IConversation, 'conversationId' | 'title'>[]>(),
+      loadUsers(
+        mongoose.models.User as Model<IUser>,
+        flags.map((flag) => String(flag.user)),
+      ),
+    ]);
+    const titles = new Map(convos.map((convo) => [convo.conversationId, convo.title ?? '']));
+    return flags.map((flag) => {
+      const userId = String(flag.user);
+      return {
+        ...toAdminFlag(flag),
+        conversationTitle: titles.get(flag.conversationId) ?? '',
+        owner: toOwner(userId, users.get(userId)),
+      };
+    });
+  }
+
   async function createFlag(input: CreateFlagInput): Promise<IFlag> {
     if (input.source === 'keyword') {
       return createKeywordFlag(input);
@@ -176,7 +216,7 @@ export function createFlagMethods(mongoose: typeof import('mongoose')): FlagMeth
       hasMore && last?.createdAt
         ? encodeKeysetCursor(last.createdAt, last._id as Types.ObjectId)
         : null;
-    return { flags: page.map(toAdminFlag), nextCursor };
+    return { flags: await enrich(page), nextCursor };
   }
 
   async function resolveFlag(

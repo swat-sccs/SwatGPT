@@ -1,4 +1,4 @@
-import type { TAdminFlag } from 'librechat-data-provider';
+import type { TAdminFlagListItem } from 'librechat-data-provider';
 import type { Document, Types } from 'mongoose';
 
 export type FlagSource = 'keyword' | 'manual';
@@ -36,7 +36,7 @@ export interface ListFlagsOptions {
 }
 
 export interface FlagPage {
-  flags: TAdminFlag[];
+  flags: TAdminFlagListItem[];
   nextCursor: string | null;
 }
 

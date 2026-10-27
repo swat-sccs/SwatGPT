@@ -204,7 +204,10 @@ function toAdminMessage(
   return item;
 }
 
-function toOwner(userId: string | undefined, user: IUser | undefined): TAdminConversationOwner {
+export function toOwner(
+  userId: string | undefined,
+  user: IUser | undefined,
+): TAdminConversationOwner {
   if (!user) {
     return userId ? { ...UNKNOWN_OWNER, id: userId } : UNKNOWN_OWNER;
   }
@@ -258,6 +261,19 @@ function uniqueInOrder(values: Array<string | undefined>): string[] {
     out.push(value);
   }
   return out;
+}
+
+/** Owner identities for a page of rows, in one query; invalid ids are skipped. */
+export async function loadUsers(
+  User: Model<IUser>,
+  userIds: Array<string | undefined>,
+): Promise<Map<string, IUser>> {
+  const ids = uniqueInOrder(userIds).filter((id) => Types.ObjectId.isValid(id));
+  if (!ids.length) {
+    return new Map();
+  }
+  const users = await User.find({ _id: { $in: ids } }, '_id name username email').lean<IUser[]>();
+  return new Map(users.map((user) => [String(user._id), user]));
 }
 
 /** Mirrors the mongoMeili `SEARCH` gate; without it the `messages` index is not kept in sync. */
@@ -326,17 +342,6 @@ export function createOversightMethods(mongoose: typeof import('mongoose')): Ove
   }
   function Generation(): Model<IGeneration> | undefined {
     return mongoose.models.Generation as Model<IGeneration> | undefined;
-  }
-
-  async function loadUsers(userIds: Array<string | undefined>): Promise<Map<string, IUser>> {
-    const ids = uniqueInOrder(userIds).filter((id) => Types.ObjectId.isValid(id));
-    if (!ids.length) {
-      return new Map();
-    }
-    const users = await User()
-      .find({ _id: { $in: ids } }, '_id name username email')
-      .lean<IUser[]>();
-    return new Map(users.map((user) => [String(user._id), user]));
   }
 
   async function loadMessageStats(conversationIds: string[]): Promise<Map<string, MessageStats>> {
@@ -413,7 +418,10 @@ export function createOversightMethods(mongoose: typeof import('mongoose')): Ove
     }
     const conversationIds = convos.map((convo) => convo.conversationId);
     const [users, messageStats, tokenStats, openFlagIds] = await Promise.all([
-      loadUsers(convos.map((convo) => convo.user)),
+      loadUsers(
+        User(),
+        convos.map((convo) => convo.user),
+      ),
       loadMessageStats(conversationIds),
       loadTokenStats(conversationIds),
       loadOpenFlagIds(conversationIds),
@@ -469,7 +477,7 @@ export function createOversightMethods(mongoose: typeof import('mongoose')): Ove
     }
     const generationModel = Generation();
     const [users, messages, generations, flagDocs] = await Promise.all([
-      loadUsers([convo.user]),
+      loadUsers(User(), [convo.user]),
       Message().find({ conversationId }).sort({ createdAt: 1, _id: 1 }).lean<IMessage[]>(),
       generationModel
         ? generationModel.find({ conversationId }).lean<IGeneration[]>()

@@ -21,6 +21,14 @@ const admin = new Types.ObjectId();
 const t = (offsetMin: number) => new Date(Date.UTC(2026, 8, 2, 9, offsetMin));
 
 async function seed(): Promise<void> {
+  await models.User.collection.insertMany([
+    { _id: alice, name: 'Alice', email: 'alice@swarthmore.edu', provider: 'local' },
+    { _id: bob, username: 'bob', email: 'bob@swarthmore.edu', provider: 'local' },
+  ]);
+  await models.Conversation.collection.insertMany([
+    { conversationId: 'c1', user: String(alice), title: 'Dining' },
+    { conversationId: 'c2', user: String(bob), title: 'Registrar' },
+  ]);
   await models.Flag.collection.insertMany([
     { conversationId: 'c1', user: alice, reason: 'r1', source: 'keyword', createdAt: t(1) },
     { conversationId: 'c1', user: alice, reason: 'r2', source: 'manual', createdAt: t(2) },
@@ -55,7 +63,11 @@ afterAll(async () => {
 });
 
 beforeEach(async () => {
-  await models.Flag.collection.deleteMany({});
+  await Promise.all([
+    models.Flag.collection.deleteMany({}),
+    models.User.collection.deleteMany({}),
+    models.Conversation.collection.deleteMany({}),
+  ]);
   await seed();
 });
 
@@ -179,6 +191,20 @@ describe('listFlags', () => {
     expect(resolved.flags.map((f) => f.reason)).toEqual(['r3']);
     expect(resolved.flags[0].resolvedAt).toBe(t(4).toISOString());
     expect(resolved.flags[0].resolvedBy).toBe(String(admin));
+  });
+
+  it('carries the conversation title and owner on every row', async () => {
+    const { flags } = await methods.listFlags();
+    const byReason = new Map(flags.map((flag) => [flag.reason, flag]));
+    expect(byReason.get('r1')).toMatchObject({
+      conversationTitle: 'Dining',
+      owner: { id: String(alice), name: 'Alice', email: 'alice@swarthmore.edu' },
+    });
+    expect(byReason.get('r3')).toMatchObject({
+      conversationTitle: 'Registrar',
+      owner: { id: String(bob), name: 'bob', email: 'bob@swarthmore.edu' },
+    });
+    expect(byReason.get('r4')).toMatchObject({ conversationTitle: '', owner: { id: String(bob) } });
   });
 
   it('filters by reason, source and owner', async () => {
