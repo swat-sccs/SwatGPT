@@ -158,9 +158,9 @@ groups:
       - alert: SwatGPTMcpPollFailing
         expr: |
           (
-            sum by (kind) (increase(swatgpt_mcp_upstream_polls_total{job="swatgpt_mcp",kind=~"alerts|realtime|content",result="error"}[1h])) > 0
+            sum by (kind) (increase(swatgpt_mcp_upstream_polls_total{job="swatgpt_mcp",kind=~"alerts|realtime|content|(realtime|content):.+",result="error"}[1h])) > 0
             unless on (kind)
-            sum by (kind) (increase(swatgpt_mcp_upstream_polls_total{job="swatgpt_mcp",kind=~"alerts|realtime|content",result="success"}[1h])) > 0
+            sum by (kind) (increase(swatgpt_mcp_upstream_polls_total{job="swatgpt_mcp",kind=~"alerts|realtime|content|(realtime|content):.+",result="success"}[1h])) > 0
           )
           or
           (
@@ -174,7 +174,7 @@ groups:
           service: swatgpt
         annotations:
           summary: "Dash MCP {{ $labels.kind }} polling keeps failing with no success"
-          description: "Every {{ $labels.kind }} poll in the last hour (3 hours for configuration, which polls hourly) failed. A Dash outage or schema change usually breaks the live fallback too, so tools return stale or unavailable data. Check `docker compose logs swatgpt-mcp` for 'Polling job failed'."
+          description: "Every {{ $labels.kind }} poll in the last hour (3 hours for configuration, which polls hourly) failed. A `content:<domain>` or `realtime:<domain>` kind names the single feed that is broken. A Dash outage or schema change usually breaks the live fallback too, so tools return stale or unavailable data. Check `docker compose logs swatgpt-mcp` for 'Polling job failed'."
           runbook_url: "https://github.com/swat-sccs/SwatGPT/blob/main/monitoring/README.md#swatgptmcppollfailing"
 
       - alert: SwatGPTMcpPollStale

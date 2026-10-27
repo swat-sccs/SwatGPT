@@ -19,7 +19,7 @@ What gets scraped:
 | `tei` | `loon:8001`, `loon:8002` | `te_request_duration`, `te_request_count` |
 | `eagle` | `eagle:9100`, `eagle:8080` | node_exporter (`node_*`, plus `swatgpt_backup_*` from its textfile collector) and cadvisor (`container_*`) |
 | `swatgpt_app` | `eagle:3080/metrics` (bearer token) | `http_requests_total`, `http_request_duration_seconds`, `sse_streams_*`, `mongoose_query_duration_seconds`, `agent_startup_*`, `rag_retrieval_total{result}`, `rag_retrieval_duration_seconds`, `rag_chunks_returned`, `mcp_tool_calls_total{server,tool,result}`, `mcp_tool_call_duration_seconds` |
-| `swatgpt_mcp` | `eagle:3001/metrics` (gull-only firewall, no auth) | `swatgpt_mcp_tool_calls_total{tool,result}`, `swatgpt_mcp_upstream_polls_total{kind,result}`, `swatgpt_mcp_upstream_last_success_timestamp_seconds{kind}`, `swatgpt_mcp_snapshot_age_seconds{domain}` |
+| `swatgpt_mcp` | `eagle:3001/metrics` (gull-only firewall, no auth) | `swatgpt_mcp_tool_calls_total{tool,result}`, `swatgpt_mcp_upstream_polls_total{kind,result}`, `swatgpt_mcp_upstream_last_success_timestamp_seconds{kind}` (kinds: `alerts`, `realtime`, `content`, `configuration`, `retention`, plus per-feed `content:<domain>` / `realtime:<domain>`), `swatgpt_mcp_snapshot_age_seconds{domain}`, `swatgpt_mcp_tool_duration_seconds{tool}`, `swatgpt_mcp_poll_duration_seconds{kind}` |
 
 Backup metrics need no scrape job of their own. `ops/backup/backup.sh` and `verify.sh` write
 `swatgpt_backup.prom` and `swatgpt_backup_verify.prom` to `/var/lib/node_exporter/textfile_collector`
@@ -215,7 +215,7 @@ The staleness thresholds assume the default `SWATGPT_*_POLL_INTERVAL_SECONDS` in
 | `SwatGPTReadyzFailing` | `probe_success{job="swatgpt_readyz"} == 0` for 2m (needs the optional blackbox job) | critical |
 | `SwatGPTApp5xxRateHigh` | 5xx share of `http_requests_total` > 2% for 5m | warning |
 | `SwatGPTMcpDown` | `up{job="swatgpt_mcp"} == 0` for 5m | warning |
-| `SwatGPTMcpPollFailing` | alerts/realtime/content had errors and no successes over 1h (configuration: over 3h, since it polls hourly), for 15m | warning |
+| `SwatGPTMcpPollFailing` | alerts/realtime/content (or a single `content:<domain>` / `realtime:<domain>` feed) had errors and no successes over 1h (configuration: over 3h, since it polls hourly), for 15m | warning |
 | `SwatGPTMcpPollStale` | last successful poll older than 3x its interval (alerts 3m, realtime 15m, content 45m, configuration 3h) for 10m | warning |
 | `SwatGPTMcpSnapshotStale` | `swatgpt_mcp_snapshot_age_seconds` > 15m for weather/transit or > 45m for hours/news/resources, for 15m (catches polls that "succeed" with zero records) | warning |
 | `SwatGPTMcpToolErrorRatioHigh` | non-success share of app-side `mcp_tool_calls_total{server="swatgpt"}` > 20% with at least 10 calls in 15m, for 15m | warning |
