@@ -76,6 +76,7 @@ function isKeysetShape(cursor: string): boolean {
       Array.isArray(parsed) &&
       parsed.length === 2 &&
       typeof parsed[0] === 'string' &&
+      !Number.isNaN(new Date(parsed[0]).getTime()) &&
       typeof parsed[1] === 'string' &&
       Types.ObjectId.isValid(parsed[1])
     );

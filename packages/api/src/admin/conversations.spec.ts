@@ -123,6 +123,10 @@ function createDeps(overrides: Partial<AdminConversationsDeps> = {}): AdminConve
 const validCursor = Buffer.from(
   JSON.stringify(['2026-09-01T12:30:00.000Z', new Types.ObjectId().toString()]),
 ).toString('base64url');
+/** Well-formed shape, unparseable date: the data layer would throw instead of returning a page. */
+const badDateCursor = Buffer.from(
+  JSON.stringify(['yesterday', new Types.ObjectId().toString()]),
+).toString('base64url');
 
 describe('createAdminConversationsHandlers', () => {
   describe('listConversations', () => {
@@ -230,6 +234,7 @@ describe('createAdminConversationsHandlers', () => {
       [{ sort: 'title' }, 'sort'],
       [{ userId: 'not-an-id' }, 'userId'],
       [{ cursor: 'garbage' }, 'cursor'],
+      [{ cursor: badDateCursor }, 'cursor'],
       [{ search: 'a' }, 'search'],
       [{ limit: ['1', '2'] }, 'single strings'],
     ])('rejects %p with 400', async (query, fragment) => {

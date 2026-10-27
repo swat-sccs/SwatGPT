@@ -82,19 +82,27 @@ describe('createAdminFlagsHandlers', () => {
       expect(deps.recordAuditEntry).not.toHaveBeenCalled();
     });
 
-    it.each([[{ limit: '500' }], [{ resolved: 'maybe' }], [{ cursor: '!!' }]])(
-      'rejects %p with 400',
-      async (query) => {
-        const deps = createDeps();
-        const handlers = createAdminFlagsHandlers(deps);
-        const { req, res, status } = createReqRes({ query });
+    it.each([
+      [{ limit: '500' }],
+      [{ resolved: 'maybe' }],
+      [{ cursor: '!!' }],
+      [
+        {
+          cursor: Buffer.from(JSON.stringify(['soon', new Types.ObjectId().toString()])).toString(
+            'base64url',
+          ),
+        },
+      ],
+    ])('rejects %p with 400', async (query) => {
+      const deps = createDeps();
+      const handlers = createAdminFlagsHandlers(deps);
+      const { req, res, status } = createReqRes({ query });
 
-        await handlers.listFlags(req, res);
+      await handlers.listFlags(req, res);
 
-        expect(status).toHaveBeenCalledWith(400);
-        expect(deps.listFlags).not.toHaveBeenCalled();
-      },
-    );
+      expect(status).toHaveBeenCalledWith(400);
+      expect(deps.listFlags).not.toHaveBeenCalled();
+    });
 
     it('returns 500 when the data layer throws', async () => {
       const deps = createDeps({ listFlags: jest.fn().mockRejectedValue(new Error('boom')) });
