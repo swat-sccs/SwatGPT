@@ -50,6 +50,8 @@ const CONVERSATION_FIELDS = 'conversationId title model createdAt updatedAt';
 
 export interface ConversationStats {
   messageCount: number;
+  /** Messages marked `error`, matching the oversight conversation list. */
+  errors: number;
   up: number;
   down: number;
 }
@@ -63,6 +65,7 @@ export interface AdminUsageDeps extends OversightAuditDeps {
   findUser: (userId: string) => Promise<IUser | null>;
   findRecentConversations: (userId: string, limit: number) => Promise<IConversation[]>;
   getConversationStats: (conversationIds: string[]) => Promise<Map<string, ConversationStats>>;
+  /** Open flags created in the range, matching the `flagged` state of the conversation lists. */
   countFlags: (range: UsageRange) => Promise<number>;
   countFlagsByUser: (range: UsageRange, userIds: string[]) => Promise<Map<string, number>>;
   /** Conversations with an open flag, matching the oversight list's `flagged`. */
@@ -378,7 +381,7 @@ export function createAdminUsageHandlers(deps: AdminUsageDeps): AdminUsageHandle
         messageCount: stat?.messageCount ?? 0,
         promptTokens: tokens?.promptTokens ?? 0,
         completionTokens: tokens?.completionTokens ?? 0,
-        errors: tokens?.errors ?? 0,
+        errors: stat?.errors ?? 0,
         flagged: flagged.has(id),
         feedback: { up: stat?.up ?? 0, down: stat?.down ?? 0 },
         createdAt: toIso(conversation.createdAt),
@@ -508,11 +511,8 @@ export function createAdminUsageHandlers(deps: AdminUsageDeps): AdminUsageHandle
   return { summary, timeseries, users, user, models };
 }
 
-interface ConversationStatsRow {
+interface ConversationStatsRow extends ConversationStats {
   _id: string;
-  messageCount: number;
-  up: number;
-  down: number;
 }
 
 interface CountRow {
@@ -541,6 +541,7 @@ export function createUsageConversationReaders(models: {
           $group: {
             _id: '$conversationId',
             messageCount: { $sum: 1 },
+            errors: { $sum: { $cond: [{ $eq: ['$error', true] }, 1, 0] } },
             up: { $sum: { $cond: [{ $eq: ['$feedback.rating', 'thumbsUp'] }, 1, 0] } },
             down: { $sum: { $cond: [{ $eq: ['$feedback.rating', 'thumbsDown'] }, 1, 0] } },
           },
@@ -556,7 +557,7 @@ function toObjectIds(ids: string[]): Types.ObjectId[] {
   return ids.filter(isValidObjectIdString).map((id) => new Types.ObjectId(id));
 }
 
-/** Flag counters over the `flags` collection written by keyword screening and manual review. */
+/** Open flags only, so the counts agree with the `flagged` state shown on conversation rows. */
 export function createUsageFlagReaders(
   Flag: Model<IFlag>,
 ): Pick<AdminUsageDeps, 'countFlags' | 'countFlagsByUser'> {
@@ -571,6 +572,7 @@ export function createUsageFlagReaders(
   return {
     countFlags: ({ from, to, userId }) =>
       Flag.countDocuments({
+        resolvedAt: null,
         createdAt: { $gte: from, $lt: to },
         ...(userId ? { user: userId } : {}),
       }),
@@ -578,7 +580,11 @@ export function createUsageFlagReaders(
       const users = toObjectIds(userIds);
       return users.length === 0
         ? Promise.resolve(new Map())
-        : countByUser({ createdAt: { $gte: from, $lt: to }, user: { $in: users } });
+        : countByUser({
+            resolvedAt: null,
+            createdAt: { $gte: from, $lt: to },
+            user: { $in: users },
+          });
     },
   };
 }

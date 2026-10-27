@@ -362,7 +362,7 @@ describe('createAdminUsageHandlers', () => {
           ),
         getConversationStats: jest
           .fn()
-          .mockResolvedValue(new Map([['c1', { messageCount: 6, up: 1, down: 0 }]])),
+          .mockResolvedValue(new Map([['c1', { messageCount: 6, errors: 2, up: 1, down: 0 }]])),
         getFlaggedConversationIds: jest.fn().mockResolvedValue(new Set(['c1'])),
         countFlags: jest.fn().mockResolvedValue(1),
       });
@@ -403,7 +403,7 @@ describe('createAdminUsageHandlers', () => {
           messageCount: 6,
           promptTokens: 300,
           completionTokens: 30,
-          errors: 1,
+          errors: 2,
           flagged: true,
           feedback: { up: 1, down: 0 },
           createdAt: '2026-09-01T09:00:00.000Z',
