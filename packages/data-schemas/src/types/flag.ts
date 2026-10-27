@@ -13,6 +13,8 @@ export interface IFlag extends Document {
   createdBy?: Types.ObjectId;
   resolvedAt?: Date;
   resolvedBy?: Types.ObjectId;
+  /** Reviewer's note left when resolving. */
+  note?: string;
   tenantId?: string;
   /** Mirrors a temporary conversation's `expiredAt`; MongoDB's TTL monitor removes the row then. */
   expiredAt?: Date | null;
@@ -26,6 +28,11 @@ export interface ListFlagsOptions {
   limit?: number;
   /** `true` → resolved only, `false` → open only, omitted → all. */
   resolved?: boolean;
+  /** Exact reason, e.g. a keyword rule name. */
+  reason?: string;
+  source?: FlagSource;
+  /** Owner of the flagged conversation. */
+  userId?: string;
 }
 
 export interface FlagPage {

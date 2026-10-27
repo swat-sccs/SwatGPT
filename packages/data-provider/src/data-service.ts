@@ -98,8 +98,11 @@ export function getAdminFlags(params: adm.TAdminFlagsQuery = {}): Promise<adm.TA
   return request.get(endpoints.adminFlags(params));
 }
 
-export function resolveAdminFlag(flagId: string): Promise<adm.TAdminFlag> {
-  return request.post(endpoints.adminFlagResolve(flagId), {});
+export function resolveAdminFlag(
+  flagId: string,
+  payload: adm.TAdminFlagResolveRequest = {},
+): Promise<adm.TAdminFlag> {
+  return request.post(endpoints.adminFlagResolve(flagId), payload);
 }
 
 export function getAdminPause(): Promise<adm.TAdminPauseState> {

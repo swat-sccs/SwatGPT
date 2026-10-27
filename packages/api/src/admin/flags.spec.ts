@@ -34,6 +34,7 @@ function createReqRes(
   overrides: {
     params?: Record<string, string>;
     query?: Record<string, unknown>;
+    body?: Record<string, unknown>;
     user?: null | { _id: Types.ObjectId; name?: string };
   } = {},
 ) {
@@ -42,7 +43,7 @@ function createReqRes(
   const req = {
     params: overrides.params ?? {},
     query: overrides.query ?? {},
-    body: {},
+    body: overrides.body ?? {},
     headers: {},
     user,
   } as unknown as ServerRequest;
@@ -76,11 +77,43 @@ describe('createAdminFlagsHandlers', () => {
         cursor: undefined,
         limit: 50,
         resolved: false,
+        reason: undefined,
+        source: undefined,
+        userId: undefined,
       });
       expect(status).toHaveBeenCalledWith(200);
       expect(json).toHaveBeenCalledWith({ flags: [flag()], nextCursor: null });
       expect(deps.recordAuditEntry).not.toHaveBeenCalled();
     });
+
+    it('forwards the reason, source and owner filters', async () => {
+      const deps = createDeps();
+      const handlers = createAdminFlagsHandlers(deps);
+      const { req, res, status } = createReqRes({
+        query: { reason: ' self-harm ', source: 'keyword', userId: ownerId },
+      });
+
+      await handlers.listFlags(req, res);
+
+      expect(deps.listFlags).toHaveBeenCalledWith(
+        expect.objectContaining({ reason: 'self-harm', source: 'keyword', userId: ownerId }),
+      );
+      expect(status).toHaveBeenCalledWith(200);
+    });
+
+    it.each([[{ source: 'robot' }], [{ userId: 'nope' }], [{ reason: 'x'.repeat(501) }]])(
+      'rejects filter %p with 400',
+      async (query) => {
+        const deps = createDeps();
+        const handlers = createAdminFlagsHandlers(deps);
+        const { req, res, status } = createReqRes({ query });
+
+        await handlers.listFlags(req, res);
+
+        expect(status).toHaveBeenCalledWith(400);
+        expect(deps.listFlags).not.toHaveBeenCalled();
+      },
+    );
 
     it.each([
       [{ limit: '500' }],
@@ -123,15 +156,53 @@ describe('createAdminFlagsHandlers', () => {
 
       await handlers.resolveFlag(req, res);
 
-      expect(deps.resolveFlag).toHaveBeenCalledWith(flagId, adminId.toString());
+      expect(deps.resolveFlag).toHaveBeenCalledWith(flagId, adminId.toString(), undefined);
       expect(status).toHaveBeenCalledWith(200);
       expect(json).toHaveBeenCalledWith(flag());
       expect((deps.recordAuditEntry as jest.Mock).mock.calls[0][0]).toMatchObject({
         action: 'conversation.flag_resolved',
         actor: { type: 'user', id: adminId.toString(), name: 'Admin' },
         target: { type: 'conversation', id: 'c1' },
-        metadata: { flagId, reason: 'self-harm' },
+        metadata: { flagId, reason: 'self-harm', note: null },
       });
+    });
+
+    it('stores the reviewer note and records it in the audit entry', async () => {
+      const deps = createDeps({
+        resolveFlag: jest.fn().mockResolvedValue(flag({ note: 'spoke with the dean' })),
+      });
+      const handlers = createAdminFlagsHandlers(deps);
+      const { req, res, status } = createReqRes({
+        params: { id: flagId },
+        body: { note: '  spoke with the dean  ' },
+      });
+
+      await handlers.resolveFlag(req, res);
+
+      expect(deps.resolveFlag).toHaveBeenCalledWith(
+        flagId,
+        adminId.toString(),
+        'spoke with the dean',
+      );
+      expect(status).toHaveBeenCalledWith(200);
+      expect((deps.recordAuditEntry as jest.Mock).mock.calls[0][0]).toMatchObject({
+        metadata: { flagId, note: 'spoke with the dean' },
+      });
+    });
+
+    it('rejects an over-long note with 400 before resolving', async () => {
+      const deps = createDeps();
+      const handlers = createAdminFlagsHandlers(deps);
+      const { req, res, status, json } = createReqRes({
+        params: { id: flagId },
+        body: { note: 'x'.repeat(501) },
+      });
+
+      await handlers.resolveFlag(req, res);
+
+      expect(status).toHaveBeenCalledWith(400);
+      expect(json.mock.calls[0][0].error).toContain('note');
+      expect(deps.resolveFlag).not.toHaveBeenCalled();
     });
 
     it('rejects a malformed id with 400', async () => {

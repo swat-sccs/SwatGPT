@@ -1,15 +1,26 @@
 import { logger, isValidObjectIdString } from '@librechat/data-schemas';
-import type { TAdminFlagsResponse } from 'librechat-data-provider';
+import type { TAdminFlagSource, TAdminFlagsResponse } from 'librechat-data-provider';
 import type { AuditLogMethods, FlagMethods } from '@librechat/data-schemas';
 import type { Response } from 'express';
 import type { OversightAuditDeps } from '~/oversight/audit';
 import type { ServerRequest } from '~/types/http';
-import { QueryError, parseBoolean, parseCursor, parseLimit } from '~/oversight/params';
+import {
+  QueryError,
+  parseBoolean,
+  parseCursor,
+  parseEnum,
+  parseLimit,
+  parseObjectId,
+  parseText,
+} from '~/oversight/params';
 import { createOversightAudit, resolveActor } from '~/oversight/audit';
 
 const SCOPE = 'adminFlags';
 const DEFAULT_LIMIT = 25;
 const MAX_LIMIT = 100;
+const MAX_REASON_LENGTH = 500;
+const MAX_NOTE_LENGTH = 500;
+const SOURCES: ReadonlyArray<TAdminFlagSource> = ['keyword', 'manual'];
 
 export interface AdminFlagsDeps extends OversightAuditDeps {
   listFlags: FlagMethods['listFlags'];
@@ -19,7 +30,7 @@ export interface AdminFlagsDeps extends OversightAuditDeps {
 
 type Handler = (req: ServerRequest, res: Response) => Promise<Response>;
 
-/** Creates the `/api/admin/flags` handlers; resolving a flag is audited. */
+/** Creates the `/api/admin/flags` handlers; resolving a flag (with an optional note) is audited. */
 export function createAdminFlagsHandlers(deps: AdminFlagsDeps): {
   listFlags: Handler;
   resolveFlag: Handler;
@@ -34,6 +45,9 @@ export function createAdminFlagsHandlers(deps: AdminFlagsDeps): {
         cursor: parseCursor(query.cursor),
         limit: parseLimit(query.limit, DEFAULT_LIMIT, MAX_LIMIT),
         resolved: parseBoolean(query.resolved, 'resolved'),
+        reason: parseText(query.reason, 'reason', { max: MAX_REASON_LENGTH }),
+        source: parseEnum(query.source, 'source', SOURCES),
+        userId: parseObjectId(query.userId, 'userId'),
       });
       const body: TAdminFlagsResponse = { flags: page.flags, nextCursor: page.nextCursor };
       return res.status(200).json(body);
@@ -56,7 +70,12 @@ export function createAdminFlagsHandlers(deps: AdminFlagsDeps): {
       if (!id || !isValidObjectIdString(id)) {
         return res.status(400).json({ error: 'Invalid flag ID format' });
       }
-      const flag = await resolveFlag(id, actor.userId);
+      const { note } = (req.body ?? {}) as { note?: unknown };
+      const flag = await resolveFlag(
+        id,
+        actor.userId,
+        parseText(note, 'note', { max: MAX_NOTE_LENGTH }),
+      );
       if (!flag) {
         return res.status(404).json({ error: 'Flag not found' });
       }
@@ -66,7 +85,12 @@ export function createAdminFlagsHandlers(deps: AdminFlagsDeps): {
           actor,
           conversationId: flag.conversationId,
           title: flag.conversationId,
-          metadata: { flagId: flag.id, reason: flag.reason, ownerId: flag.userId },
+          metadata: {
+            flagId: flag.id,
+            reason: flag.reason,
+            ownerId: flag.userId,
+            note: flag.note ?? null,
+          },
           req,
         });
       } catch (auditError) {
@@ -76,6 +100,9 @@ export function createAdminFlagsHandlers(deps: AdminFlagsDeps): {
       }
       return res.status(200).json(flag);
     } catch (error) {
+      if (error instanceof QueryError) {
+        return res.status(400).json({ error: error.message });
+      }
       logger.error(`[${SCOPE}] resolveFlag error:`, error);
       return res.status(500).json({ error: 'Failed to resolve flag' });
     }

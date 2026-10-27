@@ -11,6 +11,7 @@ const flagSchema: Schema<IFlag> = new Schema(
     createdBy: { type: Schema.Types.ObjectId, ref: 'User' },
     resolvedAt: { type: Date },
     resolvedBy: { type: Schema.Types.ObjectId, ref: 'User' },
+    note: { type: String },
     tenantId: { type: String, index: true },
     expiredAt: { type: Date },
   },

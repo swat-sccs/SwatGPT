@@ -1,5 +1,6 @@
+import { Types } from 'mongoose';
 import type { TAdminFlag } from 'librechat-data-provider';
-import type { FilterQuery, Model, Types } from 'mongoose';
+import type { FilterQuery, Model } from 'mongoose';
 import type { IFlag, FlagSource, FlagPage, ListFlagsOptions, UnresolvedFlagRange } from '~/types';
 import {
   decodeKeysetCursor,
@@ -40,8 +41,15 @@ export interface FlagMethods {
   createKeywordFlag: (input: CreateFlagInput) => Promise<IFlag>;
   createFlagAdmin: (input: CreateFlagInput) => Promise<TAdminFlag>;
   listFlags: (options?: ListFlagsOptions) => Promise<FlagPage>;
-  /** Marks the flag resolved; a second call is a no-op that returns the current record. `null` when missing. */
-  resolveFlag: (id: string, resolvedBy: string | Types.ObjectId) => Promise<TAdminFlag | null>;
+  /**
+   * Marks the flag resolved, keeping the reviewer's `note` when given; a second call is a
+   * no-op that returns the current record. `null` when missing.
+   */
+  resolveFlag: (
+    id: string,
+    resolvedBy: string | Types.ObjectId,
+    note?: string,
+  ) => Promise<TAdminFlag | null>;
   deleteFlag: (id: string) => Promise<boolean>;
   getFlagsForConversation: (conversationId: string) => Promise<TAdminFlag[]>;
   /** Subset of `conversationIds` that carry at least one unresolved flag. */
@@ -84,6 +92,20 @@ function resolvedFilter(resolved: boolean | undefined): FilterQuery<IFlag> {
     return {};
   }
   return resolved ? { resolvedAt: { $ne: null } } : { resolvedAt: null };
+}
+
+function listFilter(options: ListFlagsOptions): FilterQuery<IFlag>[] {
+  const conditions: FilterQuery<IFlag>[] = [resolvedFilter(options.resolved)];
+  if (options.reason) {
+    conditions.push({ reason: options.reason });
+  }
+  if (options.source) {
+    conditions.push({ source: options.source });
+  }
+  if (options.userId && Types.ObjectId.isValid(options.userId)) {
+    conditions.push({ user: new Types.ObjectId(options.userId) });
+  }
+  return conditions;
 }
 
 function rangeFilter(range: UnresolvedFlagRange): FilterQuery<IFlag> {
@@ -138,7 +160,7 @@ export function createFlagMethods(mongoose: typeof import('mongoose')): FlagMeth
     if (options.cursor && !cursor) {
       throw new Error('Invalid cursor');
     }
-    const conditions: FilterQuery<IFlag>[] = [resolvedFilter(options.resolved)];
+    const conditions = listFilter(options);
     if (cursor) {
       conditions.push(keysetFilter<IFlag>('createdAt', cursor));
     }
@@ -160,11 +182,13 @@ export function createFlagMethods(mongoose: typeof import('mongoose')): FlagMeth
   async function resolveFlag(
     id: string,
     resolvedBy: string | Types.ObjectId,
+    note?: string,
   ): Promise<TAdminFlag | null> {
+    const trimmed = note?.trim();
     const updated = await model()
       .findOneAndUpdate(
         { _id: id, resolvedAt: null },
-        { $set: { resolvedAt: new Date(), resolvedBy } },
+        { $set: { resolvedAt: new Date(), resolvedBy, ...(trimmed ? { note: trimmed } : {}) } },
         { new: true },
       )
       .lean<IFlag | null>();

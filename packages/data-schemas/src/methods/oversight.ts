@@ -155,6 +155,7 @@ export function toAdminFlag(flag: IFlag): TAdminFlag {
     createdAt: toIso(flag.createdAt),
     resolvedAt: flag.resolvedAt ? flag.resolvedAt.toISOString() : null,
     resolvedBy: idString(flag.resolvedBy),
+    note: flag.note ?? null,
   };
 }
 

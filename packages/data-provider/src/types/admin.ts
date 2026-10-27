@@ -196,6 +196,8 @@ export type TAdminFlag = {
   createdAt: string;
   resolvedAt: string | null;
   resolvedBy: string | null;
+  /** Reviewer's note recorded on resolution. */
+  note?: string | null;
 };
 
 export type TAdminConversationDetail = {
@@ -206,7 +208,18 @@ export type TAdminConversationDetail = {
 
 export type TAdminFlagRequest = { reason: string; messageId?: string };
 
-export type TAdminFlagsQuery = { cursor?: string; limit?: number; resolved?: boolean };
+export type TAdminFlagsQuery = {
+  cursor?: string;
+  limit?: number;
+  resolved?: boolean;
+  /** Exact reason, e.g. a keyword rule name. */
+  reason?: string;
+  source?: TAdminFlagSource;
+  /** Owner of the flagged conversation. */
+  userId?: string;
+};
+
+export type TAdminFlagResolveRequest = { note?: string };
 
 export type TAdminFlagsResponse = { flags: TAdminFlag[]; nextCursor: string | null };
 

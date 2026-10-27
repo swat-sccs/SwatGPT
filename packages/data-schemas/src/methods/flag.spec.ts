@@ -181,6 +181,16 @@ describe('listFlags', () => {
     expect(resolved.flags[0].resolvedBy).toBe(String(admin));
   });
 
+  it('filters by reason, source and owner', async () => {
+    const ids = async (options: Parameters<typeof methods.listFlags>[0]) =>
+      (await methods.listFlags(options)).flags.map((flag) => flag.reason);
+    expect(await ids({ reason: 'r1' })).toEqual(['r1']);
+    expect(await ids({ source: 'manual' })).toEqual(['r2']);
+    expect(await ids({ userId: String(bob) })).toEqual(['r4', 'r3']);
+    expect(await ids({ userId: String(bob), resolved: false })).toEqual(['r4']);
+    expect(await ids({ userId: 'not-an-id' })).toHaveLength(4);
+  });
+
   it('pages with a keyset cursor', async () => {
     const first = await methods.listFlags({ limit: 3 });
     expect(first.flags.map((f) => f.reason)).toEqual(['r4', 'r3', 'r2']);
@@ -195,6 +205,17 @@ describe('listFlags', () => {
 });
 
 describe('resolveFlag', () => {
+  it('keeps a trimmed reviewer note and leaves it unset when blank', async () => {
+    const [open] = (await methods.listFlags({ resolved: false, limit: 1 })).flags;
+    const resolved = await methods.resolveFlag(open.id, admin, '  spoke with the dean  ');
+    expect(resolved).toMatchObject({ note: 'spoke with the dean', resolvedBy: String(admin) });
+
+    const [other] = (await methods.listFlags({ resolved: false, limit: 1 })).flags;
+    expect(other.id).not.toBe(open.id);
+    const blank = await methods.resolveFlag(other.id, admin, '   ');
+    expect(blank?.note).toBeNull();
+  });
+
   it('resolves once and is a no-op afterwards', async () => {
     const open = await methods.listFlags({ resolved: false });
     const target = open.flags.find((f) => f.reason === 'r1')!;
